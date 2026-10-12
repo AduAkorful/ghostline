@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "test_faucet"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+tari_template_lib = "0.34.0"
+
+[lib]
+crate-type = ["cdylib"]

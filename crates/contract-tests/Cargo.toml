@@ -1,0 +1,23 @@
+[package]
+name = "ghostline-contract-tests"
+description = "Engine-level tests for the Ghostline channel contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+ghostline-core = { path = "../ghostline-core" }
+ootle_byte_type = { version = "0.16", features = ["crypto"] }
+rand = "0.10.1"
+tari_bor = { version = "0.16.3", default-features = true }
+tari_crypto = "0.24.0"
+tari_engine_types = "0.45.0"
+tari_ootle_common_types = "0.45.0"
+tari_ootle_transaction = "0.45.0"
+tari_ootle_wallet_crypto = { version = "0.46", features = ["serde"] }
+tari_template_lib = "0.34.0"
+tari_template_test_tooling = "0.45.0"

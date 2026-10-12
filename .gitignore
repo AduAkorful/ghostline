@@ -1,0 +1,46 @@
+# Private planning and agent instructions (kept local)
+plans/
+AGENTS.md
+
+# Rust
+target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+.pnpm-store/
+*.tsbuildinfo
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.seed
+*.keystore
+secrets/
+
+# Local network and wallet state
+.swarm/
+localnet/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Build artifacts
+*.wasm
+!tests/fixtures/*.wasm
+
+# Logs and coverage
+*.log
+coverage/
+lcov.info
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

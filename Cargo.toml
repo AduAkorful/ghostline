@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/ghostline-core", "crates/contract-tests"]
+# Template crates build for wasm32 in their own nested cargo invocation, so they stay out of the host workspace.
+exclude = ["contracts/channel", "crates/contract-tests/templates/faucet"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/ghostline-pay/ghostline"

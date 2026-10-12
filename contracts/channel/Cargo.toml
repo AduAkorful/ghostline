@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "ghostline_channel"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Ghostline payment channel: one-shot voucher settlement for stealth deposits on Tari Ootle"
+
+[dependencies]
+tari_template_lib = "0.34.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
