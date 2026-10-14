@@ -1432,6 +1432,7 @@ dependencies = [
  "ghostline-sdk",
  "ootle_byte_type",
  "rand",
+ "serde",
  "serde_json",
  "tari_crypto",
  "tari_ootle_common_types",

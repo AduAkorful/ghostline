@@ -32,7 +32,8 @@ Because remainder + claimed = deposit, **settlement reveals the deposit**.
 
 ## What the software does not yet do
 
-- Live wallet daemon / indexer scan of Ghostline outputs (`inspect-tx` lists fields from a sealed tx you already have; `unblind` / `unblind-tx` recover mask and value. Nothing here lists chain UTXOs)
+- Listing Ghostline UTXOs from the chain (`inspect-tx` reads a sealed tx you already have; `unblind` recovers mask and value from output fields or a wallet UTXO JSON dump)
+- Submitting Ghostline-sealed envelopes through the public indexer REST API (unverified; live settles used the wallet daemon)
 - TypeScript signing (encodings only)
 - A proven fee source that stays unlinkable
 - Enforcement of spending limits if the agent signs without the policy engine

@@ -36,14 +36,15 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `contracts/channel` | The channel template (Rust, compiled to WASM) |
 | `crates/ghostline-core` | Channel id, voucher signing, verification, payer session and service ledger |
 | `crates/ghostline-sdk` | Condition-tree open (`PayTo::Conditions`), settle and refund stealth statements |
-| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, seal open/settle/refund, indexer submit |
+| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, `pay-to`, seal open/settle/refund, wallet unsigned submit, indexer submit |
 | `docs/privacy.md` | Plain-language observer view |
+| `docs/threat-model.md` | Assets, actors, attacks, residual risk |
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
 | `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
 | `demo/paid-api` | Reference paid endpoint (`/fortune`) |
 | `packages/ghostline` | TypeScript channel-id and voucher-message encodings |
 | `crates/ghostline-mcp` | MCP stdio server (`ghostline-mcp`) |
-| `crates/ghostline-net` | Indexer REST: wait, epoch stats, submit / dry-run |
+| `crates/ghostline-net` | Indexer REST and local wallet-daemon JSON-RPC (unsigned submit) |
 | `scripts/localnet.sh` | Clone/init/start `tari_swarm_daemon` outside this repo |
 | `crates/contract-tests` | Engine-level tests, run against the in-process Ootle engine |
 
@@ -114,7 +115,28 @@ cargo run -p ghostline-cli -- indexer wait --url http://127.0.0.1:<indexer-port>
 cargo run -p ghostline-cli -- indexer epoch --url http://127.0.0.1:<indexer-port>/
 ```
 
-Recover value and mask from a stealth output encrypted to `GHOSTLINE_PAYER_SECRET` (localnet resource default):
+Wallet-daemon settle (unsigned JSON; daemon must be `--authentication none`). The sealer is the service key imported into the wallet; the account key co-signs `pay_fee`. Ghostline-sealed indexer envelopes are unverified.
+
+```bash
+cargo run -p ghostline-cli -- seal-settle --unsigned-json \
+  --ootle-network esmeralda --max-epoch <epoch> \
+  --fee-account <component_…> --max-fee 100000 \
+  …open args… --voucher-hex <hex> > /tmp/settle.unsigned.json
+
+cargo run -p ghostline-cli -- wallet submit \
+  --unsigned-json /tmp/settle.unsigned.json \
+  --seal-key-id-file /path/to/service.key_id.json \
+  --dry-run
+```
+
+Wallet-built channel outputs are encrypted to the wallet view key. Unblind with `GHOSTLINE_CLAIM_SECRET` (that view key), not the Ghostline payer key. SQLite `tag_byte` may be a signed INTEGER; `--utxo-json` accepts that.
+
+```bash
+GHOSTLINE_CLAIM_SECRET=<view-key-hex> cargo run -p ghostline-cli -- unblind \
+  --utxo-json /path/to/utxo.json --ootle-network esmeralda
+```
+
+Recover value and mask from a stealth output encrypted to the claim secret (localnet resource default):
 
 ```bash
 cargo run -p ghostline-cli -- unblind \

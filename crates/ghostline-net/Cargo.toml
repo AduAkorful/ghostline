@@ -1,6 +1,6 @@
 [package]
 name = "ghostline-net"
-description = "Submit sealed Ghostline transactions to a local Ootle indexer"
+description = "Submit Ghostline transactions to an Ootle indexer or a local wallet daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

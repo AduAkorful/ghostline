@@ -18,4 +18,6 @@ pub enum NetError {
     },
     #[error("indexer returned an unexpected body for {path}: {details}")]
     Decode { path: String, details: String },
+    #[error("wallet daemon RPC {method} failed: {message}")]
+    WalletRpc { method: String, message: String },
 }

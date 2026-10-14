@@ -7,16 +7,21 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
-use ghostline_net::{IndexerClient, TransactionEnvelope};
-use ghostline_sdk::{
-    MaskAndValue, OutputScan, inspect_transaction, unblind_output, unblind_transaction,
+use ghostline_net::{
+    DEFAULT_ACCOUNT_SIGNER_JSON, IndexerClient, TransactionEnvelope, WalletClient,
+    WalletSubmitRequest, execution_accepted,
 };
+use ghostline_sdk::{
+    MaskAndValue, OutputScan, UnsignedTransaction, inspect_transaction, unblind_output,
+    unblind_transaction,
+};
+use serde::Deserialize;
 use tari_utilities::ByteArray;
 
 #[derive(Parser)]
 #[command(
     name = "ghostline",
-    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, submit to an indexer"
+    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, submit via a wallet daemon or indexer"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -67,6 +72,11 @@ enum Command {
     Indexer {
         #[command(subcommand)]
         command: IndexerCommand,
+    },
+    /// Talk to a local `tari_walletd` JSON-RPC (`--authentication none`).
+    Wallet {
+        #[command(subcommand)]
+        command: WalletCommand,
     },
     /// Print payer_root and channel_id from a full channel spec (computes the tree).
     Spec(OpenArgs),
@@ -137,13 +147,16 @@ enum Command {
     /// Recover value and mask from a stealth output encrypted to the claim secret.
     Unblind {
         #[arg(long)]
-        commitment_hex: String,
+        commitment_hex: Option<String>,
         #[arg(long)]
-        nonce_hex: String,
+        nonce_hex: Option<String>,
         #[arg(long)]
-        encrypted_hex: String,
+        encrypted_hex: Option<String>,
         #[arg(long)]
-        tag: u32,
+        tag: Option<i64>,
+        /// JSON with `commitment`, `nonce`, `encrypted_hex`, `tag` (u32 or signed sqlite INTEGER), optional `value`.
+        #[arg(long)]
+        utxo_json: Option<PathBuf>,
         #[arg(long)]
         resource_hex: Option<String>,
         #[arg(long)]
@@ -163,6 +176,43 @@ enum Command {
         #[arg(long)]
         tx_hex: String,
     },
+}
+
+#[derive(Subcommand)]
+enum WalletCommand {
+    /// Dry-run or submit an unsigned transaction (`seal-settle --unsigned-json`).
+    Submit {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        /// Path to unsigned JSON, or `-` for stdin.
+        #[arg(long)]
+        unsigned_json: PathBuf,
+        /// `KeyId` JSON for the sealer (service key imported into the wallet).
+        #[arg(long)]
+        seal_key_id: Option<String>,
+        #[arg(long)]
+        seal_key_id_file: Option<PathBuf>,
+        /// Extra `KeyId` JSON. Defaults to the derived account key that pays `pay_fee`.
+        #[arg(long)]
+        other_signer: Vec<String>,
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip `transactions.wait_result` after a live submit.
+        #[arg(long)]
+        no_wait: bool,
+        #[arg(long, default_value_t = 60)]
+        timeout_secs: u64,
+    },
+}
+
+#[derive(Deserialize)]
+struct UtxoJson {
+    commitment: String,
+    nonce: String,
+    encrypted_hex: String,
+    tag: i64,
+    #[serde(default)]
+    value: Option<u64>,
 }
 
 #[derive(Subcommand)]
@@ -383,6 +433,72 @@ async fn run(cli: Cli) -> Result<(), String> {
                 println!("{id}");
             }
         },
+        Command::Wallet { command } => match command {
+            WalletCommand::Submit {
+                url,
+                unsigned_json,
+                seal_key_id,
+                seal_key_id_file,
+                other_signer,
+                dry_run,
+                no_wait,
+                timeout_secs,
+            } => {
+                let unsigned = read_unsigned_json(&unsigned_json)?;
+                let seal_signer = read_key_id(seal_key_id.as_deref(), seal_key_id_file.as_deref())?;
+                let other_signers = if other_signer.is_empty() {
+                    vec![
+                        serde_json::from_str(DEFAULT_ACCOUNT_SIGNER_JSON)
+                            .expect("DEFAULT_ACCOUNT_SIGNER_JSON"),
+                    ]
+                } else {
+                    other_signer
+                        .iter()
+                        .map(|s| {
+                            serde_json::from_str(s).map_err(|e| format!("other-signer JSON: {e}"))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                };
+                let request = WalletSubmitRequest::new(unsigned, seal_signer, other_signers);
+                let mut wallet = WalletClient::connect(&url).map_err(|e| e.to_string())?;
+                wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+                if dry_run {
+                    let dry = wallet
+                        .submit_dry_run(&request)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    println!("transaction_id={}", dry.transaction_id);
+                    println!("required_fees={}", dry.required_fees);
+                    if execution_accepted(&dry.result) {
+                        println!("result=Accept");
+                    } else {
+                        return Err(format!("dry-run did not Accept: {}", dry.result));
+                    }
+                } else {
+                    let submitted = wallet.submit(&request).await.map_err(|e| e.to_string())?;
+                    println!("transaction_id={}", submitted.transaction_id);
+                    if !no_wait {
+                        let waited = wallet
+                            .wait_result(submitted.transaction_id, Some(timeout_secs))
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let outcome = waited.get("result").unwrap_or(&waited);
+                        let status = waited
+                            .get("status")
+                            .and_then(|s| s.as_str())
+                            .or_else(|| outcome.get("status").and_then(|s| s.as_str()));
+                        if execution_accepted(outcome)
+                            || execution_accepted(&waited)
+                            || status == Some("Accepted")
+                        {
+                            println!("result=Accept");
+                        } else {
+                            println!("wait={}", waited);
+                        }
+                    }
+                }
+            }
+        },
         Command::Keygen => {
             use tari_crypto::keys::PublicKey as _;
             use tari_crypto::ristretto::RistrettoPublicKey;
@@ -558,6 +674,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             nonce_hex,
             encrypted_hex,
             tag,
+            utxo_json,
             resource_hex,
             secret_hex,
             ootle_network,
@@ -567,11 +684,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                 crypto::{PedersenCommitmentBytes, UtxoTag},
                 stealth::UnspentOutput,
             };
-            let secret = secrets::load_secret(
-                secret_hex.as_deref(),
-                secrets::PAYER_SECRET_ENV,
-                "claim secret",
-            )?;
+            let (commitment_hex, nonce_hex, encrypted_hex, tag, expected) =
+                load_utxo(utxo_json, commitment_hex, nonce_hex, encrypted_hex, tag)?;
+            let secret = secrets::load_claim_secret(secret_hex.as_deref())?;
             let encrypted_bytes = from_hex(&encrypted_hex)
                 .map_err(|_| "encrypted: expected even-length hex".to_string())?;
             let encrypted = EncryptedData::try_from(encrypted_bytes)
@@ -592,6 +707,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                 seal::parse_scan(&ootle_network, resource)?,
             )
             .map_err(|e| e.to_string())?;
+            if let Some(expected) = expected
+                && recovered.value != expected
+            {
+                return Err(format!(
+                    "unblinded value {} does not match expected {expected}",
+                    recovered.value
+                ));
+            }
             println!("value={}", recovered.value);
             println!("mask={}", to_hex(recovered.mask.as_bytes()));
         }
@@ -631,6 +754,66 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn load_utxo(
+    utxo_json: Option<PathBuf>,
+    commitment_hex: Option<String>,
+    nonce_hex: Option<String>,
+    encrypted_hex: Option<String>,
+    tag: Option<i64>,
+) -> Result<(String, String, String, u32, Option<u64>), String> {
+    if let Some(path) = utxo_json {
+        let parsed: UtxoJson = serde_json::from_str(
+            &std::fs::read_to_string(&path).map_err(|e| format!("utxo-json: {e}"))?,
+        )
+        .map_err(|e| format!("utxo-json: {e}"))?;
+        return Ok((
+            parsed.commitment,
+            parsed.nonce,
+            parsed.encrypted_hex,
+            parsed.tag as u32,
+            parsed.value,
+        ));
+    }
+    Ok((
+        commitment_hex.ok_or("unblind requires --utxo-json or --commitment-hex")?,
+        nonce_hex.ok_or("unblind requires --nonce-hex")?,
+        encrypted_hex.ok_or("unblind requires --encrypted-hex")?,
+        tag.ok_or("unblind requires --tag")? as u32,
+        None,
+    ))
+}
+
+fn read_unsigned_json(path: &std::path::Path) -> Result<UnsignedTransaction, String> {
+    let raw = if path.as_os_str() == "-" {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .map_err(|e| format!("unsigned-json stdin: {e}"))?;
+        buf
+    } else {
+        std::fs::read_to_string(path).map_err(|e| format!("unsigned-json: {e}"))?
+    };
+    serde_json::from_str(raw.trim()).map_err(|e| format!("unsigned-json: {e}"))
+}
+
+fn read_key_id(
+    json: Option<&str>,
+    file: Option<&std::path::Path>,
+) -> Result<serde_json::Value, String> {
+    let raw = match (json, file) {
+        (Some(s), None) => s.to_string(),
+        (None, Some(path)) => {
+            std::fs::read_to_string(path).map_err(|e| format!("seal-key-id-file: {e}"))?
+        }
+        (Some(_), Some(_)) => {
+            return Err("pass either --seal-key-id or --seal-key-id-file, not both".into());
+        }
+        (None, None) => {
+            return Err("set --seal-key-id JSON or --seal-key-id-file".into());
+        }
+    };
+    serde_json::from_str(raw.trim()).map_err(|e| format!("seal-key-id: {e}"))
 }
 
 fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
@@ -806,5 +989,15 @@ mod seal_tests {
         )
         .unwrap();
         assert_eq!(recovered.mask, found[0].funds.mask);
+    }
+
+    #[test]
+    fn sqlite_signed_tag_becomes_u32() {
+        let parsed: UtxoJson = serde_json::from_str(
+            r#"{"commitment":"aa","nonce":"bb","encrypted_hex":"cc","tag":-1825295126,"value":1000000}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.tag as u32, 2469672170);
+        assert_eq!(parsed.value, Some(1_000_000));
     }
 }
