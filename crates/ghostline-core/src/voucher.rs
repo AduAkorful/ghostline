@@ -61,12 +61,35 @@ impl SignedVoucher {
                 deposit: params.deposit,
             });
         }
+        Self::sign_with_nonce(secret, params, amount, None)
+    }
+
+    /// `nonce = None` draws a fresh signing nonce (the usual path).
+    pub fn sign_with_nonce(
+        secret: &RistrettoSecretKey,
+        params: &ChannelParams,
+        amount: u64,
+        nonce: Option<RistrettoSecretKey>,
+    ) -> Result<Self, VoucherError> {
+        if amount == 0 {
+            return Err(VoucherError::ZeroAmount);
+        }
+        if amount > params.deposit {
+            return Err(VoucherError::ExceedsDeposit {
+                amount,
+                deposit: params.deposit,
+            });
+        }
         let channel_id = params.channel_id();
         let message = voucher_message(&channel_id, amount);
+        let signature = match nonce {
+            Some(n) => crate::sign_with_nonce(secret, n, VOUCHER_DOMAIN, &message),
+            None => sign_with_domain(secret, VOUCHER_DOMAIN, &message),
+        };
         Ok(Self {
             channel_id,
             amount,
-            signature: sign_with_domain(secret, VOUCHER_DOMAIN, &message),
+            signature,
         })
     }
 

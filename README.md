@@ -42,7 +42,7 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
 | `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
 | `demo/paid-api` | Reference paid endpoint (`/fortune`) |
-| `packages/ghostline` | TypeScript channel-id and voucher-message encodings |
+| `packages/ghostline` | TypeScript channel-id encodings and voucher signatures |
 | `crates/ghostline-mcp` | MCP stdio server (`ghostline-mcp`) |
 | `crates/ghostline-net` | Indexer REST and local wallet-daemon JSON-RPC (unsigned submit) |
 | `scripts/localnet.sh` | Clone/init/start `tari_swarm_daemon` outside this repo |

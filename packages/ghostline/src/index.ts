@@ -11,3 +11,11 @@ export {
   toHex,
   voucherMessage,
 } from "./channel.ts";
+export {
+  SignedVoucher,
+  computeChallenge,
+  publicKeyFromSecret,
+  signVoucher,
+  verifyVoucher,
+  voucherToBytes,
+} from "./voucher.ts";

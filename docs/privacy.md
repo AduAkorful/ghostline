@@ -34,7 +34,7 @@ Because remainder + claimed = deposit, **settlement reveals the deposit**.
 
 - Listing Ghostline UTXOs from the chain (`inspect-tx` reads a sealed tx you already have; `unblind` recovers mask and value from output fields or a wallet UTXO JSON dump)
 - Submitting Ghostline-sealed envelopes through the public indexer REST API (unverified; live settles used the wallet daemon)
-- TypeScript signing (encodings only)
+- TypeScript signing of `ghostline.channel.voucher.v1` is covered by a shared Rust/TS vector; WASM/Ootle JS wallet signing is a separate path
 - A proven fee source that stays unlinkable
 - Enforcement of spending limits if the agent signs without the policy engine
 

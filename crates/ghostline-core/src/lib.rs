@@ -34,7 +34,18 @@ fn sign_with_domain(
     domain: &[u8],
     message: &[u8],
 ) -> Signature<NoSignatureDomain> {
-    let (nonce, nonce_public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let (nonce, _) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    sign_with_nonce(secret, nonce, domain, message)
+}
+
+/// Same challenge as `RistrettoSchnorrBlake2bVerifier` (`tari_ootle_common_types` 0.45).
+pub fn sign_with_nonce(
+    secret: &RistrettoSecretKey,
+    nonce: RistrettoSecretKey,
+    domain: &[u8],
+    message: &[u8],
+) -> Signature<NoSignatureDomain> {
+    let nonce_public = RistrettoPublicKey::from_secret_key(&nonce);
     let public_key = RistrettoPublicKey::from_secret_key(secret);
     let challenge = RistrettoSchnorrBlake2bVerifier::compute_challenge(
         domain,

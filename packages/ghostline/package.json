@@ -1,7 +1,7 @@
 {
   "name": "@ghostline/sdk",
   "version": "0.1.0",
-  "description": "Ghostline voucher encodings for TypeScript. Signatures stay in the Rust SDK until the Ootle WASM signer is proven against ghostline.channel.voucher.v1.",
+  "description": "Ghostline channel-id encodings and Ristretto Schnorr voucher signatures (`ghostline.channel.voucher.v1`).",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -9,12 +9,13 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test src/channel.test.ts"
+    "test": "node --experimental-strip-types --test src/channel.test.ts src/voucher.test.ts"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0"
   }
 }
