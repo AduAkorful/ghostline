@@ -10,24 +10,16 @@
 
 mod support;
 
-use ghostline_core::{ChannelParams, NONCE_LEN, sign_voucher, witness_data};
+use ghostline_core::{NONCE_LEN, SignedVoucher, sign_voucher};
+use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, refund, settle};
 use ootle_byte_type::ToByteType;
 use support::{CHANNEL, DEPOSIT, fund, transfer};
-use tari_engine_types::stealth::MerkleTree;
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction};
-use tari_template_lib::types::{
-    FunctionName,
-    Hash32,
-    bytes::Bytes,
-    crypto::{RistrettoPublicKeyBytes, Signature},
-    rule,
-    stealth::{BuiltinPredicate, SpendCondition, TemplateFunction},
-};
+use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, Signature};
 use tari_template_test_tooling::{
     TemplateTest,
     support::spec::{InputAuthSpec, InputSpec, OutputAuthSpec},
-    wallet_crypto::MaskAndValue,
 };
 
 const NETWORK_TAG: u8 = 1;
@@ -84,23 +76,11 @@ impl Scenario {
     }
 }
 
-fn encode_arg<T: tari_bor::Encode<()>>(value: &T) -> Bytes {
-    Bytes::from_vec(tari_bor::encode(value).unwrap())
-}
-
-fn all(atoms: Vec<SpendCondition>) -> SpendCondition {
-    SpendCondition::all(atoms.into_iter().flat_map(|c| c.into_conditions().into_vec()))
-}
-
-fn builtin(predicate: BuiltinPredicate) -> SpendCondition {
-    SpendCondition::builtin(predicate)
-}
-
 fn run(s: Scenario) -> Result<(), String> {
-    let mut test = TemplateTest::new(env!("CARGO_MANIFEST_DIR"), [
-        "templates/faucet",
-        "../../contracts/channel",
-    ]);
+    let mut test = TemplateTest::new(
+        env!("CARGO_MANIFEST_DIR"),
+        ["templates/faucet", "../../contracts/channel"],
+    );
     let channel_template = test.get_template_address(CHANNEL);
 
     let (payer_secret, payer_public) = create_key_pair_from_seed(11);
@@ -109,60 +89,64 @@ fn run(s: Scenario) -> Result<(), String> {
     let payer: RistrettoPublicKeyBytes = payer_public.to_byte_type();
     let service: RistrettoPublicKeyBytes = service_public.to_byte_type();
 
-    let payer_target = SpendCondition::access_rule(rule!(public_key(payer)));
-    let payer_root: Hash32 = MerkleTree::from_conditions([&payer_target]).unwrap().root();
+    let channel = Channel::open(ChannelSpec {
+        network_tag: NETWORK_TAG,
+        payer,
+        service,
+        deposit: DEPOSIT,
+        expiry_epoch: s.expiry,
+        nonce: NONCE,
+        channel_template,
+    })
+    .map_err(|e| e.to_string())?;
 
-    let settle_leaf = all(vec![
-        SpendCondition::template_function(TemplateFunction::new(
-            channel_template,
-            FunctionName::try_from("settle").unwrap(),
-            vec![
-                encode_arg(&NETWORK_TAG),
-                encode_arg(&payer),
-                encode_arg(&DEPOSIT),
-                encode_arg(&payer_root),
-                encode_arg(&NONCE.to_vec()),
-            ],
-        )),
-        builtin(BuiltinPredicate::BeforeEpoch(s.expiry)),
-        SpendCondition::access_rule(rule!(public_key(service))),
-    ]);
-    let refund_leaf = all(vec![
-        builtin(BuiltinPredicate::AfterEpoch(s.expiry)),
-        SpendCondition::access_rule(rule!(public_key(payer))),
-    ]);
-    let tree = vec![settle_leaf.clone(), refund_leaf.clone()];
+    let (resource, mask) = fund(&mut test, OutputAuthSpec::Conditions(channel.leaves_vec()));
+    let funded = MaskAndValue {
+        mask,
+        value: DEPOSIT,
+    };
 
-    let (resource, mask) = fund(&mut test, OutputAuthSpec::Conditions(tree.clone()));
-    let funded = MaskAndValue { mask, value: DEPOSIT };
-
-    let spend = match s.action {
+    let statement = match s.action {
         Action::Settle => {
-            let params = ChannelParams {
-                network_tag: s.voucher_network,
-                payer,
-                deposit: DEPOSIT,
-                payer_root,
-                nonce: s.voucher_nonce,
+            let signing_key = if s.forged {
+                &other_secret
+            } else {
+                &payer_secret
             };
-            let signing_key = if s.forged { &other_secret } else { &payer_secret };
+            let mut params = channel.params().clone();
+            params.network_tag = s.voucher_network;
+            params.nonce = s.voucher_nonce;
             let signature: Signature<_> = sign_voucher(signing_key, &params, s.signed_amount);
-            let data = witness_data(s.claimed_amount, &signature);
-            let input = InputSpec::with_auth(funded, InputAuthSpec::script_path(tree, settle_leaf, data));
-            let payer_gets = s.payer_gets.unwrap_or(DEPOSIT.saturating_sub(s.claimed_amount));
-            let service_gets = DEPOSIT - payer_gets;
-            transfer(vec![input], vec![
-                (payer_gets, OutputAuthSpec::Conditions(vec![payer_target])),
-                (service_gets, OutputAuthSpec::KeyPath(service)),
-            ])
-        },
-        Action::Refund => {
-            let input = InputSpec::with_auth(
-                funded,
-                InputAuthSpec::script_path(tree, refund_leaf, Bytes::from_vec(vec![])),
-            );
-            transfer(vec![input], vec![(DEPOSIT, OutputAuthSpec::KeyPath(payer))])
-        },
+            let voucher = SignedVoucher {
+                channel_id: params.channel_id(),
+                amount: s.claimed_amount,
+                signature,
+            };
+            if let Some(payer_gets) = s.payer_gets {
+                let input = InputSpec::with_auth(
+                    funded,
+                    InputAuthSpec::script_path(
+                        channel.leaves_vec(),
+                        channel.settle_leaf().clone(),
+                        voucher.witness_data(),
+                    ),
+                );
+                transfer(
+                    vec![input],
+                    vec![
+                        (
+                            payer_gets,
+                            OutputAuthSpec::Conditions(vec![channel.payer_target().clone()]),
+                        ),
+                        (DEPOSIT - payer_gets, OutputAuthSpec::KeyPath(service)),
+                    ],
+                )
+                .statement
+            } else {
+                settle(&channel, funded, &voucher, service).map_err(|e| e.to_string())?
+            }
+        }
+        Action::Refund => refund(&channel, funded, payer).map_err(|e| e.to_string())?,
     };
 
     let secret = match s.signer {
@@ -171,7 +155,7 @@ fn run(s: Scenario) -> Result<(), String> {
         Signer::Other => &other_secret,
     };
     let tx = Transaction::builder_localnet(Epoch(1))
-        .stealth_transfer(resource, spend.statement)
+        .stealth_transfer(resource, statement)
         .finish()
         .seal(secret);
 
@@ -185,7 +169,10 @@ fn run(s: Scenario) -> Result<(), String> {
 
 fn assert_rejected(result: Result<(), String>, expected: &str) {
     let reason = result.expect_err("scenario must be rejected");
-    assert!(reason.contains(expected), "expected `{expected}` in rejection, got: {reason}");
+    assert!(
+        reason.contains(expected),
+        "expected `{expected}` in rejection, got: {reason}"
+    );
 }
 
 // ---------------------------------- Settlement ---------------------------------- //

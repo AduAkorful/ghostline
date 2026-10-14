@@ -11,6 +11,7 @@ publish = false
 
 [dev-dependencies]
 ghostline-core = { path = "../ghostline-core" }
+ghostline-sdk = { path = "../ghostline-sdk" }
 ootle_byte_type = { version = "0.16", features = ["crypto"] }
 rand = "0.10.1"
 tari_bor = { version = "0.16.3", default-features = true }

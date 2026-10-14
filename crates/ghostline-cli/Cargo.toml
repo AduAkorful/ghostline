@@ -1,0 +1,21 @@
+[package]
+name = "ghostline-cli"
+description = "Sign and verify Ghostline vouchers from the terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ghostline"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+ghostline-core = { path = "../ghostline-core" }
+tari_crypto = "0.24.0"
+tari_template_lib = "0.34.0"
+tari_utilities = "0.10"
+
+[dev-dependencies]
+rand = "0.10.1"

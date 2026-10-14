@@ -34,7 +34,9 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | Path | Contents |
 |---|---|
 | `contracts/channel` | The channel template (Rust, compiled to WASM) |
-| `crates/ghostline-core` | Channel id, voucher message and signing primitives |
+| `crates/ghostline-core` | Channel id, voucher signing, verification, payer session and service ledger |
+| `crates/ghostline-sdk` | Condition-tree open, settle and refund stealth statements |
+| `crates/ghostline-cli` | `ghostline` CLI: `channel-id`, `sign`, `verify` |
 | `crates/contract-tests` | Engine-level tests, run against the in-process Ootle engine |
 
 ## Running the tests
@@ -46,6 +48,13 @@ cargo test
 ```
 
 The first run compiles the Ootle engine and takes several minutes.
+
+Offline voucher commands (no network):
+
+```bash
+cargo run -p ghostline-cli -- channel-id --network-tag 1 --deposit 100 \
+  --payer-hex <32-byte-hex> --payer-root-hex <32-byte-hex> --nonce-hex <32-byte-hex>
+```
 
 ## License
 
