@@ -7,6 +7,7 @@ use tari_crypto::{
 };
 use tari_ootle_wallet_crypto::{
     MaskAndValue, OutputWitness, StealthCryptoApi, StealthInputWitness, StealthOutputWitness,
+    pay_to::PayTo,
     stealth::{self, create_transfer_statement},
 };
 use tari_template_lib::types::{
@@ -17,6 +18,73 @@ use tari_template_lib::types::{
 use tari_utilities::ByteArray;
 
 use crate::{Channel, SdkError};
+
+/// A funded channel UTXO plus the transfer that created it.
+#[derive(Clone)]
+pub struct OpenStatement {
+    pub statement: StealthTransferStatement,
+    pub deposit: MaskAndValue,
+}
+
+impl std::fmt::Debug for OpenStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenStatement")
+            .field("deposit_value", &self.deposit.value)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Spends key-path stealth inputs into the channel's two-leaf condition tree (`PayTo::Conditions`).
+///
+/// Input value above the deposit is returned as a key-path change output to `payer_change_key`.
+/// Every output's minimum-value promise equals its value.
+pub fn fund_open(
+    channel: &Channel,
+    inputs: impl IntoIterator<Item = MaskAndValue>,
+    payer_change_key: RistrettoPublicKeyBytes,
+) -> Result<OpenStatement, SdkError> {
+    let inputs: Vec<MaskAndValue> = inputs.into_iter().collect();
+    let mut have: u64 = 0;
+    for input in &inputs {
+        if input.value == 0 {
+            return Err(SdkError::ZeroInput);
+        }
+        have = have.checked_add(input.value).ok_or(SdkError::Overflow)?;
+    }
+    let need = channel.params().deposit;
+    if have < need {
+        return Err(SdkError::InsufficientFunds { have, need });
+    }
+    let change = have - need;
+
+    let auth =
+        stealth::pay_to_output_authorization(&PayTo::Conditions(channel.leaves_vec()), || {
+            unreachable!("PayTo::Conditions does not derive a one-time spend key")
+        })?;
+
+    let deposit_out = output(need, auth, &channel.spec().payer)?;
+    let deposit = MaskAndValue {
+        value: need,
+        mask: deposit_out.witness.mask.clone(),
+    };
+
+    let mut outputs = vec![deposit_out];
+    if change > 0 {
+        outputs.push(output(
+            change,
+            SpendAuthorization::Key(payer_change_key),
+            &payer_change_key,
+        )?);
+    }
+
+    let statement = create_transfer_statement(
+        inputs.into_iter().map(StealthInputWitness::new),
+        Amount::zero(),
+        outputs.iter(),
+        None,
+    )?;
+    Ok(OpenStatement { statement, deposit })
+}
 
 /// Spends the channel UTXO with a voucher: service receives `amount`, remainder returns under `payer_root`.
 ///
@@ -226,5 +294,59 @@ mod tests {
                 actual: 99
             }
         ));
+    }
+
+    #[test]
+    fn open_commits_the_channel_tree() {
+        let (_secret, channel, _service) = channel_and_keys();
+        let opened = fund_open(&channel, [funded(100)], channel.spec().payer).unwrap();
+        assert_eq!(opened.statement.outputs_statement.outputs.len(), 1);
+        assert_eq!(
+            opened.statement.outputs_statement.outputs[0]
+                .output
+                .minimum_value_promise,
+            100
+        );
+        let expected = stealth::pay_to_output_authorization(
+            &PayTo::Conditions(channel.leaves_vec()),
+            || unreachable!(),
+        )
+        .unwrap();
+        assert_eq!(opened.statement.outputs_statement.outputs[0].auth, expected);
+        assert_eq!(opened.deposit.value, 100);
+    }
+
+    #[test]
+    fn open_change_promises_its_value() {
+        let (_secret, channel, _service) = channel_and_keys();
+        let opened = fund_open(&channel, [funded(130)], channel.spec().payer).unwrap();
+        let promises: Vec<u64> = opened
+            .statement
+            .outputs_statement
+            .outputs
+            .iter()
+            .map(|o| o.output.minimum_value_promise)
+            .collect();
+        assert_eq!(promises, vec![100, 30]);
+    }
+
+    #[test]
+    fn open_rejects_short_inputs() {
+        let (_secret, channel, _service) = channel_and_keys();
+        let err = fund_open(&channel, [funded(40), funded(50)], channel.spec().payer).unwrap_err();
+        assert!(matches!(
+            err,
+            SdkError::InsufficientFunds {
+                have: 90,
+                need: 100
+            }
+        ));
+    }
+
+    #[test]
+    fn open_statement_validates() {
+        let (_secret, channel, _service) = channel_and_keys();
+        let opened = fund_open(&channel, [funded(100)], channel.spec().payer).unwrap();
+        tari_engine_types::stealth::validate_transfer(&opened.statement, None).unwrap();
     }
 }

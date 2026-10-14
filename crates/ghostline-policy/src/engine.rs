@@ -26,6 +26,7 @@ pub struct RateLimit {
 pub struct PolicyEngine {
     policy: Policy,
     rate: Option<RateLimit>,
+    human: bool,
     events: VecDeque<(Instant, u64)>,
     log: Vec<AuditEvent>,
 }
@@ -35,9 +36,16 @@ impl PolicyEngine {
         Self {
             policy,
             rate: None,
+            human: false,
             events: VecDeque::new(),
             log: Vec::new(),
         }
+    }
+
+    /// After the numeric limits pass, `approve` still fails until [`approve_attested`] is used.
+    pub fn require_human(mut self) -> Self {
+        self.human = true;
+        self
     }
 
     pub fn with_rate_limit(mut self, rate: RateLimit) -> Self {
@@ -60,10 +68,43 @@ impl PolicyEngine {
         already_owed: u64,
         now: Instant,
     ) -> Result<(), PolicyError> {
+        self.decide(vendor, price, already_owed, now, false)
+    }
+
+    /// Same checks as [`approve`], but satisfies a configured human gate. The caller must have
+    /// confirmed the spend out of band; this crate does not present a UI.
+    pub fn approve_attested(
+        &mut self,
+        vendor: &RistrettoPublicKeyBytes,
+        price: u64,
+        already_owed: u64,
+        now: Instant,
+    ) -> Result<(), PolicyError> {
+        self.decide(vendor, price, already_owed, now, true)
+    }
+
+    fn decide(
+        &mut self,
+        vendor: &RistrettoPublicKeyBytes,
+        price: u64,
+        already_owed: u64,
+        now: Instant,
+        attested: bool,
+    ) -> Result<(), PolicyError> {
         let result = self
             .policy
             .approve(vendor, price, already_owed)
-            .and_then(|_| self.check_rate(now, price));
+            .and_then(|_| self.check_rate(now, price))
+            .and_then(|_| {
+                if self.human && !attested {
+                    Err(PolicyError::NeedsHumanApproval {
+                        price,
+                        already_owed,
+                    })
+                } else {
+                    Ok(())
+                }
+            });
         self.log.push(AuditEvent {
             unix_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -108,7 +149,7 @@ impl PolicyEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Policy;
+    use crate::{Policy, PolicyError};
 
     fn vendor() -> RistrettoPublicKeyBytes {
         RistrettoPublicKeyBytes::from_bytes(&[1u8; 32]).unwrap()
@@ -139,5 +180,20 @@ mod tests {
         );
         assert_eq!(engine.audit_log().iter().filter(|e| e.approved).count(), 2);
         assert_eq!(engine.audit_log().iter().filter(|e| !e.approved).count(), 1);
+    }
+
+    #[test]
+    fn human_gate_blocks_until_attested() {
+        let mut engine = PolicyEngine::new(Policy::new(100, 10)).require_human();
+        let now = Instant::now();
+        assert_eq!(
+            engine.approve(&vendor(), 10, 0, now),
+            Err(PolicyError::NeedsHumanApproval {
+                price: 10,
+                already_owed: 0
+            })
+        );
+        engine.approve_attested(&vendor(), 10, 0, now).unwrap();
+        assert_eq!(engine.audit_log().iter().filter(|e| e.approved).count(), 1);
     }
 }

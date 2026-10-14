@@ -18,4 +18,5 @@ tari_template_lib = "0.34.0"
 tari_utilities = "0.10"
 
 [dev-dependencies]
+tari_engine_types = "0.45.0"
 tari_ootle_common_types = "0.45.0"

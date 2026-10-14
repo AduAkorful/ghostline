@@ -14,6 +14,7 @@ pub enum PolicyError {
     BudgetExceeded { would_owe: u64, budget: u64 },
     VendorDenied,
     RateLimited,
+    NeedsHumanApproval { price: u64, already_owed: u64 },
 }
 
 impl fmt::Display for PolicyError {
@@ -33,6 +34,13 @@ impl fmt::Display for PolicyError {
             }
             Self::VendorDenied => write!(f, "vendor is not on the allowlist"),
             Self::RateLimited => write!(f, "rate limit exceeded"),
+            Self::NeedsHumanApproval {
+                price,
+                already_owed,
+            } => write!(
+                f,
+                "human approval required for price {price} with {already_owed} already owed"
+            ),
         }
     }
 }

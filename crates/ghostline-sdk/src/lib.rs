@@ -16,7 +16,7 @@ pub use ghostline_core::{
     ChannelParams, PaymentSession, ServiceLedger, SignedVoucher, VoucherError, sign_voucher,
     witness_data,
 };
-pub use spend::{refund, settle};
+pub use spend::{OpenStatement, fund_open, refund, settle};
 pub use tari_ootle_transaction::TransactionEnvelope;
 pub use tari_ootle_wallet_crypto::MaskAndValue;
 pub use tx::{encode_transaction_envelope, seal_localnet_stealth_transfer};

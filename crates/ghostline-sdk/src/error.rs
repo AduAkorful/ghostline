@@ -8,6 +8,9 @@ use tari_ootle_wallet_crypto::WalletCryptoError;
 #[derive(Debug)]
 pub enum SdkError {
     ZeroDeposit,
+    ZeroInput,
+    Overflow,
+    InsufficientFunds { have: u64, need: u64 },
     DepositMismatch { expected: u64, actual: u64 },
     Voucher(VoucherError),
     Wallet(WalletCryptoError),
@@ -20,6 +23,11 @@ impl fmt::Display for SdkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroDeposit => write!(f, "channel deposit must be greater than zero"),
+            Self::ZeroInput => write!(f, "open inputs must each be greater than zero"),
+            Self::Overflow => write!(f, "input values overflow u64"),
+            Self::InsufficientFunds { have, need } => {
+                write!(f, "inputs total {have} is below channel deposit {need}")
+            }
             Self::DepositMismatch { expected, actual } => {
                 write!(
                     f,

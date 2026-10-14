@@ -11,7 +11,7 @@
 mod support;
 
 use ghostline_core::{NONCE_LEN, SignedVoucher, sign_voucher};
-use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, refund, settle};
+use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, fund_open, refund, settle};
 use ootle_byte_type::ToByteType;
 use support::{CHANNEL, DEPOSIT, fund, transfer};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
@@ -298,4 +298,51 @@ fn refund_by_non_payer_is_rejected() {
         }),
         "Access Denied",
     );
+}
+
+#[test]
+fn sdk_open_from_key_path_then_settle() {
+    let mut test = TemplateTest::new(
+        env!("CARGO_MANIFEST_DIR"),
+        ["templates/faucet", "../../contracts/channel"],
+    );
+    let channel_template = test.get_template_address(CHANNEL);
+    let (payer_secret, payer_public) = create_key_pair_from_seed(11);
+    let (service_secret, service_public) = create_key_pair_from_seed(13);
+    let payer: RistrettoPublicKeyBytes = payer_public.to_byte_type();
+    let service: RistrettoPublicKeyBytes = service_public.to_byte_type();
+    let channel = Channel::open(ChannelSpec {
+        network_tag: NETWORK_TAG,
+        payer,
+        service,
+        deposit: DEPOSIT,
+        expiry_epoch: u64::MAX,
+        nonce: NONCE,
+        channel_template,
+    })
+    .unwrap();
+
+    let (resource, mask) = fund(&mut test, OutputAuthSpec::KeyPath(payer));
+    let opened = fund_open(
+        &channel,
+        [MaskAndValue {
+            mask,
+            value: DEPOSIT,
+        }],
+        payer,
+    )
+    .unwrap();
+    let open_tx = Transaction::builder_localnet(Epoch(1))
+        .stealth_transfer(resource, opened.statement)
+        .finish()
+        .seal(&payer_secret);
+    test.execute_expect_success(open_tx, vec![]);
+
+    let voucher = SignedVoucher::sign(&payer_secret, channel.params(), SIGNED).unwrap();
+    let settle_stmt = settle(&channel, opened.deposit, &voucher, service).unwrap();
+    let settle_tx = Transaction::builder_localnet(Epoch(1))
+        .stealth_transfer(resource, settle_stmt)
+        .finish()
+        .seal(&service_secret);
+    test.execute_expect_success(settle_tx, vec![]);
 }
