@@ -32,7 +32,7 @@ Because remainder + claimed = deposit, **settlement reveals the deposit**.
 
 ## What the software does not yet do
 
-- Live wallet recovery of Ghostline outputs (tags are still `0` in the SDK)
+- Live wallet daemon / indexer scan of Ghostline outputs (`ghostline unblind` recovers mask and value from a tagged output you already have; nothing here lists UTXOs)
 - TypeScript signing (encodings only)
 - A proven fee source that stays unlinkable
 - Enforcement of spending limits if the agent signs without the policy engine

@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 ghostline-core = { path = "../ghostline-core" }
+ootle-network = "0.2.0"
 ootle_byte_type = { version = "0.16", features = ["crypto"] }
 rand = "0.10.1"
 tari_bor = { version = "0.16.3", default-features = true }

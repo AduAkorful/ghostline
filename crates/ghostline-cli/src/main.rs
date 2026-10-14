@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
 use ghostline_net::{IndexerClient, TransactionEnvelope};
-use ghostline_sdk::MaskAndValue;
+use ghostline_sdk::{MaskAndValue, OutputScan, unblind_output};
+use tari_utilities::ByteArray;
 
 #[derive(Parser)]
 #[command(
@@ -109,6 +110,21 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+    },
+    /// Recover value and mask from a stealth output encrypted to the claim secret.
+    Unblind {
+        #[arg(long)]
+        commitment_hex: String,
+        #[arg(long)]
+        nonce_hex: String,
+        #[arg(long)]
+        encrypted_hex: String,
+        #[arg(long)]
+        tag: u32,
+        #[arg(long)]
+        resource_hex: Option<String>,
+        #[arg(long)]
+        secret_hex: Option<String>,
     },
 }
 
@@ -427,6 +443,47 @@ async fn run(cli: Cli) -> Result<(), String> {
             )?;
             println!("{tx}");
         }
+        Command::Unblind {
+            commitment_hex,
+            nonce_hex,
+            encrypted_hex,
+            tag,
+            resource_hex,
+            secret_hex,
+        } => {
+            use tari_template_lib::types::{
+                EncryptedData,
+                crypto::{PedersenCommitmentBytes, UtxoTag},
+                stealth::UnspentOutput,
+            };
+            let secret = secrets::load_secret(
+                secret_hex.as_deref(),
+                secrets::PAYER_SECRET_ENV,
+                "claim secret",
+            )?;
+            let encrypted_bytes = from_hex(&encrypted_hex)
+                .map_err(|_| "encrypted: expected even-length hex".to_string())?;
+            let encrypted = EncryptedData::try_from(encrypted_bytes)
+                .map_err(|len| format!("encrypted: invalid length {len}"))?;
+            let output = UnspentOutput {
+                commitment: PedersenCommitmentBytes::from_hex(&commitment_hex)
+                    .map_err(|e| format!("commitment: {e}"))?,
+                sender_public_nonce: seal::parse_pk("nonce", &nonce_hex)?,
+                encrypted_data: encrypted,
+                minimum_value_promise: 0,
+                viewable_balance_proof: None,
+            };
+            let resource = seal::parse_resource(resource_hex.as_deref())?;
+            let recovered = unblind_output(
+                &output,
+                UtxoTag::new(tag),
+                &secret,
+                OutputScan::localnet(resource),
+            )
+            .map_err(|e| e.to_string())?;
+            println!("value={}", recovered.value);
+            println!("mask={}", to_hex(recovered.mask.as_bytes()));
+        }
     }
     Ok(())
 }
@@ -517,5 +574,37 @@ mod seal_tests {
         )
         .unwrap();
         decode_tx(&settle_hex).unwrap();
+    }
+
+    #[test]
+    fn unblind_recovers_deposit_mask_from_open_output() {
+        let (payer_secret, payer_public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
+        let channel = seal::channel(seal::OpenSpec {
+            network_tag: 1,
+            deposit: 100,
+            payer: payer_public.to_byte_type(),
+            service: service_public.to_byte_type(),
+            expiry_epoch: u64::MAX,
+            nonce: [42u8; NONCE_LEN],
+            channel_template: Hash32::from_array([7u8; 32]),
+        })
+        .unwrap();
+        let opened = ghostline_sdk::fund_open(
+            &channel,
+            [MaskAndValue {
+                value: 100,
+                mask: RistrettoSecretKey::random(&mut rand::rng()),
+            }],
+            channel.spec().payer,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        )
+        .unwrap();
+        let out = &opened.statement.outputs_statement.outputs[0];
+        let recovered =
+            unblind_output(&out.output, out.tag, &payer_secret, OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS))
+                .unwrap();
+        assert_eq!(recovered.value, 100);
+        assert_eq!(recovered.mask, opened.deposit.mask);
     }
 }

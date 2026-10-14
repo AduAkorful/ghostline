@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use ghostline_core::{SignedVoucher, VoucherError};
+use ootle_network::Network;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -11,13 +12,30 @@ use tari_ootle_wallet_crypto::{
     stealth::{self, create_transfer_statement},
 };
 use tari_template_lib::types::{
-    Amount,
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    Amount, ResourceAddress,
+    crypto::RistrettoPublicKeyBytes,
     stealth::{SpendAuthorization, StealthTransferStatement},
 };
 use tari_utilities::ByteArray;
 
 use crate::{Channel, SdkError};
+
+/// Ootle scan parameters for UTXO tags. Distinct from Ghostline's voucher `network_tag`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputScan {
+    pub network: Network,
+    pub resource: ResourceAddress,
+}
+
+impl OutputScan {
+    /// Tags for `Transaction::builder_localnet` and the given resource.
+    pub fn localnet(resource: ResourceAddress) -> Self {
+        Self {
+            network: Network::LocalNet,
+            resource,
+        }
+    }
+}
 
 /// A funded channel UTXO plus the transfer that created it.
 #[derive(Clone)]
@@ -42,6 +60,7 @@ pub fn fund_open(
     channel: &Channel,
     inputs: impl IntoIterator<Item = MaskAndValue>,
     payer_change_key: RistrettoPublicKeyBytes,
+    scan: OutputScan,
 ) -> Result<OpenStatement, SdkError> {
     let inputs: Vec<MaskAndValue> = inputs.into_iter().collect();
     let mut have: u64 = 0;
@@ -62,7 +81,7 @@ pub fn fund_open(
             unreachable!("PayTo::Conditions does not derive a one-time spend key")
         })?;
 
-    let deposit_out = output(need, auth, &channel.spec().payer)?;
+    let deposit_out = output(need, auth, &channel.spec().payer, scan)?;
     let deposit = MaskAndValue {
         value: need,
         mask: deposit_out.witness.mask.clone(),
@@ -74,6 +93,7 @@ pub fn fund_open(
             change,
             SpendAuthorization::Key(payer_change_key),
             &payer_change_key,
+            scan,
         )?);
     }
 
@@ -95,6 +115,7 @@ pub fn settle(
     deposit: MaskAndValue,
     voucher: &SignedVoucher,
     service_output_key: RistrettoPublicKeyBytes,
+    scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     if voucher.amount > channel.params().deposit {
         return Err(VoucherError::ExceedsDeposit {
@@ -129,6 +150,7 @@ pub fn settle(
             remainder,
             SpendAuthorization::Script(channel.params().payer_root),
             &channel.spec().payer,
+            scan,
         )?);
     }
     if voucher.amount > 0 {
@@ -136,6 +158,7 @@ pub fn settle(
             voucher.amount,
             SpendAuthorization::Key(service_output_key),
             &service_output_key,
+            scan,
         )?);
     }
 
@@ -152,6 +175,7 @@ pub fn refund(
     channel: &Channel,
     deposit: MaskAndValue,
     payer_output_key: RistrettoPublicKeyBytes,
+    scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     if deposit.value != channel.params().deposit {
         return Err(SdkError::DepositMismatch {
@@ -170,6 +194,7 @@ pub fn refund(
         channel.params().deposit,
         SpendAuthorization::Key(payer_output_key),
         &payer_output_key,
+        scan,
     )?];
 
     Ok(create_transfer_statement(
@@ -184,6 +209,7 @@ fn output(
     amount: u64,
     auth: SpendAuthorization,
     recipient: &RistrettoPublicKeyBytes,
+    scan: OutputScan,
 ) -> Result<StealthOutputWitness, SdkError> {
     let mask = RistrettoSecretKey::random(&mut rand::rng());
     let (nonce_secret, nonce_public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
@@ -192,6 +218,12 @@ fn output(
     let encrypted_data = StealthCryptoApi::new()
         .encrypt_value_and_mask(amount, &mask, &recipient_pk, &nonce_secret, None)
         .map_err(|err| SdkError::Encrypt(err.to_string()))?;
+    let tag = StealthCryptoApi::new().derive_stealth_output_tag(
+        scan.network,
+        &nonce_secret,
+        &recipient_pk,
+        &scan.resource,
+    );
 
     Ok(StealthOutputWitness {
         witness: OutputWitness {
@@ -203,7 +235,7 @@ fn output(
             resource_view_key: None,
         },
         auth,
-        tag: UtxoTag::new(0),
+        tag,
     })
 }
 
@@ -215,6 +247,11 @@ mod tests {
     use ootle_byte_type::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::Hash32;
+    use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+
+    fn scan() -> OutputScan {
+        OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS)
+    }
 
     fn channel_and_keys() -> (RistrettoSecretKey, Channel, RistrettoPublicKeyBytes) {
         let (payer_secret, payer_public) = create_key_pair_from_seed(11);
@@ -245,7 +282,7 @@ mod tests {
     fn settle_outputs_promise_their_own_value() {
         let (secret, channel, service) = channel_and_keys();
         let voucher = SignedVoucher::sign(&secret, channel.params(), 30).unwrap();
-        let statement = settle(&channel, funded(100), &voucher, service).unwrap();
+        let statement = settle(&channel, funded(100), &voucher, service, scan()).unwrap();
         let promises: Vec<u64> = statement
             .outputs_statement
             .outputs
@@ -259,7 +296,7 @@ mod tests {
     fn full_deposit_voucher_omits_remainder() {
         let (secret, channel, service) = channel_and_keys();
         let voucher = SignedVoucher::sign(&secret, channel.params(), 100).unwrap();
-        let statement = settle(&channel, funded(100), &voucher, service).unwrap();
+        let statement = settle(&channel, funded(100), &voucher, service, scan()).unwrap();
         assert_eq!(statement.outputs_statement.outputs.len(), 1);
         assert_eq!(
             statement.outputs_statement.outputs[0]
@@ -272,7 +309,7 @@ mod tests {
     #[test]
     fn refund_returns_the_deposit() {
         let (_secret, channel, _service) = channel_and_keys();
-        let statement = refund(&channel, funded(100), channel.spec().payer).unwrap();
+        let statement = refund(&channel, funded(100), channel.spec().payer, scan()).unwrap();
         assert_eq!(statement.outputs_statement.outputs.len(), 1);
         assert_eq!(
             statement.outputs_statement.outputs[0]
@@ -286,7 +323,7 @@ mod tests {
     fn settle_rejects_wrong_utxo_value() {
         let (secret, channel, service) = channel_and_keys();
         let voucher = SignedVoucher::sign(&secret, channel.params(), 30).unwrap();
-        let err = settle(&channel, funded(99), &voucher, service).unwrap_err();
+        let err = settle(&channel, funded(99), &voucher, service, scan()).unwrap_err();
         assert!(matches!(
             err,
             SdkError::DepositMismatch {
@@ -299,7 +336,7 @@ mod tests {
     #[test]
     fn open_commits_the_channel_tree() {
         let (_secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(100)], channel.spec().payer).unwrap();
+        let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
         assert_eq!(opened.statement.outputs_statement.outputs.len(), 1);
         assert_eq!(
             opened.statement.outputs_statement.outputs[0]
@@ -319,7 +356,7 @@ mod tests {
     #[test]
     fn open_change_promises_its_value() {
         let (_secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(130)], channel.spec().payer).unwrap();
+        let opened = fund_open(&channel, [funded(130)], channel.spec().payer, scan()).unwrap();
         let promises: Vec<u64> = opened
             .statement
             .outputs_statement
@@ -333,7 +370,7 @@ mod tests {
     #[test]
     fn open_rejects_short_inputs() {
         let (_secret, channel, _service) = channel_and_keys();
-        let err = fund_open(&channel, [funded(40), funded(50)], channel.spec().payer).unwrap_err();
+        let err = fund_open(&channel, [funded(40), funded(50)], channel.spec().payer, scan()).unwrap_err();
         assert!(matches!(
             err,
             SdkError::InsufficientFunds {
@@ -346,7 +383,23 @@ mod tests {
     #[test]
     fn open_statement_validates() {
         let (_secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(100)], channel.spec().payer).unwrap();
+        let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
         tari_engine_types::stealth::validate_transfer(&opened.statement, None).unwrap();
+    }
+
+    #[test]
+    fn payer_wallet_recomputes_the_deposit_tag() {
+        let (secret, channel, _service) = channel_and_keys();
+        let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
+        let out = &opened.statement.outputs_statement.outputs[0];
+        let nonce = RistrettoPublicKey::from_canonical_bytes(out.output.sender_public_nonce.as_bytes())
+            .unwrap();
+        let expected = StealthCryptoApi::new().derive_stealth_output_tag(
+            Network::LocalNet,
+            &secret,
+            &nonce,
+            &STEALTH_TARI_RESOURCE_ADDRESS,
+        );
+        assert_eq!(out.tag, expected);
     }
 }

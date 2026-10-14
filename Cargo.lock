@@ -1560,6 +1560,7 @@ name = "ghostline-sdk"
 version = "0.1.0"
 dependencies = [
  "ghostline-core",
+ "ootle-network",
  "ootle_byte_type",
  "rand",
  "tari_bor",

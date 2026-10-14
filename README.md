@@ -112,6 +112,14 @@ cargo run -p ghostline-cli -- indexer wait --url http://127.0.0.1:<indexer-port>
 cargo run -p ghostline-cli -- indexer epoch --url http://127.0.0.1:<indexer-port>/
 ```
 
+Recover value and mask from a stealth output encrypted to `GHOSTLINE_PAYER_SECRET` (localnet resource default):
+
+```bash
+cargo run -p ghostline-cli -- unblind \
+  --commitment-hex <32-byte-hex> --nonce-hex <32-byte-hex> \
+  --encrypted-hex <encrypted-data-hex> --tag <u32>
+```
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

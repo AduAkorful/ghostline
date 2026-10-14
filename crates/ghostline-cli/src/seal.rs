@@ -2,7 +2,7 @@
 
 use ghostline_core::{NONCE_LEN, SignedVoucher, from_hex, to_hex};
 use ghostline_sdk::{
-    Channel, ChannelSpec, MaskAndValue, fund_open, refund, seal_localnet_hex, settle,
+    Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, seal_localnet_hex, settle,
 };
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{
@@ -77,7 +77,8 @@ pub fn seal_open(
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
 ) -> Result<(String, String), String> {
-    let opened = fund_open(channel, [input], change_key).map_err(|e| e.to_string())?;
+    let opened = fund_open(channel, [input], change_key, OutputScan::localnet(resource))
+        .map_err(|e| e.to_string())?;
     let tx = seal_localnet_hex(resource, opened.statement, max_epoch, sealer)
         .map_err(|e| e.to_string())?;
     Ok((tx, to_hex(opened.deposit.mask.as_bytes())))
@@ -92,7 +93,14 @@ pub fn seal_settle(
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
 ) -> Result<String, String> {
-    let statement = settle(channel, deposit, voucher, service_output).map_err(|e| e.to_string())?;
+    let statement = settle(
+        channel,
+        deposit,
+        voucher,
+        service_output,
+        OutputScan::localnet(resource),
+    )
+    .map_err(|e| e.to_string())?;
     seal_localnet_hex(resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
 }
 
@@ -104,6 +112,12 @@ pub fn seal_refund(
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
 ) -> Result<String, String> {
-    let statement = refund(channel, deposit, payer_output).map_err(|e| e.to_string())?;
+    let statement = refund(
+        channel,
+        deposit,
+        payer_output,
+        OutputScan::localnet(resource),
+    )
+    .map_err(|e| e.to_string())?;
     seal_localnet_hex(resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
 }

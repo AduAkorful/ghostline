@@ -11,7 +11,7 @@
 mod support;
 
 use ghostline_core::{NONCE_LEN, SignedVoucher, sign_voucher};
-use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, fund_open, refund, settle};
+use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, settle};
 use ootle_byte_type::ToByteType;
 use support::{CHANNEL, DEPOSIT, fund, transfer};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
@@ -143,10 +143,23 @@ fn run(s: Scenario) -> Result<(), String> {
                 )
                 .statement
             } else {
-                settle(&channel, funded, &voucher, service).map_err(|e| e.to_string())?
+                settle(
+                    &channel,
+                    funded,
+                    &voucher,
+                    service,
+                    OutputScan::localnet(resource),
+                )
+                .map_err(|e| e.to_string())?
             }
         }
-        Action::Refund => refund(&channel, funded, payer).map_err(|e| e.to_string())?,
+        Action::Refund => refund(
+            &channel,
+            funded,
+            payer,
+            OutputScan::localnet(resource),
+        )
+        .map_err(|e| e.to_string())?,
     };
 
     let secret = match s.signer {
@@ -330,6 +343,7 @@ fn sdk_open_from_key_path_then_settle() {
             value: DEPOSIT,
         }],
         payer,
+        OutputScan::localnet(resource),
     )
     .unwrap();
     let open_tx = Transaction::builder_localnet(Epoch(1))
@@ -339,7 +353,14 @@ fn sdk_open_from_key_path_then_settle() {
     test.execute_expect_success(open_tx, vec![]);
 
     let voucher = SignedVoucher::sign(&payer_secret, channel.params(), SIGNED).unwrap();
-    let settle_stmt = settle(&channel, opened.deposit, &voucher, service).unwrap();
+    let settle_stmt = settle(
+        &channel,
+        opened.deposit,
+        &voucher,
+        service,
+        OutputScan::localnet(resource),
+    )
+    .unwrap();
     let settle_tx = Transaction::builder_localnet(Epoch(1))
         .stealth_transfer(resource, settle_stmt)
         .finish()

@@ -170,7 +170,14 @@ mod tests {
             value: 100,
             mask: tari_crypto::ristretto::RistrettoSecretKey::random(&mut rand::rng()),
         };
-        let statement = settle(&channel, funded, &voucher, service_public.to_byte_type()).unwrap();
+        let statement = settle(
+            &channel,
+            funded,
+            &voucher,
+            service_public.to_byte_type(),
+            ghostline_sdk::OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        )
+        .unwrap();
         seal_localnet_stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, statement, Epoch(1), &sealer)
     }
 

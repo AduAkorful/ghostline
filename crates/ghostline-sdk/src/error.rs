@@ -17,6 +17,8 @@ pub enum SdkError {
     InvalidKey,
     Encode,
     Encrypt(String),
+    Decrypt(String),
+    TagMismatch,
 }
 
 impl fmt::Display for SdkError {
@@ -39,6 +41,8 @@ impl fmt::Display for SdkError {
             Self::InvalidKey => write!(f, "invalid ristretto key bytes"),
             Self::Encode => write!(f, "failed to encode bound template arguments"),
             Self::Encrypt(details) => write!(f, "failed to encrypt output data: {details}"),
+            Self::Decrypt(details) => write!(f, "failed to decrypt output data: {details}"),
+            Self::TagMismatch => write!(f, "utxo tag does not match this claim key and resource"),
         }
     }
 }

@@ -7,6 +7,7 @@
 
 mod channel;
 mod error;
+mod recover;
 mod spend;
 mod tx;
 
@@ -16,7 +17,8 @@ pub use ghostline_core::{
     ChannelParams, PaymentSession, ServiceLedger, SignedVoucher, VoucherError, sign_voucher,
     witness_data,
 };
-pub use spend::{OpenStatement, fund_open, refund, settle};
+pub use recover::unblind_output;
+pub use spend::{OpenStatement, OutputScan, fund_open, refund, settle};
 pub use tari_ootle_transaction::TransactionEnvelope;
 pub use tari_ootle_wallet_crypto::MaskAndValue;
 pub use tx::{
