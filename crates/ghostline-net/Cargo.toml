@@ -1,0 +1,25 @@
+[package]
+name = "ghostline-net"
+description = "Submit sealed Ghostline transactions to a local Ootle indexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ghostline-sdk = { path = "../ghostline-sdk" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tari_ootle_transaction = { version = "0.45.0", features = ["serde"] }
+thiserror = "2"
+url = "2"
+
+[dev-dependencies]
+ghostline-core = { path = "../ghostline-core" }
+ootle_byte_type = { version = "0.16", features = ["crypto"] }
+rand = "0.10.1"
+tari_crypto = "0.24.0"
+tari_ootle_common_types = "0.45.0"
+tari_template_lib = "0.34.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

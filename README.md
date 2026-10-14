@@ -42,6 +42,8 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `demo/paid-api` | Reference paid endpoint (`/fortune`) |
 | `packages/ghostline` | TypeScript channel-id and voucher-message encodings |
 | `crates/ghostline-mcp` | MCP stdio server (`ghostline-mcp`) |
+| `crates/ghostline-net` | Indexer REST: wait, epoch stats, submit / dry-run |
+| `scripts/localnet.sh` | Clone/init/start `tari_swarm_daemon` outside this repo |
 | `crates/contract-tests` | Engine-level tests, run against the in-process Ootle engine |
 
 ## Running the tests
@@ -74,6 +76,22 @@ MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 - `ghostline_sign_voucher`
 - `ghostline_verify_voucher`
 - `ghostline_call_paid`
+
+Localnet (needs tens of GB free; refused below `GHOSTLINE_MIN_FREE_GB`, default 40):
+
+```bash
+scripts/localnet.sh clone
+# checkout a matching L1 tag, then:
+scripts/localnet.sh init
+scripts/localnet.sh start
+```
+
+Swarm UI: `http://localhost:8080`. Then:
+
+```bash
+cargo run -p ghostline-cli -- indexer wait --url http://127.0.0.1:<indexer-port>/
+cargo run -p ghostline-cli -- indexer epoch --url http://127.0.0.1:<indexer-port>/
+```
 
 ## License
 

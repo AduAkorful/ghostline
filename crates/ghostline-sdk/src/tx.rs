@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_transaction::{Epoch, Transaction};
+use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope};
 use tari_template_lib::types::{ResourceAddress, stealth::StealthTransferStatement};
+
+use crate::SdkError;
 
 /// Wraps a stealth transfer statement in a localnet transaction and seals it.
 ///
@@ -17,6 +19,13 @@ pub fn seal_localnet_stealth_transfer(
         .stealth_transfer(resource, statement)
         .finish()
         .seal(sealer)
+}
+
+/// BOR-encode a sealed transaction as the indexer `SubmitTransactionRequest.transaction` envelope.
+pub fn encode_transaction_envelope(
+    transaction: Transaction,
+) -> Result<TransactionEnvelope, SdkError> {
+    TransactionEnvelope::encode(transaction).map_err(|_| SdkError::Encode)
 }
 
 #[cfg(test)]
@@ -57,5 +66,7 @@ mod tests {
             &service_secret,
         );
         assert_eq!(tx.calculate_id(), tx.calculate_id());
+        let envelope = encode_transaction_envelope(tx).unwrap();
+        assert!(!envelope.0.is_empty());
     }
 }

@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
+use ghostline_net::{IndexerClient, TransactionEnvelope};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 use tari_utilities::ByteArray;
@@ -9,7 +10,7 @@ use tari_utilities::ByteArray;
 #[derive(Parser)]
 #[command(
     name = "ghostline",
-    about = "Sign and verify Ghostline channel vouchers"
+    about = "Sign and verify Ghostline channel vouchers, and submit sealed transactions to a local indexer"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -38,6 +39,39 @@ enum Command {
         /// Hex-encoded CBOR voucher from `ghostline sign`.
         #[arg(long)]
         voucher_hex: String,
+    },
+    /// Talk to a local Ootle indexer REST API (do not point this at public networks for attack tests).
+    Indexer {
+        #[command(subcommand)]
+        command: IndexerCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum IndexerCommand {
+    /// GET /wait-until-ready
+    Wait {
+        #[arg(long)]
+        url: String,
+    },
+    /// GET /epoch-manager/stats — prints current_epoch
+    Epoch {
+        #[arg(long)]
+        url: String,
+    },
+    /// POST /transactions — hex is BOR-encoded sealed Transaction bytes
+    Submit {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        tx_hex: String,
+    },
+    /// POST /transactions/dry-run
+    DryRun {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        tx_hex: String,
     },
 }
 
@@ -89,14 +123,15 @@ fn parse_secret(hex: &str) -> Result<RistrettoSecretKey, String> {
     RistrettoSecretKey::from_canonical_bytes(&bytes).map_err(|e| format!("secret: {e}"))
 }
 
-fn main() {
-    if let Err(err) = run(Cli::parse()) {
+#[tokio::main]
+async fn main() {
+    if let Err(err) = run(Cli::parse()).await {
         eprintln!("{err}");
         std::process::exit(1);
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
+async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::ChannelId(args) => {
             println!("{}", to_hex(&params(&args)?.channel_id()));
@@ -127,8 +162,49 @@ fn run(cli: Cli) -> Result<(), String> {
                 to_hex(&voucher.channel_id)
             );
         }
+        Command::Indexer { command } => match command {
+            IndexerCommand::Wait { url } => {
+                IndexerClient::connect(&url)
+                    .map_err(|e| e.to_string())?
+                    .wait_until_ready()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("ready");
+            }
+            IndexerCommand::Epoch { url } => {
+                let stats = IndexerClient::connect(&url)
+                    .map_err(|e| e.to_string())?
+                    .epoch_stats()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("{}", stats.current_epoch.as_u64());
+            }
+            IndexerCommand::Submit { url, tx_hex } => {
+                let id = IndexerClient::connect(&url)
+                    .map_err(|e| e.to_string())?
+                    .submit(decode_tx(&tx_hex)?)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("{id}");
+            }
+            IndexerCommand::DryRun { url, tx_hex } => {
+                let id = IndexerClient::connect(&url)
+                    .map_err(|e| e.to_string())?
+                    .dry_run(decode_tx(&tx_hex)?)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("{id}");
+            }
+        },
     }
     Ok(())
+}
+
+fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
+    let bytes = from_hex(tx_hex).map_err(|_| "tx: expected even-length hex".to_string())?;
+    TransactionEnvelope::from_raw(bytes.into_boxed_slice())
+        .decode()
+        .map_err(|e| format!("tx envelope: {e}"))
 }
 
 #[cfg(test)]

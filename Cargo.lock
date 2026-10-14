@@ -1401,10 +1401,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "ghostline-core",
+ "ghostline-net",
  "rand",
  "tari_crypto",
  "tari_template_lib",
  "tari_utilities",
+ "tokio",
 ]
 
 [[package]]
@@ -1456,6 +1458,26 @@ dependencies = [
  "tari_template_lib",
  "tari_utilities",
  "tokio",
+]
+
+[[package]]
+name = "ghostline-net"
+version = "0.1.0"
+dependencies = [
+ "ghostline-core",
+ "ghostline-sdk",
+ "ootle_byte_type",
+ "rand",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tari_crypto",
+ "tari_ootle_common_types",
+ "tari_ootle_transaction",
+ "tari_template_lib",
+ "thiserror",
+ "tokio",
+ "url",
 ]
 
 [[package]]
