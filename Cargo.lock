@@ -1427,6 +1427,8 @@ dependencies = [
  "clap",
  "ghostline-core",
  "ghostline-net",
+ "ghostline-paywall",
+ "ghostline-policy",
  "ghostline-sdk",
  "ootle_byte_type",
  "rand",
@@ -1476,6 +1478,7 @@ version = "0.1.0"
 dependencies = [
  "ghostline-core",
  "ghostline-paywall",
+ "ghostline-policy",
  "ootle_byte_type",
  "reqwest",
  "rmcp",

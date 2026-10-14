@@ -75,7 +75,7 @@ cargo run -p ghostline-cli -- spec --network-tag 1 --deposit 100 \
 MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 
 - `ghostline_channel_id`
-- `ghostline_sign_voucher`
+- `ghostline_sign_voucher` (secret from `GHOSTLINE_PAYER_SECRET`; session from `GHOSTLINE_SESSION`)
 - `ghostline_verify_voucher`
 - `ghostline_call_paid`
 

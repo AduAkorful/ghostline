@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 use ghostline_core::{ChannelParams, SignedVoucher, VoucherError, from_hex, to_hex};
-use ghostline_paywall::{PaymentRequired, VOUCHER_HEADER, encode_voucher_header};
+use ghostline_paywall::{
+    ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
+};
+use ghostline_policy::{Policy, PolicyEngine, env_flag};
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -20,8 +23,11 @@ pub struct ChannelArgs {
 pub struct SignArgs {
     #[serde(flatten)]
     pub channel: ChannelArgs,
-    pub amount: u64,
-    pub secret_hex: String,
+    /// Per-call increment, not the cumulative total.
+    pub price: u64,
+    /// Required when `GHOSTLINE_POLICY_REQUIRE_HUMAN` is set.
+    #[serde(default)]
+    pub attested: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -57,13 +63,52 @@ pub fn channel_id_hex(args: &ChannelArgs) -> Result<String, String> {
     Ok(to_hex(&parse_params(args)?.channel_id()))
 }
 
+pub fn payer_secret_from_env() -> Result<RistrettoSecretKey, String> {
+    let hex = std::env::var("GHOSTLINE_PAYER_SECRET")
+        .map_err(|_| "set GHOSTLINE_PAYER_SECRET; the tool does not accept a secret argument")?;
+    let bytes = from_hex(hex.trim()).map_err(|e| e.to_string())?;
+    RistrettoSecretKey::from_canonical_bytes(&bytes).map_err(|e| e.to_string())
+}
+
+fn vendor_from_env() -> Result<RistrettoPublicKeyBytes, String> {
+    let hex = std::env::var("GHOSTLINE_POLICY_VENDOR_HEX")
+        .map_err(|_| "set GHOSTLINE_POLICY_VENDOR_HEX")?;
+    RistrettoPublicKeyBytes::from_hex(hex.trim()).map_err(|e| e.to_string())
+}
+
+fn session_store(params: ChannelParams) -> Result<ChannelStore, String> {
+    let path = std::env::var("GHOSTLINE_SESSION").map_err(|_| "set GHOSTLINE_SESSION")?;
+    ChannelStore::open_or_create(path, params).map_err(|e| e.to_string())
+}
+
 pub fn sign_voucher_hex(args: &SignArgs) -> Result<String, String> {
     let params = parse_params(&args.channel)?;
-    let secret_bytes = from_hex(&args.secret_hex).map_err(|e| e.to_string())?;
-    let secret =
-        RistrettoSecretKey::from_canonical_bytes(&secret_bytes).map_err(|e| e.to_string())?;
-    let voucher = SignedVoucher::sign(&secret, &params, args.amount)
-        .map_err(|e: VoucherError| e.to_string())?;
+    let secret = payer_secret_from_env()?;
+    let mut store = session_store(params)?;
+    if env_flag("GHOSTLINE_POLICY_UNSAFE") {
+        let mut session = store.session().map_err(|e| e.to_string())?;
+        let voucher = session
+            .sign_next(&secret, args.price)
+            .map_err(|e: VoucherError| e.to_string())?;
+        store.save_session(&session).map_err(|e| e.to_string())?;
+        return Ok(encode_voucher_header(&voucher));
+    }
+    let policy = Policy::from_env()?
+        .ok_or("set GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL")?;
+    let vendor = vendor_from_env()?;
+    let mut engine = PolicyEngine::new(policy);
+    if env_flag("GHOSTLINE_POLICY_REQUIRE_HUMAN") {
+        engine = engine.require_human();
+    }
+    let (voucher, _) = gated_sign(
+        &mut store,
+        engine,
+        vendor,
+        args.price,
+        &secret,
+        args.attested,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(encode_voucher_header(&voucher))
 }
 
@@ -109,7 +154,6 @@ mod tests {
     use ootle_byte_type::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::Hash32;
-    use tari_utilities::ByteArray;
 
     #[test]
     fn sign_and_verify_round_trip() {
@@ -121,12 +165,22 @@ mod tests {
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
-        let voucher_hex = sign_voucher_hex(&SignArgs {
-            channel: args.clone(),
-            amount: 30,
-            secret_hex: to_hex(secret.as_bytes()),
-        })
+        let dir = std::env::temp_dir().join(format!("ghostline-mcp-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("session.json");
+        let _ = std::fs::remove_file(&path);
+        let mut store = ChannelStore::create(&path, parse_params(&args).unwrap()).unwrap();
+        let engine = PolicyEngine::new(Policy::new(100, 50).allow_vendor(public.to_byte_type()));
+        let (voucher, _) = gated_sign(
+            &mut store,
+            engine,
+            public.to_byte_type(),
+            30,
+            &secret,
+            false,
+        )
         .unwrap();
+        let voucher_hex = encode_voucher_header(&voucher);
         verify_voucher(&VerifyArgs {
             channel: args,
             voucher_hex,

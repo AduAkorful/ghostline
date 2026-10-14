@@ -82,6 +82,32 @@ impl Policy {
         self.max_per_call
     }
 
+    /// `GHOSTLINE_POLICY_BUDGET` and `GHOSTLINE_POLICY_MAX_PER_CALL`. Optional
+    /// `GHOSTLINE_POLICY_VENDOR_HEX` becomes a one-vendor allowlist.
+    pub fn from_env() -> Result<Option<Self>, String> {
+        let budget = env_u64("GHOSTLINE_POLICY_BUDGET")?;
+        let max_per_call = env_u64("GHOSTLINE_POLICY_MAX_PER_CALL")?;
+        match (budget, max_per_call) {
+            (None, None) => Ok(None),
+            (Some(budget), Some(max_per_call)) => {
+                let mut policy = Policy::new(budget, max_per_call);
+                if let Ok(hex) = std::env::var("GHOSTLINE_POLICY_VENDOR_HEX") {
+                    let hex = hex.trim();
+                    if !hex.is_empty() {
+                        let vendor = RistrettoPublicKeyBytes::from_hex(hex)
+                            .map_err(|e| format!("GHOSTLINE_POLICY_VENDOR_HEX: {e}"))?;
+                        policy = policy.allow_vendor(vendor);
+                    }
+                }
+                Ok(Some(policy))
+            }
+            _ => Err(
+                "set both GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL, or neither"
+                    .to_string(),
+            ),
+        }
+    }
+
     /// Approves paying `price` to `vendor` when the session already owes `already_owed`.
     pub fn approve(
         &self,
@@ -114,6 +140,25 @@ impl Policy {
         }
         Ok(())
     }
+}
+
+fn env_u64(name: &str) -> Result<Option<u64>, String> {
+    match std::env::var(name) {
+        Err(_) => Ok(None),
+        Ok(s) if s.trim().is_empty() => Ok(None),
+        Ok(s) => s
+            .trim()
+            .parse()
+            .map(Some)
+            .map_err(|_| format!("{name} must be an integer")),
+    }
+}
+
+pub fn env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|s| {
+        let s = s.trim();
+        s == "1" || s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("yes")
+    })
 }
 
 #[cfg(test)]

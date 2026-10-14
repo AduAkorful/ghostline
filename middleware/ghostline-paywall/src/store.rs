@@ -71,6 +71,27 @@ impl ChannelStore {
         Ok(store)
     }
 
+    pub fn open_or_create(
+        path: impl Into<PathBuf>,
+        params: ChannelParams,
+    ) -> Result<Self, PaywallError> {
+        let path = path.into();
+        if path.exists() {
+            let existing = Self::open(&path)?;
+            if existing.params()? != params {
+                return Err(PaywallError::Voucher(VoucherError::ChannelMismatch));
+            }
+            Ok(existing)
+        } else {
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent).map_err(|e| PaywallError::Storage(e.to_string()))?;
+            }
+            Self::create(path, params)
+        }
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, PaywallError> {
         let path = path.as_ref().to_path_buf();
         let bytes = fs::read(&path).map_err(|e| PaywallError::Storage(e.to_string()))?;

@@ -44,7 +44,7 @@ impl GhostlineMcp {
     }
 
     #[tool(
-        description = "Sign a cumulative Ghostline voucher. Pass the payer secret as hex; do not log it."
+        description = "Sign the next Ghostline voucher for `price`. Uses GHOSTLINE_PAYER_SECRET, GHOSTLINE_SESSION, and policy env vars. Does not take a secret argument."
     )]
     fn ghostline_sign_voucher(
         &self,
@@ -78,7 +78,7 @@ impl GhostlineMcp {
 #[tool_handler(
     name = "ghostline",
     version = "0.1.0",
-    instructions = "Ghostline payment-channel tools. Signatures use the payer secret you pass; never echo it."
+    instructions = "Ghostline payment-channel tools. Payer secret comes from GHOSTLINE_PAYER_SECRET, never from a tool argument."
 )]
 impl ServerHandler for GhostlineMcp {}
 

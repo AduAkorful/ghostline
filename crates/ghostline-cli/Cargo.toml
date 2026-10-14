@@ -14,6 +14,8 @@ path = "src/main.rs"
 clap = { version = "4.5", features = ["derive"] }
 ghostline-core = { path = "../ghostline-core" }
 ghostline-net = { path = "../ghostline-net" }
+ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
+ghostline-policy = { path = "../ghostline-policy" }
 ghostline-sdk = { path = "../ghostline-sdk" }
 tari_crypto = "0.24.0"
 tari_template_lib = "0.34.0"

@@ -78,3 +78,9 @@ impl From<VoucherError> for AgentError {
         Self::Voucher(value)
     }
 }
+
+impl From<PaywallError> for AgentError {
+    fn from(value: PaywallError) -> Self {
+        Self::Paywall(value)
+    }
+}

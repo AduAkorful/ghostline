@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 mod seal;
+mod secrets;
+
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
@@ -21,16 +24,33 @@ struct Cli {
 enum Command {
     /// Print the 32-byte channel id for the given open parameters.
     ChannelId(ParamsArgs),
-    /// Sign a cumulative voucher. Prints hex-encoded CBOR of (channel_id, amount, signature).
+    /// Sign the next voucher. Requires a session file and policy unless `--unsafe-no-policy`.
     Sign {
         #[command(flatten)]
         params: ParamsArgs,
-        /// Cumulative amount owed, in integer micro-units.
+        /// Per-call increment (policy path). Mutually exclusive with `--amount`.
         #[arg(long)]
-        amount: u64,
-        /// Hex-encoded 32-byte payer secret. Prefer piping; never log this value.
+        price: Option<u64>,
+        /// Absolute cumulative amount. Only with `--unsafe-no-policy`.
         #[arg(long)]
-        secret_hex: String,
+        amount: Option<u64>,
+        #[arg(long)]
+        session: Option<PathBuf>,
+        #[arg(long)]
+        vendor_hex: Option<String>,
+        #[arg(long)]
+        budget: Option<u64>,
+        #[arg(long)]
+        max_per_call: Option<u64>,
+        /// Satisfy a configured human gate for this sign only.
+        #[arg(long)]
+        attest: bool,
+        /// Sign an absolute `--amount` without policy or session persistence.
+        #[arg(long)]
+        unsafe_no_policy: bool,
+        /// Hex payer secret. Prefer `GHOSTLINE_PAYER_SECRET` or `-` on stdin.
+        #[arg(long)]
+        secret_hex: Option<String>,
     },
     /// Verify a hex-encoded voucher against the given channel parameters.
     Verify {
@@ -54,9 +74,9 @@ enum Command {
         #[arg(long)]
         input_value: u64,
         #[arg(long)]
-        input_mask_hex: String,
+        input_mask_hex: Option<String>,
         #[arg(long)]
-        seal_secret_hex: String,
+        seal_secret_hex: Option<String>,
         #[arg(long, default_value_t = 1)]
         max_epoch: u64,
         #[arg(long)]
@@ -69,9 +89,9 @@ enum Command {
         #[arg(long)]
         voucher_hex: String,
         #[arg(long)]
-        deposit_mask_hex: String,
+        deposit_mask_hex: Option<String>,
         #[arg(long)]
-        seal_secret_hex: String,
+        seal_secret_hex: Option<String>,
         #[arg(long, default_value_t = 1)]
         max_epoch: u64,
         #[arg(long)]
@@ -82,9 +102,9 @@ enum Command {
         #[command(flatten)]
         open: OpenArgs,
         #[arg(long)]
-        deposit_mask_hex: String,
+        deposit_mask_hex: Option<String>,
         #[arg(long)]
-        seal_secret_hex: String,
+        seal_secret_hex: Option<String>,
         #[arg(long, default_value_t = 1)]
         max_epoch: u64,
         #[arg(long)]
@@ -200,14 +220,66 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Sign {
             params: args,
+            price,
             amount,
+            session,
+            vendor_hex,
+            budget,
+            max_per_call,
+            attest,
+            unsafe_no_policy,
             secret_hex,
         } => {
             let params = params(&args)?;
-            let secret = seal::parse_secret("secret", &secret_hex)?;
-            let voucher =
-                SignedVoucher::sign(&secret, &params, amount).map_err(|e| e.to_string())?;
-            println!("{}", to_hex(&voucher.to_bytes()));
+            let secret = secrets::load_secret(
+                secret_hex.as_deref(),
+                secrets::PAYER_SECRET_ENV,
+                "payer secret",
+            )?;
+            let unsafe_ok = unsafe_no_policy || ghostline_policy::env_flag(secrets::UNSAFE_ENV);
+            if unsafe_ok {
+                let amount = amount.ok_or("unsafe sign requires --amount")?;
+                let voucher =
+                    SignedVoucher::sign(&secret, &params, amount).map_err(|e| e.to_string())?;
+                println!("{}", to_hex(&voucher.to_bytes()));
+            } else {
+                if amount.is_some() {
+                    return Err(
+                        "use --price with a session; --amount is only for --unsafe-no-policy"
+                            .into(),
+                    );
+                }
+                let price =
+                    price.ok_or("sign requires --price (or --unsafe-no-policy --amount)")?;
+                let path = session
+                    .or_else(|| std::env::var_os(secrets::SESSION_ENV).map(PathBuf::from))
+                    .ok_or("set --session or GHOSTLINE_SESSION")?;
+                let vendor_hex = vendor_hex
+                    .or_else(|| std::env::var(secrets::VENDOR_ENV).ok())
+                    .ok_or("set --vendor-hex or GHOSTLINE_POLICY_VENDOR_HEX")?;
+                let vendor = seal::parse_pk("vendor", vendor_hex.trim())?;
+                let policy = match (budget, max_per_call) {
+                    (Some(b), Some(m)) => ghostline_policy::Policy::new(b, m).allow_vendor(vendor),
+                    (None, None) => ghostline_policy::Policy::from_env()?.ok_or(
+                        "set --budget and --max-per-call, or GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL",
+                    )?,
+                    _ => {
+                        return Err("set both --budget and --max-per-call".into());
+                    }
+                };
+                let mut engine = ghostline_policy::PolicyEngine::new(policy);
+                if ghostline_policy::env_flag("GHOSTLINE_POLICY_REQUIRE_HUMAN") {
+                    engine = engine.require_human();
+                }
+                let mut store =
+                    ghostline_paywall::ChannelStore::open_or_create(path, params.clone())
+                        .map_err(|e| e.to_string())?;
+                let (voucher, _) = ghostline_paywall::gated_sign(
+                    &mut store, engine, vendor, price, &secret, attest,
+                )
+                .map_err(|e| e.to_string())?;
+                println!("{}", to_hex(&voucher.to_bytes()));
+            }
         }
         Command::Verify {
             params: args,
@@ -270,11 +342,20 @@ async fn run(cli: Cli) -> Result<(), String> {
             resource_hex,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
-            let sealer = seal::parse_secret("seal secret", &seal_secret_hex)?;
+            let sealer = secrets::load_secret(
+                seal_secret_hex.as_deref(),
+                secrets::SEAL_SECRET_ENV,
+                "seal secret",
+            )?;
+            let input_mask = secrets::load_hex(
+                input_mask_hex.as_deref(),
+                secrets::INPUT_MASK_ENV,
+                "input mask",
+            )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
             let (tx, mask) = seal::seal_open(
                 &channel,
-                funded(input_value, &input_mask_hex)?,
+                funded(input_value, &input_mask)?,
                 channel.spec().payer,
                 resource,
                 max_epoch,
@@ -295,11 +376,20 @@ async fn run(cli: Cli) -> Result<(), String> {
             let bytes = from_hex(&voucher_hex)
                 .map_err(|_| "voucher: expected even-length hex".to_string())?;
             let voucher = SignedVoucher::from_bytes(&bytes).map_err(|e| e.to_string())?;
-            let sealer = seal::parse_secret("seal secret", &seal_secret_hex)?;
+            let sealer = secrets::load_secret(
+                seal_secret_hex.as_deref(),
+                secrets::SEAL_SECRET_ENV,
+                "seal secret",
+            )?;
+            let deposit_mask = secrets::load_hex(
+                deposit_mask_hex.as_deref(),
+                secrets::DEPOSIT_MASK_ENV,
+                "deposit mask",
+            )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
             let tx = seal::seal_settle(
                 &channel,
-                funded(channel.params().deposit, &deposit_mask_hex)?,
+                funded(channel.params().deposit, &deposit_mask)?,
                 &voucher,
                 channel.spec().service,
                 resource,
@@ -316,11 +406,20 @@ async fn run(cli: Cli) -> Result<(), String> {
             resource_hex,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
-            let sealer = seal::parse_secret("seal secret", &seal_secret_hex)?;
+            let sealer = secrets::load_secret(
+                seal_secret_hex.as_deref(),
+                secrets::SEAL_SECRET_ENV,
+                "seal secret",
+            )?;
+            let deposit_mask = secrets::load_hex(
+                deposit_mask_hex.as_deref(),
+                secrets::DEPOSIT_MASK_ENV,
+                "deposit mask",
+            )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
             let tx = seal::seal_refund(
                 &channel,
-                funded(channel.params().deposit, &deposit_mask_hex)?,
+                funded(channel.params().deposit, &deposit_mask)?,
                 channel.spec().payer,
                 resource,
                 max_epoch,

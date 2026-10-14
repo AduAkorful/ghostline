@@ -10,7 +10,7 @@ mod gate;
 mod protocol;
 mod store;
 
-pub use agent::AgentPayer;
+pub use agent::{AgentPayer, gated_sign};
 pub use error::{AgentError, PaywallError};
 pub use gate::{channel_id_hex, charge, ledger_channel_id};
 pub use ghostline_core::{PaymentSession, ServiceLedger, SignedVoucher};
