@@ -64,6 +64,23 @@ cargo test -p ghostline-paywall -p ghostline-paid-api
 cd packages/ghostline && npm test
 ```
 
+Offline 402 loop (two JSON files: service `ledger`, payer `session`):
+
+```bash
+cargo run -p ghostline-paid-api -- init \
+  --ledger /tmp/ghostline/ledger.json --session /tmp/ghostline/session.json \
+  --network-tag 1 --deposit 100 \
+  --payer-hex <32-byte-hex> --payer-root-hex <32-byte-hex> --nonce-hex <32-byte-hex>
+
+cargo run -p ghostline-paid-api -- serve --ledger /tmp/ghostline/ledger.json --price 10
+
+GHOSTLINE_PAYER_SECRET=<32-byte-hex> cargo run -p ghostline-paid-api -- call \
+  --url http://127.0.0.1:8787/fortune --session /tmp/ghostline/session.json \
+  --vendor-hex <service-or-allowlist-pubkey-hex> --budget 100 --max-per-call 10 --calls 10
+```
+
+Ten paid calls still settle as one cumulative amount. Do not share one store file between `serve` and `call`.
+
 Offline voucher commands (no network):
 
 ```bash

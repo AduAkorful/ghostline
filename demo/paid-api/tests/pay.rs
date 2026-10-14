@@ -4,8 +4,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use ghostline_core::{ChannelParams, NONCE_LEN, PaymentSession, ServiceLedger};
 use ghostline_paid_api::{AppState, router};
-use ghostline_paywall::{AgentPayer, PaymentRequired, VOUCHER_HEADER};
-use ghostline_policy::Policy;
+use ghostline_paywall::{
+    AgentPayer, ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
+};
+use ghostline_policy::{Policy, PolicyEngine};
 use http_body_util::BodyExt;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
@@ -85,6 +87,114 @@ async fn agent_pays_and_receives_the_fortune() {
     assert_eq!(paid.status(), StatusCode::OK);
     let body = json_body(paid).await;
     assert_eq!(body["fortune"], "pay once, call many");
+}
+
+#[tokio::test]
+async fn ten_paid_calls_leave_one_settle_total() {
+    let (state, mut agent, secret) = fixtures();
+    let app = router(state);
+    let mut last_amount = 0u64;
+    for _ in 0..10 {
+        let quote: PaymentRequired = serde_json::from_value(
+            json_body(
+                app.clone()
+                    .oneshot(
+                        Request::builder()
+                            .uri("/fortune")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap(),
+            )
+            .await,
+        )
+        .unwrap();
+        let header = agent.voucher_header(&quote, &secret).unwrap();
+        let paid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/fortune")
+                    .header(VOUCHER_HEADER, header)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paid.status(), StatusCode::OK);
+        last_amount += 10;
+    }
+    assert_eq!(agent.session().cumulative(), last_amount);
+    assert_eq!(last_amount, 100);
+}
+
+#[tokio::test]
+async fn ledger_file_keeps_accepted_after_reopen() {
+    let (secret, public) = create_key_pair_from_seed(11);
+    let payer = public.to_byte_type();
+    let params = ChannelParams {
+        network_tag: 1,
+        payer,
+        deposit: 100,
+        payer_root: Hash32::from_array([9u8; 32]),
+        nonce: [3u8; NONCE_LEN],
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "ghostline-paid-persist-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ledger_path = dir.join("ledger.json");
+    let session_path = dir.join("session.json");
+    ChannelStore::create(&ledger_path, params.clone()).unwrap();
+    ChannelStore::create(&session_path, params.clone()).unwrap();
+
+    let state = AppState::with_store(ChannelStore::open(&ledger_path).unwrap(), 10).unwrap();
+    let app = router(state);
+    let mut payer_store = ChannelStore::open(&session_path).unwrap();
+    let mut engine = PolicyEngine::new(Policy::new(100, 10).allow_vendor(payer));
+    for _ in 0..3 {
+        let quote: PaymentRequired = serde_json::from_value(
+            json_body(
+                app.clone()
+                    .oneshot(
+                        Request::builder()
+                            .uri("/fortune")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap(),
+            )
+            .await,
+        )
+        .unwrap();
+        let (voucher, next) =
+            gated_sign(&mut payer_store, engine, payer, quote.price, &secret, false).unwrap();
+        engine = next;
+        let paid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/fortune")
+                    .header(VOUCHER_HEADER, encode_voucher_header(&voucher))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paid.status(), StatusCode::OK);
+    }
+    drop(app);
+    let ledger = ChannelStore::open(&ledger_path).unwrap();
+    let session = ChannelStore::open(&session_path).unwrap();
+    assert_eq!(ledger.ledger().unwrap().accepted(), 30);
+    assert_eq!(session.session().unwrap().cumulative(), 30);
 }
 
 #[tokio::test]

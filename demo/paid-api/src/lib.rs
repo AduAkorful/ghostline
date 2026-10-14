@@ -8,7 +8,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use ghostline_core::ServiceLedger;
-use ghostline_paywall::{PaymentRejection, PaymentRequired, VOUCHER_HEADER, charge};
+use ghostline_paywall::{
+    ChannelStore, PaymentRejection, PaymentRequired, VOUCHER_HEADER, charge,
+};
 use serde::Serialize;
 use tokio::sync::Mutex;
 
@@ -17,6 +19,7 @@ const PRICE: u64 = 10;
 #[derive(Clone)]
 pub struct AppState {
     ledger: Arc<Mutex<ServiceLedger>>,
+    store: Option<Arc<Mutex<ChannelStore>>>,
     price: u64,
 }
 
@@ -24,8 +27,18 @@ impl AppState {
     pub fn new(ledger: ServiceLedger) -> Self {
         Self {
             ledger: Arc::new(Mutex::new(ledger)),
+            store: None,
             price: PRICE,
         }
+    }
+
+    pub fn with_store(store: ChannelStore, price: u64) -> Result<Self, ghostline_paywall::PaywallError> {
+        let ledger = store.ledger()?;
+        Ok(Self {
+            ledger: Arc::new(Mutex::new(ledger)),
+            store: Some(Arc::new(Mutex::new(store))),
+            price,
+        })
     }
 
     pub fn price(&self) -> u64 {
@@ -50,13 +63,25 @@ async fn fortune(State(state): State<AppState>, headers: HeaderMap) -> Response 
         .and_then(|value| value.to_str().ok());
     let mut ledger = state.ledger.lock().await;
     match charge(&mut ledger, state.price, voucher) {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(Fortune {
-                fortune: "pay once, call many",
-            }),
-        )
-            .into_response(),
+        Ok(_) => {
+            if let Some(store) = &state.store {
+                let mut store = store.lock().await;
+                if let Err(err) = store.save_ledger(&ledger) {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(PaymentRejection::from_error(&err)),
+                    )
+                        .into_response();
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(Fortune {
+                    fortune: "pay once, call many",
+                }),
+            )
+                .into_response()
+        }
         Err(ghostline_paywall::PaywallError::MissingVoucher) => {
             let body = PaymentRequired::new(state.price, &ledger.params().channel_id());
             (StatusCode::PAYMENT_REQUIRED, Json(body)).into_response()

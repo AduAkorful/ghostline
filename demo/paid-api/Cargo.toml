@@ -13,9 +13,15 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.8.9"
+clap = { version = "4.5", features = ["derive"] }
 ghostline-core = { path = "../../crates/ghostline-core" }
 ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
+ghostline-policy = { path = "../../crates/ghostline-policy" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
+tari_crypto = "0.24.0"
+tari_template_lib = "0.34.0"
+tari_utilities = "0.10"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]

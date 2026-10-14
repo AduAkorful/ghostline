@@ -1517,16 +1517,19 @@ name = "ghostline-paid-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "clap",
  "ghostline-core",
  "ghostline-paywall",
  "ghostline-policy",
  "http-body-util",
  "ootle_byte_type",
+ "reqwest",
  "serde",
  "serde_json",
  "tari_crypto",
  "tari_ootle_common_types",
  "tari_template_lib",
+ "tari_utilities",
  "tokio",
  "tower",
 ]

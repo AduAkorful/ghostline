@@ -181,4 +181,28 @@ mod tests {
         assert_eq!(service.accept(&first).unwrap(), 0);
         assert_eq!(service.accepted(), 10);
     }
+
+    #[test]
+    fn thousand_calls_are_one_cumulative_total() {
+        let (secret, public) = create_key_pair_from_seed(11);
+        let params = ChannelParams {
+            network_tag: 1,
+            payer: public.to_byte_type(),
+            deposit: 10_000,
+            payer_root: Hash32::from_array([9u8; 32]),
+            nonce: [3u8; NONCE_LEN],
+        };
+        let mut payer = PaymentSession::new(params.clone());
+        let mut service = ServiceLedger::new(params);
+        let mut last = None;
+        for _ in 0..1000 {
+            let voucher = payer.sign_next(&secret, 10).unwrap();
+            assert_eq!(service.accept(&voucher).unwrap(), 10);
+            last = Some(voucher);
+        }
+        assert_eq!(service.accepted(), 10_000);
+        assert_eq!(service.remaining(), 0);
+        assert_eq!(payer.cumulative(), 10_000);
+        assert_eq!(last.unwrap().amount, 10_000);
+    }
 }

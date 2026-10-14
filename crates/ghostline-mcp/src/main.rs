@@ -64,7 +64,7 @@ impl GhostlineMcp {
     }
 
     #[tool(
-        description = "GET a paid HTTP resource. On 402, returns the Ghostline payment-required quote."
+        description = "GET a paid HTTP resource. On 402, if GHOSTLINE_SESSION is set, signs a voucher from the session and retries once."
     )]
     async fn ghostline_call_paid(
         &self,
