@@ -160,6 +160,16 @@ enum Command {
         resource_hex: Option<String>,
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
+        /// Account component that pays revealed XTR fees (`pay_fee`). On refund this is the payer's fee account.
+        #[arg(long)]
+        fee_account: Option<String>,
+        #[arg(long, default_value_t = 100_000)]
+        max_fee: u64,
+        #[arg(long)]
+        fee_secret_hex: Option<String>,
+        /// Print unsigned JSON for `wallet submit` / `indexer resolve-inputs` instead of a sealed hex.
+        #[arg(long)]
+        unsigned_json: bool,
     },
     /// Recover value and mask from a stealth output encrypted to the claim secret.
     Unblind {
@@ -197,7 +207,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum WalletCommand {
-    /// Dry-run or submit an unsigned transaction (`seal-settle --unsigned-json`).
+    /// Dry-run or submit an unsigned transaction (`seal-settle` / `seal-refund --unsigned-json`).
     Submit {
         #[arg(long, default_value = "http://127.0.0.1:5100")]
         url: String,
@@ -911,13 +921,12 @@ async fn run(cli: Cli) -> Result<(), String> {
             max_epoch,
             resource_hex,
             ootle_network,
+            fee_account,
+            max_fee,
+            fee_secret_hex,
+            unsigned_json,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
-            let sealer = secrets::load_secret(
-                seal_secret_hex.as_deref(),
-                secrets::SEAL_SECRET_ENV,
-                "seal secret",
-            )?;
             let deposit_mask = secrets::load_hex(
                 deposit_mask_hex.as_deref(),
                 secrets::DEPOSIT_MASK_ENV,
@@ -925,16 +934,64 @@ async fn run(cli: Cli) -> Result<(), String> {
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
             let scan = seal::parse_scan(&ootle_network, resource)?;
-            let tx = seal::seal_refund(
-                &channel,
-                funded(channel.params().deposit, &deposit_mask)?,
-                channel.spec().payer,
-                resource,
-                max_epoch,
-                &sealer,
-                scan,
-            )?;
-            println!("{tx}");
+            let deposit = funded(channel.params().deposit, &deposit_mask)?;
+            if unsigned_json {
+                let fee = match &fee_account {
+                    Some(addr) => Some((seal::parse_component("fee-account", addr)?, max_fee)),
+                    None => None,
+                };
+                let unsigned = seal::unsigned_refund(
+                    &channel,
+                    deposit,
+                    channel.spec().payer,
+                    resource,
+                    max_epoch,
+                    scan,
+                    fee,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&unsigned).map_err(|e| e.to_string())?
+                );
+            } else {
+                let sealer = secrets::load_secret(
+                    seal_secret_hex.as_deref(),
+                    secrets::SEAL_SECRET_ENV,
+                    "seal secret",
+                )?;
+                let fee_secret = if fee_account.is_some() {
+                    Some(secrets::load_secret(
+                        fee_secret_hex.as_deref(),
+                        secrets::FEE_SECRET_ENV,
+                        "fee secret",
+                    )?)
+                } else {
+                    None
+                };
+                let fee = match (&fee_account, &fee_secret) {
+                    (Some(addr), Some(secret)) => Some(ghostline_sdk::AccountFee {
+                        account: seal::parse_component("fee-account", addr)?,
+                        max_fee,
+                        signer: secret,
+                    }),
+                    (None, None) => None,
+                    _ => return Err(
+                        "fee-account and fee secret must be set together (GHOSTLINE_FEE_SECRET)"
+                            .into(),
+                    ),
+                };
+                let tx = seal::seal_refund(
+                    &channel,
+                    deposit,
+                    channel.spec().payer,
+                    resource,
+                    max_epoch,
+                    &sealer,
+                    scan,
+                    fee,
+                )?;
+                println!("{tx}");
+            }
         }
         Command::Unblind {
             commitment_hex,
@@ -1384,6 +1441,44 @@ mod seal_tests {
         assert_eq!(off["V1"]["dry_run"], false);
         let on = serde_json::to_value(&unsigned.with_dry_run(true)).unwrap();
         assert_eq!(on["V1"]["dry_run"], true);
+    }
+
+    #[test]
+    fn unsigned_refund_serializes_like_settle() {
+        let (_, payer_public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
+        let channel = seal::channel(seal::OpenSpec {
+            network_tag: 1,
+            deposit: 100,
+            payer: payer_public.to_byte_type(),
+            service: service_public.to_byte_type(),
+            expiry_epoch: 0,
+            nonce: [42u8; NONCE_LEN],
+            channel_template: Hash32::from_array([7u8; 32]),
+        })
+        .unwrap();
+        let unsigned = seal::unsigned_refund(
+            &channel,
+            MaskAndValue {
+                value: 100,
+                mask: RistrettoSecretKey::random(&mut rand::rng()),
+            },
+            channel.spec().payer,
+            STEALTH_TARI_RESOURCE_ADDRESS,
+            1,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+            None,
+        )
+        .unwrap();
+        let json = serde_json::to_value(&unsigned).unwrap();
+        assert_eq!(json["V1"]["dry_run"], false);
+        assert!(
+            json["V1"]["inputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| { i.get("version").is_some() && i["version"].is_null() })
+        );
     }
 
     #[test]

@@ -148,6 +148,21 @@ cargo run -p ghostline-cli -- wallet submit \
   --dry-run
 ```
 
+Refund after expiry uses the same unsigned + `wallet submit` path. The sealer is the Ghostline payer key (import it as `GeneralPurpose`). Fees come from the payer's account, not the service fee account. Live Esmeralda: 0.1 tTARI channel, refund before `AfterEpoch` left the UTXO unspent; at expiry a stealth-transfer refund Finalized Commit (9502 µT fee from the opener). Live settle-after-expiry is not separately proven.
+
+```bash
+cargo run -p ghostline-cli -- seal-refund --unsigned-json \
+  --ootle-network esmeralda --max-epoch <epoch> \
+  --fee-account <payer-component_…> --max-fee 100000 \
+  …open args… > /tmp/refund.unsigned.json
+
+cargo run -p ghostline-cli -- wallet submit \
+  --unsigned-json /tmp/refund.unsigned.json \
+  --seal-key-id-file /path/to/payer.key_id.json \
+  --fee-account-name <payer-account> \
+  --dry-run
+```
+
 Indexer-sealed settle (after the same unsigned JSON; versions must still be null so resolve can fill them):
 
 ```bash

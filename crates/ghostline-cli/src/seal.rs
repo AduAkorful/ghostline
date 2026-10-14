@@ -139,6 +139,25 @@ pub fn unsigned_settle(
     ))
 }
 
+pub fn unsigned_refund(
+    channel: &Channel,
+    deposit: MaskAndValue,
+    payer_output: RistrettoPublicKeyBytes,
+    resource: ResourceAddress,
+    max_epoch: u64,
+    scan: OutputScan,
+    fee_account: Option<(ComponentAddress, u64)>,
+) -> Result<UnsignedTransaction, String> {
+    let statement = refund(channel, deposit, payer_output, scan).map_err(|e| e.to_string())?;
+    Ok(unsigned_stealth_transfer_with_fee(
+        scan.network,
+        resource,
+        statement,
+        max_epoch,
+        fee_account,
+    ))
+}
+
 pub fn seal_refund(
     channel: &Channel,
     deposit: MaskAndValue,
@@ -147,7 +166,9 @@ pub fn seal_refund(
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
     scan: OutputScan,
+    fee: Option<AccountFee<'_>>,
 ) -> Result<String, String> {
     let statement = refund(channel, deposit, payer_output, scan).map_err(|e| e.to_string())?;
-    seal_hex(scan.network, resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
+    seal_hex_with_fee(scan.network, resource, statement, max_epoch, sealer, fee)
+        .map_err(|e| e.to_string())
 }
