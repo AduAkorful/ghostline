@@ -16,7 +16,7 @@ Those facts never go on-chain if you settle once at the end.
 
 | When | What an observer can see |
 |---|---|
-| Every transaction | Fees, and who paid them |
+| Every transaction | Fees, and which account component paid them |
 | Open | That a stealth output was created (not your identity, if you funded it from an unlinkable UTXO) |
 | Settle | The settle branch, the voucher amount, the remainder, the channel id bound into the template, the service key on that leaf |
 | Refund after expiry | The refund branch, the full deposit returning to the payer key |
@@ -25,17 +25,16 @@ Because remainder + claimed = deposit, **settlement reveals the deposit**.
 
 ## Things that can re-identify you anyway
 
-- Paying fees from an account that is already linked to you
+- Paying fees from an account that is already linked to you (including funding a “service” fee account from the opener)
 - Settling immediately after a distinctive deposit amount
 - The service's own logs
 - IP addresses and TLS metadata on the HTTP path (outside Ootle)
 
 ## What the software does not yet do
 
-- Listing Ghostline UTXOs from the chain (`inspect-tx` reads a sealed tx you already have; `unblind` recovers mask and value from output fields or a wallet UTXO JSON dump)
-- Submitting Ghostline-sealed envelopes through the public indexer REST API (unverified; live settles used the wallet daemon)
+- Listing Ghostline UTXOs from the chain indexer (`wallet utxos` / live `wallet open` read a wallet-stored transaction via `transactions.get` and emit `unblind --utxo-json`; wallet-built opens keep the channel output in `fee_instructions`; `inspect-tx` still needs a sealed hex you already have; `stealth_utxos.list` is not the source of truth)
 - TypeScript signing of `ghostline.channel.voucher.v1` is covered by a shared Rust/TS vector; WASM/Ootle JS wallet signing is a separate path
-- A proven fee source that stays unlinkable
+- On-chain proof that settle fees and the opener are unlinked (the CLI can target a distinct service fee account; that is only unlinkable if that account was funded independently)
 - Enforcement of spending limits if the agent signs without the policy engine
 
 Unaudited. Testnet only. Do not use with real funds.

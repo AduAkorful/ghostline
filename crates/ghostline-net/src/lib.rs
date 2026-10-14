@@ -11,10 +11,12 @@ mod client;
 mod error;
 mod wallet;
 
-pub use client::{EpochStats, IndexerClient};
+pub use client::{EpochStats, IndexerClient, ResolvedInputs, indexer_result_status};
 pub use error::NetError;
 pub use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope, TransactionId};
 pub use wallet::{
-    DEFAULT_ACCOUNT_SIGNER_JSON, StealthTransferRequest, UtxoInputSelection, WalletClient,
-    WalletDryRunResponse, WalletSubmitRequest, WalletSubmitResponse, execution_accepted,
+    AccountWithAddress, AccountsCreateRequest, DEFAULT_ACCOUNT_SIGNER_JSON, StealthTransferRequest,
+    UtxoInputSelection, WalletAccount, WalletClient, WalletDryRunResponse, WalletStealthUtxo,
+    WalletSubmitRequest, WalletSubmitResponse, account_name, channel_open_utxo,
+    derived_account_key_id, execution_accepted, settle_fee_signers, stealth_utxos_from_wallet_tx,
 };

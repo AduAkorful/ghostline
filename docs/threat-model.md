@@ -51,11 +51,11 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 **Wallet-built deposit encrypted to the view key.** `accounts.stealth_transfer` with a wallet `destination_address` encrypts the output to the wallet view key, not the Ghostline payer key. Unblinding with the payer secret fails. Settlement needs the view-key mask (or a wallet that already holds it).
 
-**Fee linkage.** Paying `pay_fee` from a reused account component publishes that the same account funded the settle. That is a privacy leak, not a theft path.
+**Fee linkage.** `pay_fee` always names an account component. Using the opener for settle fees publishes that the same account opened and settled. `wallet submit` requires `--fee-account-name` or `--other-signer` so that path is not implied. A distinct service-owned fee account is the intended design (the service key is already on the settle leaf). Funding that account from the opener, or creating it in a wallet whose other spends are already linked, still links them. Independent funding of a service wallet is not proven live. That is a privacy leak, not a theft path.
 
-**Indexer-sealed envelopes.** Ghostline-sealed 0.45 envelopes submitted to the public indexer REST API have returned an id without finalizing. Live settles that worked went through the wallet daemon (`transactions.submit` of unsigned JSON, service sealer, account co-signer, `detect_inputs`). Until that indexer path is reproduced, do not treat sealed-hex submit as a working money path.
+**Indexer-sealed envelopes.** Unsigned settles leave input `version` null and omit the fee account vault. Walletd `detect_inputs` fills both. The indexer REST submit does not. A sealed hex with null versions can return an id and stay Pending. Version-only resolve (UTXO + component, no vault) FinalizedAbort with `OneOrMoreInputsNotFound` / vault not found. `indexer resolve-inputs` pins versions, appends vault ids from account component state (CBOR tag 132), then `seal-unsigned`. A live unspent-channel settle on that path Finalized `Commit`. `GET /substates/{id}` 404s spent UTXOs as `(vN) is down`. Indexer `POST /transactions/dry-run` rejects envelopes with `dry_run: false` (use `/transactions` or build a dry-run transaction).
 
-**List lag.** After an Accepted settle, `stealth_utxos.list` has shown the spent script UTXO as Unspent. Execution Accept is the source of truth, not the list.
+**List lag.** After an Accepted settle, `stealth_utxos.list` has shown the spent script UTXO as Unspent. Execution Accept is the source of truth, not the list. Channel deposit fields for unblind come from `transactions.get` of the open transaction, not from that list. Wallet-built opens store that Script output in `fee_instructions`.
 
 ## Residual risk
 

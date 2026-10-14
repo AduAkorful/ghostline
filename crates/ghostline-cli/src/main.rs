@@ -6,14 +6,19 @@ mod secrets;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
+#[cfg(test)]
+use ghostline_core::{CHANNEL_ID_LEN, NONCE_LEN};
+use ghostline_core::{ChannelParams, SignedVoucher, from_hex, to_hex};
 use ghostline_net::{
-    DEFAULT_ACCOUNT_SIGNER_JSON, IndexerClient, StealthTransferRequest, TransactionEnvelope,
-    UtxoInputSelection, WalletClient, WalletSubmitRequest, execution_accepted,
+    AccountsCreateRequest, IndexerClient, StealthTransferRequest, TransactionEnvelope,
+    TransactionId, UtxoInputSelection, WalletClient, WalletStealthUtxo, WalletSubmitRequest,
+    channel_open_utxo, execution_accepted, indexer_result_status, settle_fee_signers,
+    stealth_utxos_from_wallet_tx,
 };
+#[cfg(test)]
+use ghostline_sdk::OutputScan;
 use ghostline_sdk::{
-    MaskAndValue, OutputScan, UnsignedTransaction, inspect_transaction, unblind_output,
-    unblind_transaction,
+    MaskAndValue, UnsignedTransaction, inspect_transaction, unblind_output, unblind_transaction,
 };
 use serde::Deserialize;
 use tari_utilities::ByteArray;
@@ -118,7 +123,7 @@ enum Command {
         resource_hex: Option<String>,
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
-        /// Account component that pays revealed XTR fees (`pay_fee`). Required on public networks.
+        /// Account component that pays revealed XTR fees (`pay_fee`). On settle this should be a service-owned account, not the opener.
         #[arg(long)]
         fee_account: Option<String>,
         #[arg(long, default_value_t = 100_000)]
@@ -128,6 +133,15 @@ enum Command {
         /// Print unsigned JSON for `transactions.submit` / `submit_dry_run` instead of a sealed hex.
         #[arg(long)]
         unsigned_json: bool,
+    },
+    /// Seal an unsigned JSON after `indexer resolve-inputs` (indexer path; versions must be set).
+    SealUnsigned {
+        #[arg(long)]
+        unsigned_json: PathBuf,
+        #[arg(long)]
+        seal_secret_hex: Option<String>,
+        #[arg(long)]
+        fee_secret_hex: Option<String>,
     },
     /// Seal a refund of the channel UTXO after expiry.
     SealRefund {
@@ -192,9 +206,12 @@ enum WalletCommand {
         seal_key_id: Option<String>,
         #[arg(long)]
         seal_key_id_file: Option<PathBuf>,
-        /// Extra `KeyId` JSON. Defaults to the derived account key that pays `pay_fee`.
+        /// Extra `KeyId` JSON. Not implied: pass this or `--fee-account-name`.
         #[arg(long)]
         other_signer: Vec<String>,
+        /// Wallet account whose `owner_key_id` co-signs `pay_fee` (service fee account, not the opener).
+        #[arg(long)]
+        fee_account_name: Option<String>,
         #[arg(long)]
         dry_run: bool,
         /// Skip `transactions.wait_result` after a live submit.
@@ -202,6 +219,16 @@ enum WalletCommand {
         no_wait: bool,
         #[arg(long, default_value_t = 60)]
         timeout_secs: u64,
+    },
+    /// Print stealth outputs from a wallet-stored transaction (`transactions.get`) as `unblind --utxo-json`.
+    Utxos {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        #[arg(long)]
+        transaction_id: String,
+        /// Write the channel deposit (`Script` auth) JSON for `unblind --utxo-json`.
+        #[arg(long)]
+        utxo_json_out: Option<PathBuf>,
     },
     /// Open a channel UTXO via `accounts.stealth_transfer` (`PayTo::Conditions`).
     Open {
@@ -229,6 +256,27 @@ enum WalletCommand {
         no_wait: bool,
         #[arg(long, default_value_t = 60)]
         timeout_secs: u64,
+        /// Write the channel deposit (`Script` auth) JSON for `unblind --utxo-json` after Accept.
+        #[arg(long)]
+        utxo_json_out: Option<PathBuf>,
+    },
+    /// Create a named wallet account (`accounts.create`). Fund it from an unlinked source before using it for settle fees.
+    AccountCreate {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        key_index: Option<u64>,
+        #[arg(long)]
+        is_default: bool,
+    },
+    /// Print a wallet account and its `owner_key_id` (`accounts.get`).
+    AccountGet {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -267,6 +315,20 @@ enum IndexerCommand {
         url: String,
         #[arg(long)]
         tx_hex: String,
+    },
+    /// GET /transactions/{id}/result — Pending, Finalized, or Rejected.
+    Result {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        transaction_id: String,
+    },
+    /// Fill `version: null` inputs and append fee-account vaults via `GET /substates/{id}`.
+    ResolveInputs {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        unsigned_json: PathBuf,
     },
 }
 
@@ -459,6 +521,35 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|e| e.to_string())?;
                 println!("{id}");
             }
+            IndexerCommand::Result {
+                url,
+                transaction_id,
+            } => {
+                let id = parse_transaction_id(&transaction_id)?;
+                let body = IndexerClient::connect(&url)
+                    .map_err(|e| e.to_string())?
+                    .transaction_result(id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("{}", indexer_result_status(&body));
+            }
+            IndexerCommand::ResolveInputs { url, unsigned_json } => {
+                let mut unsigned = serde_json::to_value(read_unsigned_json(&unsigned_json)?)
+                    .map_err(|e| e.to_string())?;
+                let report = IndexerClient::connect(&url)
+                    .map_err(|e| e.to_string())?
+                    .resolve_unsigned_input_versions(&mut unsigned)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!(
+                    "filled={} down={} added={}",
+                    report.filled, report.down, report.added
+                );
+                println!(
+                    "{}",
+                    serde_json::to_string(&unsigned).map_err(|e| e.to_string())?
+                );
+            }
         },
         Command::Wallet { command } => match command {
             WalletCommand::Submit {
@@ -467,27 +558,33 @@ async fn run(cli: Cli) -> Result<(), String> {
                 seal_key_id,
                 seal_key_id_file,
                 other_signer,
+                fee_account_name,
                 dry_run,
                 no_wait,
                 timeout_secs,
             } => {
                 let unsigned = read_unsigned_json(&unsigned_json)?;
                 let seal_signer = read_key_id(seal_key_id.as_deref(), seal_key_id_file.as_deref())?;
-                let other_signers = if other_signer.is_empty() {
-                    vec![
-                        serde_json::from_str(DEFAULT_ACCOUNT_SIGNER_JSON)
-                            .expect("DEFAULT_ACCOUNT_SIGNER_JSON"),
-                    ]
-                } else {
-                    other_signer
-                        .iter()
-                        .map(|s| {
-                            serde_json::from_str(s).map_err(|e| format!("other-signer JSON: {e}"))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                let request = WalletSubmitRequest::new(unsigned, seal_signer, other_signers);
+                let explicit = other_signer
+                    .iter()
+                    .map(|s| serde_json::from_str(s).map_err(|e| format!("other-signer JSON: {e}")))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let wallet = connect_wallet(&url).await?;
+                let from_account = if let Some(name) = fee_account_name {
+                    let got = wallet.account_get(&name).await.map_err(|e| e.to_string())?;
+                    println!("fee_account={}", got.account.component_address_display());
+                    Some(
+                        got.account
+                            .fee_signer_key_id()
+                            .map_err(|e| e.to_string())?
+                            .clone(),
+                    )
+                } else {
+                    None
+                };
+                let other_signers =
+                    settle_fee_signers(explicit, from_account).map_err(|e| e.to_string())?;
+                let request = WalletSubmitRequest::new(unsigned, seal_signer, other_signers);
                 if dry_run {
                     let dry = wallet
                         .submit_dry_run(&request)
@@ -508,6 +605,19 @@ async fn run(cli: Cli) -> Result<(), String> {
                     }
                 }
             }
+            WalletCommand::Utxos {
+                url,
+                transaction_id,
+                utxo_json_out,
+            } => {
+                let wallet = connect_wallet(&url).await?;
+                dump_wallet_utxos(
+                    &wallet,
+                    parse_transaction_id(&transaction_id)?,
+                    utxo_json_out.as_deref(),
+                )
+                .await?;
+            }
             WalletCommand::Open {
                 open,
                 url,
@@ -520,6 +630,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 dry_run,
                 no_wait,
                 timeout_secs,
+                utxo_json_out,
             } => {
                 let channel = seal::channel(open_spec(&open)?)?;
                 let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
@@ -551,9 +662,34 @@ async fn run(cli: Cli) -> Result<(), String> {
                 println!("transaction_id={}", submitted.transaction_id);
                 if dry_run {
                     println!("dry_run=true");
+                    println!("utxo dump needs an Accepted live open (dry-run is not stored)");
                 } else if !no_wait {
                     print_wait(&wallet, submitted.transaction_id, timeout_secs).await?;
+                    dump_wallet_utxos(&wallet, submitted.transaction_id, utxo_json_out.as_deref())
+                        .await?;
                 }
+            }
+            WalletCommand::AccountCreate {
+                url,
+                name,
+                key_index,
+                is_default,
+            } => {
+                let wallet = connect_wallet(&url).await?;
+                let created = wallet
+                    .account_create(&AccountsCreateRequest {
+                        account_name: Some(name),
+                        is_default: Some(is_default),
+                        key_index,
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                print_wallet_account(&created);
+            }
+            WalletCommand::AccountGet { url, name } => {
+                let wallet = connect_wallet(&url).await?;
+                let got = wallet.account_get(&name).await.map_err(|e| e.to_string())?;
+                print_wallet_account(&got);
             }
         },
         Command::Keygen => {
@@ -693,6 +829,45 @@ async fn run(cli: Cli) -> Result<(), String> {
                 )?;
                 println!("{tx}");
             }
+        }
+        Command::SealUnsigned {
+            unsigned_json,
+            seal_secret_hex,
+            fee_secret_hex,
+        } => {
+            use tari_crypto::keys::PublicKey as _;
+            use tari_crypto::ristretto::RistrettoPublicKey;
+            use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+            let unsigned = read_unsigned_json(&unsigned_json)?;
+            let sealer = secrets::load_secret(
+                seal_secret_hex.as_deref(),
+                secrets::SEAL_SECRET_ENV,
+                "seal secret",
+            )?;
+            let pk = RistrettoPublicKey::from_secret_key(&sealer);
+            let sealer_pk = RistrettoPublicKeyBytes::from_bytes(pk.as_bytes())
+                .map_err(|e| format!("seal public key: {e}"))?;
+            let fee_secret = if fee_secret_hex.is_some()
+                || std::env::var(secrets::FEE_SECRET_ENV)
+                    .ok()
+                    .is_some_and(|v| !v.trim().is_empty())
+            {
+                Some(secrets::load_secret(
+                    fee_secret_hex.as_deref(),
+                    secrets::FEE_SECRET_ENV,
+                    "fee secret",
+                )?)
+            } else {
+                None
+            };
+            let tx = match &fee_secret {
+                Some(fee) => unsigned.add_signer(&sealer_pk, fee).seal(&sealer),
+                None => unsigned.finish().seal(&sealer),
+            };
+            println!(
+                "{}",
+                ghostline_sdk::transaction_envelope_hex(tx).map_err(|e| e.to_string())?
+            );
         }
         Command::SealRefund {
             open,
@@ -842,10 +1017,75 @@ fn load_utxo(
     ))
 }
 
+fn print_wallet_account(got: &ghostline_net::AccountWithAddress) {
+    if let Some(name) = &got.account.name {
+        println!("name={name}");
+    }
+    println!(
+        "component_address={}",
+        got.account.component_address_display()
+    );
+    println!("is_default={}", got.account.is_default);
+    match &got.account.owner_key_id {
+        Some(key_id) => println!("owner_key_id={key_id}"),
+        None => println!("owner_key_id="),
+    }
+    println!("address={}", got.address_display());
+}
+
 async fn connect_wallet(url: &str) -> Result<WalletClient, String> {
     let mut wallet = WalletClient::connect(url).map_err(|e| e.to_string())?;
     wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
     Ok(wallet)
+}
+
+fn parse_transaction_id(hex: &str) -> Result<TransactionId, String> {
+    TransactionId::from_hex(hex.trim()).map_err(|e| format!("transaction-id: {e}"))
+}
+
+async fn dump_wallet_utxos(
+    wallet: &WalletClient,
+    transaction_id: TransactionId,
+    utxo_json_out: Option<&std::path::Path>,
+) -> Result<(), String> {
+    let got = wallet
+        .transaction_get(transaction_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let utxos = stealth_utxos_from_wallet_tx(&got);
+    print_stealth_utxos(&utxos);
+    if let Some(path) = utxo_json_out {
+        let Some(channel) = channel_open_utxo(&utxos) else {
+            return Err("no body stealth output to write as utxo-json".into());
+        };
+        std::fs::write(
+            path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&channel.unblind_json()).map_err(|e| e.to_string())?
+            ),
+        )
+        .map_err(|e| format!("utxo-json-out: {e}"))?;
+        println!("wrote={}", path.display());
+    }
+    Ok(())
+}
+
+fn print_stealth_utxos(utxos: &[WalletStealthUtxo]) {
+    println!("outputs={}", utxos.len());
+    for (i, utxo) in utxos.iter().enumerate() {
+        println!(
+            "output[{i}] auth={} tag={} from_fee={} resource={}",
+            utxo.auth,
+            utxo.tag,
+            utxo.from_fee_instruction,
+            utxo.resource.as_deref().unwrap_or("")
+        );
+        println!(
+            "utxo_json={}",
+            serde_json::to_string(&utxo.unblind_json()).expect("utxo json")
+        );
+    }
 }
 
 async fn print_wait(

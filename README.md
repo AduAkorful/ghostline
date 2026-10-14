@@ -115,26 +115,46 @@ cargo run -p ghostline-cli -- indexer wait --url http://127.0.0.1:<indexer-port>
 cargo run -p ghostline-cli -- indexer epoch --url http://127.0.0.1:<indexer-port>/
 ```
 
-Wallet-daemon open (`accounts.stealth_transfer` with `PayTo::Conditions`) and settle (unsigned JSON). Daemon must be `--authentication none`. Destination defaults to `accounts.get_default` (encrypted to that wallet's view key). Ghostline-sealed indexer envelopes are unverified.
+Wallet-daemon open (`accounts.stealth_transfer` with `PayTo::Conditions`) and settle (unsigned JSON) is proven live on Esmeralda as a CLI-only loop. Daemon must be `--authentication none`. Destination defaults to `accounts.get_default` (encrypted to that wallet's `view_only_key`). After an Accepted open, the CLI loads `transactions.get` and prints `unblind --utxo-json` for the channel output (`PayTo::Conditions` is stored as `Script` auth). Wallet-built `accounts.stealth_transfer` places that output in `fee_instructions` (with `PayFeeFromBucket`); unsigned settle places it in body `instructions`. Dry-run opens are not stored. Ghostline-sealed indexer settle is also proven: `indexer resolve-inputs` (pins versions and appends the fee account vault; CBOR tag 132) then `seal-unsigned` then `indexer submit`. A first submit that omitted the vault FinalizedAbort (`OneOrMoreInputsNotFound`). With the vault, `GET /transactions/{id}/result` is Finalized (`Commit`; 50 µT voucher, 17623 µT fee). `GET /substates/{id}` 404s a spent channel UTXO (`(vN) is down`). `stealth_utxos.list` is not used for this dump (it can lag).
 
 ```bash
 cargo run -p ghostline-cli -- wallet open --account-name <wallet-account> --dry-run \
   --network-tag 1 --deposit <µT> --payer-hex <32-byte-hex> --service-hex <32-byte-hex> \
   --expiry-epoch <epoch> --nonce-hex <32-byte-hex> --template-hex <32-byte-hex>
+
+# after a live Accepted open (or any wallet-stored stealth tx):
+cargo run -p ghostline-cli -- wallet utxos --transaction-id <64-hex> \
+  --utxo-json-out /tmp/channel.utxo.json
 ```
 
-Wallet-daemon settle: the sealer is the service key imported into the wallet; the account key co-signs `pay_fee`.
+Wallet-daemon settle: the sealer is the service key imported into the wallet. `pay_fee` is public, so the fee account must be **service-owned** and funded from a source that never opened the channel. `wallet submit` does not default to derived account index 0 (the usual opener).
 
 ```bash
+cargo run -p ghostline-cli -- wallet account-create --name <service-fee-account> --key-index 1
+cargo run -p ghostline-cli -- wallet account-get --name <service-fee-account>
+
 cargo run -p ghostline-cli -- seal-settle --unsigned-json \
   --ootle-network esmeralda --max-epoch <epoch> \
-  --fee-account <component_…> --max-fee 100000 \
+  --fee-account <service-component_…> --max-fee 100000 \
   …open args… --voucher-hex <hex> > /tmp/settle.unsigned.json
 
 cargo run -p ghostline-cli -- wallet submit \
   --unsigned-json /tmp/settle.unsigned.json \
   --seal-key-id-file /path/to/service.key_id.json \
+  --fee-account-name <service-fee-account> \
   --dry-run
+```
+
+Indexer-sealed settle (after the same unsigned JSON; versions must still be null so resolve can fill them):
+
+```bash
+cargo run -p ghostline-cli -- indexer resolve-inputs --url <indexer-url> \
+  --unsigned-json /tmp/settle.unsigned.json > /tmp/settle.resolved.json
+# first line is filled=/down=/added=; rest is JSON
+cargo run -p ghostline-cli -- seal-unsigned --unsigned-json /tmp/settle.resolved.json \
+  > /tmp/settle.sealed.hex
+cargo run -p ghostline-cli -- indexer submit --url <indexer-url> --tx-hex "$(cat /tmp/settle.sealed.hex)"
+cargo run -p ghostline-cli -- indexer result --url <indexer-url> --transaction-id <64-hex>
 ```
 
 Wallet-built channel outputs are encrypted to the wallet view key. Unblind with `GHOSTLINE_CLAIM_SECRET` (that view key), not the Ghostline payer key. SQLite `tag_byte` may be a signed INTEGER; `--utxo-json` accepts that.

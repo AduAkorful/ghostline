@@ -33,8 +33,9 @@ pub fn seal_stealth_transfer(
 
 /// Like [`seal_stealth_transfer`], optionally paying fees from `fee.account`.
 ///
-/// The fee instruction is authorised by `fee.signer` (typically the wallet account key). The
-/// transaction is still sealed by `sealer` (the service key on settle, the payer on open/refund).
+/// The fee instruction is authorised by `fee.signer` (the owner of `fee.account`). On settle that
+/// should be a **service-owned** account, not the opener: `pay_fee` is public. The transaction is
+/// still sealed by `sealer` (the service key on settle, the payer on open/refund).
 pub fn unsigned_stealth_transfer_with_fee(
     network: Network,
     resource: ResourceAddress,
