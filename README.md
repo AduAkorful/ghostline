@@ -36,7 +36,7 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `contracts/channel` | The channel template (Rust, compiled to WASM) |
 | `crates/ghostline-core` | Channel id, voucher signing, verification, payer session and service ledger |
 | `crates/ghostline-sdk` | Condition-tree open (`PayTo::Conditions`), settle and refund stealth statements |
-| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, `pay-to`, seal open/settle/refund, wallet unsigned submit, indexer submit |
+| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, `pay-to`, wallet open/submit, seal open/settle/refund, indexer submit |
 | `docs/privacy.md` | Plain-language observer view |
 | `docs/threat-model.md` | Assets, actors, attacks, residual risk |
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
@@ -115,7 +115,15 @@ cargo run -p ghostline-cli -- indexer wait --url http://127.0.0.1:<indexer-port>
 cargo run -p ghostline-cli -- indexer epoch --url http://127.0.0.1:<indexer-port>/
 ```
 
-Wallet-daemon settle (unsigned JSON; daemon must be `--authentication none`). The sealer is the service key imported into the wallet; the account key co-signs `pay_fee`. Ghostline-sealed indexer envelopes are unverified.
+Wallet-daemon open (`accounts.stealth_transfer` with `PayTo::Conditions`) and settle (unsigned JSON). Daemon must be `--authentication none`. Destination defaults to `accounts.get_default` (encrypted to that wallet's view key). Ghostline-sealed indexer envelopes are unverified.
+
+```bash
+cargo run -p ghostline-cli -- wallet open --account-name <wallet-account> --dry-run \
+  --network-tag 1 --deposit <µT> --payer-hex <32-byte-hex> --service-hex <32-byte-hex> \
+  --expiry-epoch <epoch> --nonce-hex <32-byte-hex> --template-hex <32-byte-hex>
+```
+
+Wallet-daemon settle: the sealer is the service key imported into the wallet; the account key co-signs `pay_fee`.
 
 ```bash
 cargo run -p ghostline-cli -- seal-settle --unsigned-json \

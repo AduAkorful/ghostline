@@ -15,6 +15,6 @@ pub use client::{EpochStats, IndexerClient};
 pub use error::NetError;
 pub use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope, TransactionId};
 pub use wallet::{
-    DEFAULT_ACCOUNT_SIGNER_JSON, WalletClient, WalletDryRunResponse, WalletSubmitRequest,
-    WalletSubmitResponse, execution_accepted,
+    DEFAULT_ACCOUNT_SIGNER_JSON, StealthTransferRequest, UtxoInputSelection, WalletClient,
+    WalletDryRunResponse, WalletSubmitRequest, WalletSubmitResponse, execution_accepted,
 };

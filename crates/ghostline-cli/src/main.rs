@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
 use ghostline_net::{
-    DEFAULT_ACCOUNT_SIGNER_JSON, IndexerClient, TransactionEnvelope, WalletClient,
-    WalletSubmitRequest, execution_accepted,
+    DEFAULT_ACCOUNT_SIGNER_JSON, IndexerClient, StealthTransferRequest, TransactionEnvelope,
+    UtxoInputSelection, WalletClient, WalletSubmitRequest, execution_accepted,
 };
 use ghostline_sdk::{
     MaskAndValue, OutputScan, UnsignedTransaction, inspect_transaction, unblind_output,
@@ -21,7 +21,7 @@ use tari_utilities::ByteArray;
 #[derive(Parser)]
 #[command(
     name = "ghostline",
-    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, submit via a wallet daemon or indexer"
+    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, open/settle via a wallet daemon or indexer"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -198,6 +198,33 @@ enum WalletCommand {
         #[arg(long)]
         dry_run: bool,
         /// Skip `transactions.wait_result` after a live submit.
+        #[arg(long)]
+        no_wait: bool,
+        #[arg(long, default_value_t = 60)]
+        timeout_secs: u64,
+    },
+    /// Open a channel UTXO via `accounts.stealth_transfer` (`PayTo::Conditions`).
+    Open {
+        #[command(flatten)]
+        open: OpenArgs,
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        /// Wallet account name used as `owner_account`.
+        #[arg(long)]
+        account_name: String,
+        /// Ootle address that receives (and encrypts) the output. Default: `accounts.get_default`.
+        #[arg(long)]
+        destination_address: Option<String>,
+        #[arg(long, default_value = "PreferConfidential")]
+        input_selection: String,
+        #[arg(long, default_value = "PreferRevealed")]
+        fee_input_selection: String,
+        #[arg(long, default_value_t = 100_000)]
+        max_fee: u64,
+        #[arg(long)]
+        resource_hex: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
         #[arg(long)]
         no_wait: bool,
         #[arg(long, default_value_t = 60)]
@@ -460,8 +487,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         .collect::<Result<Vec<_>, _>>()?
                 };
                 let request = WalletSubmitRequest::new(unsigned, seal_signer, other_signers);
-                let mut wallet = WalletClient::connect(&url).map_err(|e| e.to_string())?;
-                wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+                let wallet = connect_wallet(&url).await?;
                 if dry_run {
                     let dry = wallet
                         .submit_dry_run(&request)
@@ -478,24 +504,55 @@ async fn run(cli: Cli) -> Result<(), String> {
                     let submitted = wallet.submit(&request).await.map_err(|e| e.to_string())?;
                     println!("transaction_id={}", submitted.transaction_id);
                     if !no_wait {
-                        let waited = wallet
-                            .wait_result(submitted.transaction_id, Some(timeout_secs))
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        let outcome = waited.get("result").unwrap_or(&waited);
-                        let status = waited
-                            .get("status")
-                            .and_then(|s| s.as_str())
-                            .or_else(|| outcome.get("status").and_then(|s| s.as_str()));
-                        if execution_accepted(outcome)
-                            || execution_accepted(&waited)
-                            || status == Some("Accepted")
-                        {
-                            println!("result=Accept");
-                        } else {
-                            println!("wait={}", waited);
-                        }
+                        print_wait(&wallet, submitted.transaction_id, timeout_secs).await?;
                     }
+                }
+            }
+            WalletCommand::Open {
+                open,
+                url,
+                account_name,
+                destination_address,
+                input_selection,
+                fee_input_selection,
+                max_fee,
+                resource_hex,
+                dry_run,
+                no_wait,
+                timeout_secs,
+            } => {
+                let channel = seal::channel(open_spec(&open)?)?;
+                let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
+                let resource = seal::parse_resource(resource_hex.as_deref())?;
+                let wallet = connect_wallet(&url).await?;
+                let destination = match destination_address {
+                    Some(addr) => addr,
+                    None => wallet
+                        .default_account_address()
+                        .await
+                        .map_err(|e| e.to_string())?,
+                };
+                let request = StealthTransferRequest::channel_open(
+                    &account_name,
+                    destination,
+                    resource.to_string(),
+                    open.deposit,
+                    pay_to,
+                    input_selection.parse::<UtxoInputSelection>()?,
+                    fee_input_selection.parse::<UtxoInputSelection>()?,
+                    max_fee,
+                    dry_run,
+                );
+                seal::print_ids(&channel);
+                let submitted = wallet
+                    .stealth_transfer(&request)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("transaction_id={}", submitted.transaction_id);
+                if dry_run {
+                    println!("dry_run=true");
+                } else if !no_wait {
+                    print_wait(&wallet, submitted.transaction_id, timeout_secs).await?;
                 }
             }
         },
@@ -783,6 +840,34 @@ fn load_utxo(
         tag.ok_or("unblind requires --tag")? as u32,
         None,
     ))
+}
+
+async fn connect_wallet(url: &str) -> Result<WalletClient, String> {
+    let mut wallet = WalletClient::connect(url).map_err(|e| e.to_string())?;
+    wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+    Ok(wallet)
+}
+
+async fn print_wait(
+    wallet: &WalletClient,
+    transaction_id: ghostline_net::TransactionId,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let waited = wallet
+        .wait_result(transaction_id, Some(timeout_secs))
+        .await
+        .map_err(|e| e.to_string())?;
+    let outcome = waited.get("result").unwrap_or(&waited);
+    let status = waited
+        .get("status")
+        .and_then(|s| s.as_str())
+        .or_else(|| outcome.get("status").and_then(|s| s.as_str()));
+    if execution_accepted(outcome) || execution_accepted(&waited) || status == Some("Accepted") {
+        println!("result=Accept");
+        Ok(())
+    } else {
+        Err(format!("wait did not Accept: {waited}"))
+    }
 }
 
 fn read_unsigned_json(path: &std::path::Path) -> Result<UnsignedTransaction, String> {

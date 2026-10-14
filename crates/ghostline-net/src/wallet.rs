@@ -14,6 +14,8 @@
 //! Submitting Ghostline-sealed envelopes through the public indexer REST API is a
 //! different path and remains unverified.
 
+use std::str::FromStr;
+
 use reqwest::{Client, IntoUrl};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -27,6 +29,8 @@ const AUTH_REQUEST: &str = "auth.request";
 const SUBMIT: &str = "transactions.submit";
 const SUBMIT_DRY_RUN: &str = "transactions.submit_dry_run";
 const WAIT_RESULT: &str = "transactions.wait_result";
+const STEALTH_TRANSFER: &str = "accounts.stealth_transfer";
+const GET_DEFAULT: &str = "accounts.get_default";
 
 /// Default `KeyId` JSON for the first derived account key (`tari_ootle_walletd_client` 0.45 `KeyId::Derived`).
 pub const DEFAULT_ACCOUNT_SIGNER_JSON: &str = r#"{"Derived":{"key_branch":"account","index":0}}"#;
@@ -110,6 +114,103 @@ struct WaitRequest {
     timeout_secs: Option<u64>,
 }
 
+/// `UtxoInputSelection` unit variants as JSON strings (`tari_ootle_walletd_client` 0.45).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum UtxoInputSelection {
+    PreferConfidential,
+    PreferRevealed,
+    ConfidentialOnly,
+    RevealedOnly,
+}
+
+impl FromStr for UtxoInputSelection {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "PreferConfidential" => Ok(Self::PreferConfidential),
+            "PreferRevealed" => Ok(Self::PreferRevealed),
+            "ConfidentialOnly" => Ok(Self::ConfidentialOnly),
+            "RevealedOnly" => Ok(Self::RevealedOnly),
+            other => Err(format!(
+                "input-selection: expected PreferConfidential, PreferRevealed, ConfidentialOnly, or RevealedOnly, got {other}"
+            )),
+        }
+    }
+}
+
+/// Fields from `TransferFeeParams` (`tari_ootle_wallet_sdk` / walletd 0.45). Optional swap is omitted.
+#[derive(Debug, Clone, Serialize)]
+pub struct TransferFeeParams {
+    pub input_selection: UtxoInputSelection,
+}
+
+/// Fields from `StealthTransferRequest` (`tari_ootle_walletd_client` 0.45).
+#[derive(Debug, Clone, Serialize)]
+pub struct StealthTransferRequest {
+    pub owner_account: Value,
+    pub fee_params: TransferFeeParams,
+    pub input_selection: UtxoInputSelection,
+    pub resource_address: String,
+    pub badge_usage: &'static str,
+    pub transfers: Vec<StealthTransfer>,
+    pub max_fee: u64,
+    pub dry_run: bool,
+}
+
+/// Fields from `StealthTransfer` (`tari_ootle_walletd_client` 0.45).
+#[derive(Debug, Clone, Serialize)]
+pub struct StealthTransfer {
+    pub destination_address: String,
+    pub blinded_output_amount: u64,
+    pub revealed_output_amount: u64,
+    pub output_memo: Option<Value>,
+    pub pay_to: Value,
+    pub attach_sender_address: bool,
+    pub pay_ref: Option<String>,
+}
+
+impl StealthTransferRequest {
+    /// One `PayTo::Conditions` output, no badge, fees from revealed UTXOs by default.
+    pub fn channel_open(
+        account_name: &str,
+        destination_address: String,
+        resource_address: String,
+        deposit: u64,
+        pay_to: Value,
+        input_selection: UtxoInputSelection,
+        fee_input_selection: UtxoInputSelection,
+        max_fee: u64,
+        dry_run: bool,
+    ) -> Self {
+        Self {
+            owner_account: serde_json::json!({ "Name": account_name }),
+            fee_params: TransferFeeParams {
+                input_selection: fee_input_selection,
+            },
+            input_selection,
+            resource_address,
+            badge_usage: "None",
+            transfers: vec![StealthTransfer {
+                destination_address,
+                blinded_output_amount: deposit,
+                revealed_output_amount: 0,
+                output_memo: None,
+                pay_to,
+                attach_sender_address: false,
+                pay_ref: None,
+            }],
+            max_fee,
+            dry_run,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountDefaultResponse {
+    pub address: String,
+}
+
 /// JSON-RPC client for a wallet daemon you run yourself.
 #[derive(Debug, Clone)]
 pub struct WalletClient {
@@ -179,6 +280,18 @@ impl WalletClient {
             },
         )
         .await
+    }
+
+    pub async fn default_account_address(&self) -> Result<String, NetError> {
+        let resp: AccountDefaultResponse = self.rpc(GET_DEFAULT, serde_json::json!({})).await?;
+        Ok(resp.address)
+    }
+
+    pub async fn stealth_transfer(
+        &self,
+        request: &StealthTransferRequest,
+    ) -> Result<WalletSubmitResponse, NetError> {
+        self.rpc(STEALTH_TRANSFER, request).await
     }
 
     async fn rpc<T: Serialize, R: DeserializeOwned>(
@@ -280,5 +393,36 @@ mod tests {
         .unwrap();
         assert_eq!(json["permissions"][0], "Admin");
         assert_eq!(json["credentials"], "None");
+    }
+
+    #[test]
+    fn stealth_open_body_matches_proven_walletd_shape() {
+        let pay_to = serde_json::json!({ "Conditions": [[]] });
+        let req = StealthTransferRequest::channel_open(
+            "ghostline",
+            "otl_esm_example".into(),
+            "resource_0101010101010101010101010101010101010101010101010101010101010101".into(),
+            1_000_000,
+            pay_to.clone(),
+            UtxoInputSelection::PreferConfidential,
+            UtxoInputSelection::PreferRevealed,
+            100_000,
+            true,
+        );
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["owner_account"]["Name"], "ghostline");
+        assert_eq!(json["fee_params"]["input_selection"], "PreferRevealed");
+        assert!(json["fee_params"].get("max_fee").is_none());
+        assert_eq!(json["input_selection"], "PreferConfidential");
+        assert_eq!(json["badge_usage"], "None");
+        assert_eq!(json["max_fee"], 100_000);
+        assert_eq!(json["dry_run"], true);
+        let xfer = &json["transfers"][0];
+        assert_eq!(xfer["blinded_output_amount"], 1_000_000);
+        assert_eq!(xfer["revealed_output_amount"], 0);
+        assert_eq!(xfer["attach_sender_address"], false);
+        assert_eq!(xfer["pay_to"], pay_to);
+        assert!(xfer["output_memo"].is_null());
+        assert!(xfer["pay_ref"].is_null());
     }
 }
