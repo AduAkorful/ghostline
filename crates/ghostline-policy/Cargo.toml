@@ -1,0 +1,10 @@
+[package]
+name = "ghostline-policy"
+description = "Spending limits enforced outside the agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tari_template_lib = "0.34.0"

@@ -37,6 +37,9 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `crates/ghostline-core` | Channel id, voucher signing, verification, payer session and service ledger |
 | `crates/ghostline-sdk` | Condition-tree open, settle and refund stealth statements |
 | `crates/ghostline-cli` | `ghostline` CLI: `channel-id`, `sign`, `verify` |
+| `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
+| `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
+| `demo/paid-api` | Reference paid endpoint (`/fortune`) |
 | `crates/contract-tests` | Engine-level tests, run against the in-process Ootle engine |
 
 ## Running the tests
@@ -48,6 +51,12 @@ cargo test
 ```
 
 The first run compiles the Ootle engine and takes several minutes.
+
+The HTTP 402 paywall and demo API do not need the engine:
+
+```bash
+cargo test -p ghostline-paywall -p ghostline-paid-api
+```
 
 Offline voucher commands (no network):
 

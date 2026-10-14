@@ -4,7 +4,10 @@ members = [
     "crates/ghostline-core",
     "crates/ghostline-sdk",
     "crates/ghostline-cli",
+    "crates/ghostline-policy",
     "crates/contract-tests",
+    "middleware/ghostline-paywall",
+    "demo/paid-api",
 ]
 # Template crates build for wasm32 in their own nested cargo invocation, so they stay out of the host workspace.
 exclude = ["contracts/channel", "crates/contract-tests/templates/faucet"]

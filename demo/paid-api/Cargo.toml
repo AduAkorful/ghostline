@@ -1,0 +1,29 @@
+[package]
+name = "ghostline-paid-api"
+description = "Reference paid HTTP API protected by a Ghostline paywall"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "ghostline-paid-api"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8.9"
+ghostline-core = { path = "../../crates/ghostline-core" }
+ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+ghostline-policy = { path = "../../crates/ghostline-policy" }
+http-body-util = "0.1"
+ootle_byte_type = { version = "0.16", features = ["crypto"] }
+serde_json = "1"
+tari_crypto = "0.24.0"
+tari_ootle_common_types = "0.45.0"
+tari_template_lib = "0.34.0"
+tower = { version = "0.5.3", features = ["util"] }
