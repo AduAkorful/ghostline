@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MIT
 
+use std::str::FromStr;
+
 use ghostline_core::{NONCE_LEN, SignedVoucher, from_hex, to_hex};
 use ghostline_sdk::{
-    Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, seal_hex, settle,
+    AccountFee, Channel, ChannelSpec, MaskAndValue, OutputScan, UnsignedTransaction, fund_open,
+    refund, seal_hex, seal_hex_with_fee, settle, unsigned_stealth_transfer_with_fee,
 };
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{
-    Hash32, ResourceAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    ComponentAddress, Hash32, ResourceAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
 };
 use tari_utilities::ByteArray;
@@ -62,6 +65,10 @@ pub fn parse_secret(label: &str, hex: &str) -> Result<RistrettoSecretKey, String
     RistrettoSecretKey::from_canonical_bytes(&bytes).map_err(|e| format!("{label}: {e}"))
 }
 
+pub fn parse_component(label: &str, addr: &str) -> Result<ComponentAddress, String> {
+    ComponentAddress::from_str(addr).map_err(|e| format!("{label}: {e}"))
+}
+
 pub fn parse_resource(hex: Option<&str>) -> Result<ResourceAddress, String> {
     match hex {
         None => Ok(STEALTH_TARI_RESOURCE_ADDRESS),
@@ -103,10 +110,33 @@ pub fn seal_settle(
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
     scan: OutputScan,
+    fee: Option<AccountFee<'_>>,
 ) -> Result<String, String> {
-    let statement = settle(channel, deposit, voucher, service_output, scan)
-        .map_err(|e| e.to_string())?;
-    seal_hex(scan.network, resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
+    let statement =
+        settle(channel, deposit, voucher, service_output, scan).map_err(|e| e.to_string())?;
+    seal_hex_with_fee(scan.network, resource, statement, max_epoch, sealer, fee)
+        .map_err(|e| e.to_string())
+}
+
+pub fn unsigned_settle(
+    channel: &Channel,
+    deposit: MaskAndValue,
+    voucher: &SignedVoucher,
+    service_output: RistrettoPublicKeyBytes,
+    resource: ResourceAddress,
+    max_epoch: u64,
+    scan: OutputScan,
+    fee_account: Option<(ComponentAddress, u64)>,
+) -> Result<UnsignedTransaction, String> {
+    let statement =
+        settle(channel, deposit, voucher, service_output, scan).map_err(|e| e.to_string())?;
+    Ok(unsigned_stealth_transfer_with_fee(
+        scan.network,
+        resource,
+        statement,
+        max_epoch,
+        fee_account,
+    ))
 }
 
 pub fn seal_refund(

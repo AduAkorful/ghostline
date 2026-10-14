@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: MIT
 
+use ootle_byte_type::ToByteType;
 use ootle_network::Network;
-use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope};
-use tari_template_lib::types::{ResourceAddress, stealth::StealthTransferStatement};
+use tari_crypto::keys::PublicKey as _;
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope, UnsignedTransaction};
+use tari_template_lib::types::{
+    ComponentAddress, ResourceAddress, UtxoAddress, UtxoId, stealth::StealthTransferStatement,
+};
 
 use crate::SdkError;
+
+/// Revealed XTR `pay_fee` from an account component, co-signed by that account.
+pub struct AccountFee<'a> {
+    pub account: ComponentAddress,
+    pub max_fee: u64,
+    pub signer: &'a RistrettoSecretKey,
+}
 
 /// Wraps a stealth transfer statement in a transaction for `network` and seals it.
 ///
@@ -17,10 +28,53 @@ pub fn seal_stealth_transfer(
     max_epoch: Epoch,
     sealer: &RistrettoSecretKey,
 ) -> Transaction {
-    Transaction::builder(network, max_epoch)
+    seal_stealth_transfer_with_fee(network, resource, statement, max_epoch, sealer, None)
+}
+
+/// Like [`seal_stealth_transfer`], optionally paying fees from `fee.account`.
+///
+/// The fee instruction is authorised by `fee.signer` (typically the wallet account key). The
+/// transaction is still sealed by `sealer` (the service key on settle, the payer on open/refund).
+pub fn unsigned_stealth_transfer_with_fee(
+    network: Network,
+    resource: ResourceAddress,
+    statement: StealthTransferStatement,
+    max_epoch: u64,
+    fee_account: Option<(ComponentAddress, u64)>,
+) -> UnsignedTransaction {
+    let mut builder = Transaction::builder(network, Epoch(max_epoch)).with_auto_fill_inputs();
+    if let Some((account, max_fee)) = fee_account {
+        builder = builder.pay_fee_from_component(account, max_fee);
+    }
+    for input in &statement.inputs_statement.inputs {
+        builder = builder.add_input(UtxoAddress::new(resource, UtxoId::from(input.commitment)));
+    }
+    builder
         .stealth_transfer(resource, statement)
-        .finish()
-        .seal(sealer)
+        .build_unsigned()
+}
+
+pub fn seal_stealth_transfer_with_fee(
+    network: Network,
+    resource: ResourceAddress,
+    statement: StealthTransferStatement,
+    max_epoch: Epoch,
+    sealer: &RistrettoSecretKey,
+    fee: Option<AccountFee<'_>>,
+) -> Transaction {
+    let fee_account = fee.as_ref().map(|f| (f.account, f.max_fee));
+    let unsigned = unsigned_stealth_transfer_with_fee(
+        network,
+        resource,
+        statement,
+        max_epoch.as_u64(),
+        fee_account,
+    );
+    let sealer_pk = RistrettoPublicKey::from_secret_key(sealer).to_byte_type();
+    match fee {
+        Some(fee) => unsigned.add_signer(&sealer_pk, fee.signer).seal(sealer),
+        None => unsigned.finish().seal(sealer),
+    }
 }
 
 /// Wraps a stealth transfer statement in a localnet transaction and seals it.
@@ -56,12 +110,25 @@ pub fn seal_hex(
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
 ) -> Result<String, SdkError> {
-    transaction_envelope_hex(seal_stealth_transfer(
+    seal_hex_with_fee(network, resource, statement, max_epoch, sealer, None)
+}
+
+/// Seal a stealth transfer, optionally attaching an account `pay_fee`.
+pub fn seal_hex_with_fee(
+    network: Network,
+    resource: ResourceAddress,
+    statement: StealthTransferStatement,
+    max_epoch: u64,
+    sealer: &RistrettoSecretKey,
+    fee: Option<AccountFee<'_>>,
+) -> Result<String, SdkError> {
+    transaction_envelope_hex(seal_stealth_transfer_with_fee(
         network,
         resource,
         statement,
         Epoch(max_epoch),
         sealer,
+        fee,
     ))
 }
 
@@ -160,5 +227,6 @@ mod tests {
             &payer_secret,
         );
         assert_eq!(tx.network(), Network::Esmeralda.as_byte());
+        assert!(tx.fee_instructions().is_empty());
     }
 }

@@ -108,6 +108,16 @@ enum Command {
         resource_hex: Option<String>,
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
+        /// Account component that pays revealed XTR fees (`pay_fee`). Required on public networks.
+        #[arg(long)]
+        fee_account: Option<String>,
+        #[arg(long, default_value_t = 100_000)]
+        max_fee: u64,
+        #[arg(long)]
+        fee_secret_hex: Option<String>,
+        /// Print unsigned JSON for `transactions.submit` / `submit_dry_run` instead of a sealed hex.
+        #[arg(long)]
+        unsigned_json: bool,
     },
     /// Seal a refund of the channel UTXO after expiry.
     SealRefund {
@@ -386,7 +396,10 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::PayTo(args) => {
             let channel = seal::channel(open_spec(&args)?)?;
             let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
-            println!("{}", serde_json::to_string(&pay_to).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string(&pay_to).map_err(|e| e.to_string())?
+            );
             seal::print_ids(&channel);
         }
         Command::SealOpen {
@@ -431,16 +444,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             max_epoch,
             resource_hex,
             ootle_network,
+            fee_account,
+            max_fee,
+            fee_secret_hex,
+            unsigned_json,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
             let bytes = from_hex(&voucher_hex)
                 .map_err(|_| "voucher: expected even-length hex".to_string())?;
             let voucher = SignedVoucher::from_bytes(&bytes).map_err(|e| e.to_string())?;
-            let sealer = secrets::load_secret(
-                seal_secret_hex.as_deref(),
-                secrets::SEAL_SECRET_ENV,
-                "seal secret",
-            )?;
             let deposit_mask = secrets::load_hex(
                 deposit_mask_hex.as_deref(),
                 secrets::DEPOSIT_MASK_ENV,
@@ -448,17 +460,66 @@ async fn run(cli: Cli) -> Result<(), String> {
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
             let scan = seal::parse_scan(&ootle_network, resource)?;
-            let tx = seal::seal_settle(
-                &channel,
-                funded(channel.params().deposit, &deposit_mask)?,
-                &voucher,
-                channel.spec().service,
-                resource,
-                max_epoch,
-                &sealer,
-                scan,
-            )?;
-            println!("{tx}");
+            let deposit = funded(channel.params().deposit, &deposit_mask)?;
+            if unsigned_json {
+                let fee = match &fee_account {
+                    Some(addr) => Some((seal::parse_component("fee-account", addr)?, max_fee)),
+                    None => None,
+                };
+                let unsigned = seal::unsigned_settle(
+                    &channel,
+                    deposit,
+                    &voucher,
+                    channel.spec().service,
+                    resource,
+                    max_epoch,
+                    scan,
+                    fee,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&unsigned).map_err(|e| e.to_string())?
+                );
+            } else {
+                let sealer = secrets::load_secret(
+                    seal_secret_hex.as_deref(),
+                    secrets::SEAL_SECRET_ENV,
+                    "seal secret",
+                )?;
+                let fee_secret = if fee_account.is_some() {
+                    Some(secrets::load_secret(
+                        fee_secret_hex.as_deref(),
+                        secrets::FEE_SECRET_ENV,
+                        "fee secret",
+                    )?)
+                } else {
+                    None
+                };
+                let fee = match (&fee_account, &fee_secret) {
+                    (Some(addr), Some(secret)) => Some(ghostline_sdk::AccountFee {
+                        account: seal::parse_component("fee-account", addr)?,
+                        max_fee,
+                        signer: secret,
+                    }),
+                    (None, None) => None,
+                    _ => return Err(
+                        "fee-account and fee secret must be set together (GHOSTLINE_FEE_SECRET)"
+                            .into(),
+                    ),
+                };
+                let tx = seal::seal_settle(
+                    &channel,
+                    deposit,
+                    &voucher,
+                    channel.spec().service,
+                    resource,
+                    max_epoch,
+                    &sealer,
+                    scan,
+                    fee,
+                )?;
+                println!("{tx}");
+            }
         }
         Command::SealRefund {
             open,
@@ -540,7 +601,8 @@ async fn run(cli: Cli) -> Result<(), String> {
                 secrets::PAYER_SECRET_ENV,
                 "claim secret",
             )?;
-            let found = unblind_transaction(&decode_tx(&tx_hex)?, &secret).map_err(|e| e.to_string())?;
+            let found =
+                unblind_transaction(&decode_tx(&tx_hex)?, &secret).map_err(|e| e.to_string())?;
             println!("outputs={}", found.len());
             for (i, out) in found.iter().enumerate() {
                 println!(
@@ -657,6 +719,7 @@ mod seal_tests {
             1,
             &service_secret,
             OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+            None,
         )
         .unwrap();
         decode_tx(&settle_hex).unwrap();
@@ -687,9 +750,13 @@ mod seal_tests {
         )
         .unwrap();
         let out = &opened.statement.outputs_statement.outputs[0];
-        let recovered =
-            unblind_output(&out.output, out.tag, &payer_secret, OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS))
-                .unwrap();
+        let recovered = unblind_output(
+            &out.output,
+            out.tag,
+            &payer_secret,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        )
+        .unwrap();
         assert_eq!(recovered.value, 100);
         assert_eq!(recovered.mask, opened.deposit.mask);
     }

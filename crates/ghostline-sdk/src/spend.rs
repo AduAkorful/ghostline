@@ -378,7 +378,13 @@ mod tests {
     #[test]
     fn open_rejects_short_inputs() {
         let (_secret, channel, _service) = channel_and_keys();
-        let err = fund_open(&channel, [funded(40), funded(50)], channel.spec().payer, scan()).unwrap_err();
+        let err = fund_open(
+            &channel,
+            [funded(40), funded(50)],
+            channel.spec().payer,
+            scan(),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             SdkError::InsufficientFunds {
@@ -400,8 +406,9 @@ mod tests {
         let (secret, channel, _service) = channel_and_keys();
         let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
         let out = &opened.statement.outputs_statement.outputs[0];
-        let nonce = RistrettoPublicKey::from_canonical_bytes(out.output.sender_public_nonce.as_bytes())
-            .unwrap();
+        let nonce =
+            RistrettoPublicKey::from_canonical_bytes(out.output.sender_public_nonce.as_bytes())
+                .unwrap();
         let expected = StealthCryptoApi::new().derive_stealth_output_tag(
             Network::LocalNet,
             &secret,

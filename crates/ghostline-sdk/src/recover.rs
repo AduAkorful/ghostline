@@ -68,7 +68,8 @@ pub fn unblind_transaction(
     tx: &Transaction,
     claim_secret: &RistrettoSecretKey,
 ) -> Result<Vec<RecoveredOutput>, SdkError> {
-    let network = Network::try_from(tx.network()).map_err(|_| SdkError::UnknownNetwork(tx.network()))?;
+    let network =
+        Network::try_from(tx.network()).map_err(|_| SdkError::UnknownNetwork(tx.network()))?;
     let mut recovered = Vec::new();
     for view in inspect_transaction(tx) {
         let scan = OutputScan {
@@ -115,20 +116,16 @@ pub fn inspect_transaction(tx: &Transaction) -> Vec<StealthOutputView> {
 mod tests {
     use super::*;
     use crate::{Channel, ChannelSpec, fund_open};
-    use tari_ootle_wallet_crypto::MaskAndValue;
     use ghostline_core::NONCE_LEN;
     use ootle_byte_type::ToByteType;
     use tari_crypto::keys::SecretKey as _;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+    use tari_ootle_wallet_crypto::MaskAndValue;
     use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
-    fn setup() -> (
-        RistrettoSecretKey,
-        crate::OpenStatement,
-        OutputScan,
-    ) {
+    fn setup() -> (RistrettoSecretKey, crate::OpenStatement, OutputScan) {
         let (payer_secret, payer_public) = create_key_pair_from_seed(11);
         let (_, service_public) = create_key_pair_from_seed(13);
         let payer: RistrettoPublicKeyBytes = payer_public.to_byte_type();
@@ -202,7 +199,10 @@ mod tests {
         );
         let views = inspect_transaction(&tx);
         assert_eq!(views.len(), 1);
-        assert_eq!(views[0].tag, opened.statement.outputs_statement.outputs[0].tag);
+        assert_eq!(
+            views[0].tag,
+            opened.statement.outputs_statement.outputs[0].tag
+        );
         let recovered = unblind_output(&views[0].output, views[0].tag, &secret, scan).unwrap();
         assert_eq!(recovered.value, 100);
         assert_eq!(recovered.mask, opened.deposit.mask);

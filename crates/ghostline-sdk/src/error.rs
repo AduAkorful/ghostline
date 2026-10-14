@@ -44,7 +44,10 @@ impl fmt::Display for SdkError {
             Self::Encrypt(details) => write!(f, "failed to encrypt output data: {details}"),
             Self::Decrypt(details) => write!(f, "failed to decrypt output data: {details}"),
             Self::TagMismatch => write!(f, "utxo tag does not match this claim key and resource"),
-            Self::UnknownNetwork(byte) => write!(f, "transaction network byte {byte:#04x} is not an Ootle Network"),
+            Self::UnknownNetwork(byte) => write!(
+                f,
+                "transaction network byte {byte:#04x} is not an Ootle Network"
+            ),
         }
     }
 }
