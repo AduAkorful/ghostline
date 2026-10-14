@@ -1,0 +1,28 @@
+[package]
+name = "ghostline-mcp"
+description = "MCP front door for Ghostline channel inspect, voucher sign/verify, and paid HTTP calls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ghostline-mcp"
+path = "src/main.rs"
+
+[dependencies]
+ghostline-core = { path = "../ghostline-core" }
+ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rmcp = { version = "3.5.1", features = ["transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tari_crypto = "0.24.0"
+tari_template_lib = "0.34.0"
+tari_utilities = "0.10"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "io-std"] }
+
+[dev-dependencies]
+ootle_byte_type = { version = "0.16", features = ["crypto"] }
+tari_ootle_common_types = "0.45.0"

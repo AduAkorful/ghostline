@@ -5,6 +5,7 @@ members = [
     "crates/ghostline-sdk",
     "crates/ghostline-cli",
     "crates/ghostline-policy",
+    "crates/ghostline-mcp",
     "crates/contract-tests",
     "middleware/ghostline-paywall",
     "demo/paid-api",

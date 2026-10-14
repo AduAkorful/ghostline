@@ -40,6 +40,8 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
 | `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
 | `demo/paid-api` | Reference paid endpoint (`/fortune`) |
+| `packages/ghostline` | TypeScript channel-id and voucher-message encodings |
+| `crates/ghostline-mcp` | MCP stdio server (`ghostline-mcp`) |
 | `crates/contract-tests` | Engine-level tests, run against the in-process Ootle engine |
 
 ## Running the tests
@@ -56,6 +58,7 @@ The HTTP 402 paywall and demo API do not need the engine:
 
 ```bash
 cargo test -p ghostline-paywall -p ghostline-paid-api
+cd packages/ghostline && npm test
 ```
 
 Offline voucher commands (no network):
@@ -64,6 +67,13 @@ Offline voucher commands (no network):
 cargo run -p ghostline-cli -- channel-id --network-tag 1 --deposit 100 \
   --payer-hex <32-byte-hex> --payer-root-hex <32-byte-hex> --nonce-hex <32-byte-hex>
 ```
+
+MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
+
+- `ghostline_channel_id`
+- `ghostline_sign_voucher`
+- `ghostline_verify_voucher`
+- `ghostline_call_paid`
 
 ## License
 
