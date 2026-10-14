@@ -12,7 +12,9 @@
 //! not implemented.
 //!
 //! Submitting Ghostline-sealed envelopes through the public indexer REST API is a
-//! different path and remains unverified.
+//! different path: `resolve-inputs` then `seal-unsigned`. That settle is proven live.
+//! A faucet-funded derived fee account (not the opener component) is proven; same-seed
+//! accounts remain correlated.
 
 use std::str::FromStr;
 

@@ -127,7 +127,7 @@ cargo run -p ghostline-cli -- wallet utxos --transaction-id <64-hex> \
   --utxo-json-out /tmp/channel.utxo.json
 ```
 
-Wallet-daemon settle: the sealer is the service key imported into the wallet. `pay_fee` is public, so the fee account must be **service-owned** and funded from a source that never opened the channel. `wallet submit` does not default to derived account index 0 (the usual opener).
+Wallet-daemon settle: the sealer is the service key imported into the wallet. `pay_fee` is public. A live settle paid fees from a derived account funded by an independent faucet (not a transfer from the opener). `wallet submit` does not default to derived account index 0 (the usual opener). Same-seed accounts remain correlated.
 
 ```bash
 cargo run -p ghostline-cli -- wallet account-create --name <service-fee-account> --key-index 1
@@ -149,10 +149,11 @@ Indexer-sealed settle (after the same unsigned JSON; versions must still be null
 
 ```bash
 cargo run -p ghostline-cli -- indexer resolve-inputs --url <indexer-url> \
-  --unsigned-json /tmp/settle.unsigned.json > /tmp/settle.resolved.json
-# first line is filled=/down=/added=; rest is JSON
+  --unsigned-json /tmp/settle.unsigned.json --out /tmp/settle.resolved.json
 cargo run -p ghostline-cli -- seal-unsigned --unsigned-json /tmp/settle.resolved.json \
   > /tmp/settle.sealed.hex
+# indexer dry-run needs --dry-run (envelope dry_run: false is rejected on that path)
+# cargo run -p ghostline-cli -- seal-unsigned --dry-run --unsigned-json /tmp/settle.resolved.json
 cargo run -p ghostline-cli -- indexer submit --url <indexer-url> --tx-hex "$(cat /tmp/settle.sealed.hex)"
 cargo run -p ghostline-cli -- indexer result --url <indexer-url> --transaction-id <64-hex>
 ```

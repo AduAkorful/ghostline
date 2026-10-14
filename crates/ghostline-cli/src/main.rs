@@ -142,6 +142,9 @@ enum Command {
         seal_secret_hex: Option<String>,
         #[arg(long)]
         fee_secret_hex: Option<String>,
+        /// Set `dry_run` on the unsigned body (required for `indexer dry-run`).
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Seal a refund of the channel UTXO after expiry.
     SealRefund {
@@ -329,6 +332,9 @@ enum IndexerCommand {
         url: String,
         #[arg(long)]
         unsigned_json: PathBuf,
+        /// Write resolved unsigned JSON here. Stdout is only the filled=/down=/added= line.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -533,7 +539,11 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|e| e.to_string())?;
                 println!("{}", indexer_result_status(&body));
             }
-            IndexerCommand::ResolveInputs { url, unsigned_json } => {
+            IndexerCommand::ResolveInputs {
+                url,
+                unsigned_json,
+                out,
+            } => {
                 let mut unsigned = serde_json::to_value(read_unsigned_json(&unsigned_json)?)
                     .map_err(|e| e.to_string())?;
                 let report = IndexerClient::connect(&url)
@@ -545,10 +555,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "filled={} down={} added={}",
                     report.filled, report.down, report.added
                 );
-                println!(
-                    "{}",
-                    serde_json::to_string(&unsigned).map_err(|e| e.to_string())?
-                );
+                let json = serde_json::to_string(&unsigned).map_err(|e| e.to_string())?;
+                if let Some(path) = out {
+                    std::fs::write(&path, json)
+                        .map_err(|e| format!("resolve-inputs --out: {e}"))?;
+                    println!("wrote={}", path.display());
+                } else {
+                    println!("{json}");
+                }
             }
         },
         Command::Wallet { command } => match command {
@@ -834,11 +848,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             unsigned_json,
             seal_secret_hex,
             fee_secret_hex,
+            dry_run,
         } => {
             use tari_crypto::keys::PublicKey as _;
             use tari_crypto::ristretto::RistrettoPublicKey;
             use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-            let unsigned = read_unsigned_json(&unsigned_json)?;
+            let unsigned = {
+                let u = read_unsigned_json(&unsigned_json)?;
+                if dry_run { u.with_dry_run(true) } else { u }
+            };
             let sealer = secrets::load_secret(
                 seal_secret_hex.as_deref(),
                 secrets::SEAL_SECRET_ENV,
@@ -1314,6 +1332,41 @@ mod seal_tests {
         )
         .unwrap();
         assert_eq!(recovered.mask, found[0].funds.mask);
+    }
+
+    #[test]
+    fn unsigned_settle_with_dry_run_sets_the_flag() {
+        let (payer_secret, payer_public) = create_key_pair_from_seed(11);
+        let (_service_secret, service_public) = create_key_pair_from_seed(13);
+        let channel = seal::channel(seal::OpenSpec {
+            network_tag: 1,
+            deposit: 100,
+            payer: payer_public.to_byte_type(),
+            service: service_public.to_byte_type(),
+            expiry_epoch: u64::MAX,
+            nonce: [42u8; NONCE_LEN],
+            channel_template: Hash32::from_array([7u8; 32]),
+        })
+        .unwrap();
+        let voucher = SignedVoucher::sign(&payer_secret, channel.params(), 30).unwrap();
+        let unsigned = seal::unsigned_settle(
+            &channel,
+            MaskAndValue {
+                value: 100,
+                mask: RistrettoSecretKey::random(&mut rand::rng()),
+            },
+            &voucher,
+            channel.spec().service,
+            STEALTH_TARI_RESOURCE_ADDRESS,
+            1,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+            None,
+        )
+        .unwrap();
+        let off = serde_json::to_value(&unsigned).unwrap();
+        assert_eq!(off["V1"]["dry_run"], false);
+        let on = serde_json::to_value(&unsigned.with_dry_run(true)).unwrap();
+        assert_eq!(on["V1"]["dry_run"], true);
     }
 
     #[test]
