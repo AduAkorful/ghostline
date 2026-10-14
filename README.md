@@ -95,6 +95,8 @@ MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 - `ghostline_sign_voucher` (secret from `GHOSTLINE_PAYER_SECRET`; session from `GHOSTLINE_SESSION`)
 - `ghostline_verify_voucher`
 - `ghostline_call_paid`
+- `ghostline_inspect_tx`
+- `ghostline_unblind_tx` (secret from `GHOSTLINE_PAYER_SECRET`)
 
 Localnet (needs tens of GB free; refused below `GHOSTLINE_MIN_FREE_GB`, default 40):
 
@@ -118,6 +120,9 @@ Recover value and mask from a stealth output encrypted to `GHOSTLINE_PAYER_SECRE
 cargo run -p ghostline-cli -- unblind \
   --commitment-hex <32-byte-hex> --nonce-hex <32-byte-hex> \
   --encrypted-hex <encrypted-data-hex> --tag <u32>
+
+cargo run -p ghostline-cli -- inspect-tx --tx-hex <seal-open-or-settle-hex>
+cargo run -p ghostline-cli -- unblind-tx --tx-hex <seal-open-or-settle-hex>
 ```
 
 ## License

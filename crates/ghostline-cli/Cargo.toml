@@ -17,6 +17,8 @@ ghostline-net = { path = "../ghostline-net" }
 ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
 ghostline-policy = { path = "../ghostline-policy" }
 ghostline-sdk = { path = "../ghostline-sdk" }
+rand = "0.10.1"
+serde_json = "1"
 tari_crypto = "0.24.0"
 tari_template_lib = "0.34.0"
 tari_utilities = "0.10"

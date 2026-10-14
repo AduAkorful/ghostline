@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 use ghostline_mcp::{
-    CallPaidArgs, ChannelArgs, SignArgs, VerifyArgs, call_paid, channel_id_hex, sign_voucher_hex,
-    verify_voucher,
+    CallPaidArgs, ChannelArgs, SignArgs, TxHexArgs, VerifyArgs, call_paid, channel_id_hex,
+    inspect_tx, sign_voucher_hex, unblind_tx, verify_voucher,
 };
 use rmcp::{
     ServerHandler, ServiceExt, handler::server::wrapper::Parameters, tool, tool_handler,
@@ -72,6 +72,28 @@ impl GhostlineMcp {
     ) -> Result<String, String> {
         let result = call_paid(&args).await?;
         serde_json::to_string(&result).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "List stealth outputs in a sealed Ghostline tx hex (resource, tag, commitment, nonce, encrypted data). No secret."
+    )]
+    fn ghostline_inspect_tx(
+        &self,
+        Parameters(args): Parameters<TxHexArgs>,
+    ) -> Result<String, String> {
+        let views = inspect_tx(&args)?;
+        serde_json::to_string(&views).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Recover value and mask from stealth outputs in a sealed tx hex encrypted to GHOSTLINE_PAYER_SECRET. Does not take a secret argument."
+    )]
+    fn ghostline_unblind_tx(
+        &self,
+        Parameters(args): Parameters<TxHexArgs>,
+    ) -> Result<String, String> {
+        let found = unblind_tx(&args)?;
+        serde_json::to_string(&found).map_err(|e| e.to_string())
     }
 }
 

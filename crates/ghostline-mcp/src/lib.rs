@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 use ghostline_core::{ChannelParams, SignedVoucher, VoucherError, from_hex, to_hex};
+use ghostline_net::TransactionEnvelope;
 use ghostline_paywall::{
     ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
 };
+use ghostline_sdk::{inspect_transaction, unblind_transaction};
 use ghostline_policy::{Policy, PolicyEngine, env_flag};
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
@@ -43,6 +45,12 @@ pub struct CallPaidArgs {
     pub voucher_hex: Option<String>,
     #[serde(default)]
     pub attested: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct TxHexArgs {
+    /// BOR-encoded sealed transaction hex from `ghostline seal-open` / `seal-settle`.
+    pub tx_hex: String,
 }
 
 pub fn parse_params(args: &ChannelArgs) -> Result<ChannelParams, String> {
@@ -176,6 +184,63 @@ async fn get_paid(url: &str, voucher_hex: Option<&str>) -> Result<PaidCall, Stri
         body,
         payment_required,
     })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InspectedOutput {
+    pub tag: u32,
+    pub resource: String,
+    pub commitment_hex: String,
+    pub nonce_hex: String,
+    pub encrypted_hex: String,
+    pub promise: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnblindedOutput {
+    pub value: u64,
+    pub tag: u32,
+    pub resource: String,
+    pub mask_hex: String,
+}
+
+fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
+    let bytes = from_hex(tx_hex).map_err(|_| "tx: expected even-length hex".to_string())?;
+    TransactionEnvelope::from_raw(bytes.into_boxed_slice())
+        .decode()
+        .map_err(|e| format!("tx envelope: {e}"))
+}
+
+/// List stealth outputs in a sealed tx. No secret.
+pub fn inspect_tx(args: &TxHexArgs) -> Result<Vec<InspectedOutput>, String> {
+    let tx = decode_tx(&args.tx_hex)?;
+    Ok(inspect_transaction(&tx)
+        .into_iter()
+        .map(|view| InspectedOutput {
+            tag: view.tag.value(),
+            resource: view.resource.to_string(),
+            commitment_hex: to_hex(view.output.commitment.as_bytes()),
+            nonce_hex: to_hex(view.output.sender_public_nonce.as_bytes()),
+            encrypted_hex: to_hex(view.output.encrypted_data.as_bytes()),
+            promise: view.output.minimum_value_promise,
+        })
+        .collect())
+}
+
+/// Recover value and mask for outputs encrypted to `GHOSTLINE_PAYER_SECRET`.
+pub fn unblind_tx(args: &TxHexArgs) -> Result<Vec<UnblindedOutput>, String> {
+    let secret = payer_secret_from_env()?;
+    let tx = decode_tx(&args.tx_hex)?;
+    let found = unblind_transaction(&tx, &secret).map_err(|e| e.to_string())?;
+    Ok(found
+        .into_iter()
+        .map(|out| UnblindedOutput {
+            value: out.funds.value,
+            tag: out.tag.value(),
+            resource: out.resource.to_string(),
+            mask_hex: to_hex(out.funds.mask.as_bytes()),
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -312,5 +377,55 @@ mod tests {
         assert!(result.body.contains("fortune"));
         let loaded = ChannelStore::open(&path).unwrap();
         assert_eq!(loaded.session().unwrap().cumulative(), 10);
+    }
+
+    #[test]
+    fn inspect_and_unblind_a_sealed_open() {
+        use ghostline_sdk::{
+            Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, seal_localnet_hex,
+        };
+        use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+
+        let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service) = create_key_pair_from_seed(13);
+        let (input_mask, _) = create_key_pair_from_seed(99);
+        let channel = Channel::open(ChannelSpec {
+            network_tag: 1,
+            payer: public.to_byte_type(),
+            service: service.to_byte_type(),
+            deposit: 100,
+            expiry_epoch: u64::MAX,
+            nonce: [42u8; NONCE_LEN],
+            channel_template: Hash32::from_array([7u8; 32]),
+        })
+        .unwrap();
+        let scan = OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS);
+        let opened = fund_open(
+            &channel,
+            [MaskAndValue {
+                value: 100,
+                mask: input_mask,
+            }],
+            channel.spec().payer,
+            scan,
+        )
+        .unwrap();
+        let hex = seal_localnet_hex(scan.resource, opened.statement, 1, &secret).unwrap();
+        let views = inspect_tx(&TxHexArgs {
+            tx_hex: hex.clone(),
+        })
+        .unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].promise, 100);
+        unsafe {
+            std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
+        }
+        let found = unblind_tx(&TxHexArgs { tx_hex: hex }).unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_PAYER_SECRET");
+        }
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].value, 100);
+        assert_eq!(found[0].mask_hex, to_hex(opened.deposit.mask.as_bytes()));
     }
 }

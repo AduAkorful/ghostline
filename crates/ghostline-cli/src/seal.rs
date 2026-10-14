@@ -2,7 +2,7 @@
 
 use ghostline_core::{NONCE_LEN, SignedVoucher, from_hex, to_hex};
 use ghostline_sdk::{
-    Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, seal_localnet_hex, settle,
+    Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, seal_hex, settle,
 };
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{
@@ -69,6 +69,16 @@ pub fn parse_resource(hex: Option<&str>) -> Result<ResourceAddress, String> {
     }
 }
 
+pub fn parse_scan(name: &str, resource: ResourceAddress) -> Result<OutputScan, String> {
+    match name {
+        "localnet" => Ok(OutputScan::localnet(resource)),
+        "esmeralda" => Ok(OutputScan::esmeralda(resource)),
+        other => Err(format!(
+            "ootle-network: expected localnet or esmeralda, got {other}"
+        )),
+    }
+}
+
 pub fn seal_open(
     channel: &Channel,
     input: MaskAndValue,
@@ -76,10 +86,10 @@ pub fn seal_open(
     resource: ResourceAddress,
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
+    scan: OutputScan,
 ) -> Result<(String, String), String> {
-    let opened = fund_open(channel, [input], change_key, OutputScan::localnet(resource))
-        .map_err(|e| e.to_string())?;
-    let tx = seal_localnet_hex(resource, opened.statement, max_epoch, sealer)
+    let opened = fund_open(channel, [input], change_key, scan).map_err(|e| e.to_string())?;
+    let tx = seal_hex(scan.network, resource, opened.statement, max_epoch, sealer)
         .map_err(|e| e.to_string())?;
     Ok((tx, to_hex(opened.deposit.mask.as_bytes())))
 }
@@ -92,16 +102,11 @@ pub fn seal_settle(
     resource: ResourceAddress,
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
+    scan: OutputScan,
 ) -> Result<String, String> {
-    let statement = settle(
-        channel,
-        deposit,
-        voucher,
-        service_output,
-        OutputScan::localnet(resource),
-    )
-    .map_err(|e| e.to_string())?;
-    seal_localnet_hex(resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
+    let statement = settle(channel, deposit, voucher, service_output, scan)
+        .map_err(|e| e.to_string())?;
+    seal_hex(scan.network, resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
 }
 
 pub fn seal_refund(
@@ -111,13 +116,8 @@ pub fn seal_refund(
     resource: ResourceAddress,
     max_epoch: u64,
     sealer: &RistrettoSecretKey,
+    scan: OutputScan,
 ) -> Result<String, String> {
-    let statement = refund(
-        channel,
-        deposit,
-        payer_output,
-        OutputScan::localnet(resource),
-    )
-    .map_err(|e| e.to_string())?;
-    seal_localnet_hex(resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
+    let statement = refund(channel, deposit, payer_output, scan).map_err(|e| e.to_string())?;
+    seal_hex(scan.network, resource, statement, max_epoch, sealer).map_err(|e| e.to_string())
 }

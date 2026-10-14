@@ -35,6 +35,14 @@ impl OutputScan {
             resource,
         }
     }
+
+    /// Tags for Esmeralda (`Network::Esmeralda` / `0x26`) and the given resource.
+    pub fn esmeralda(resource: ResourceAddress) -> Self {
+        Self {
+            network: Network::Esmeralda,
+            resource,
+        }
+    }
 }
 
 /// A funded channel UTXO plus the transfer that created it.

@@ -8,13 +8,15 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use ghostline_core::{CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, SignedVoucher, from_hex, to_hex};
 use ghostline_net::{IndexerClient, TransactionEnvelope};
-use ghostline_sdk::{MaskAndValue, OutputScan, unblind_output};
+use ghostline_sdk::{
+    MaskAndValue, OutputScan, inspect_transaction, unblind_output, unblind_transaction,
+};
 use tari_utilities::ByteArray;
 
 #[derive(Parser)]
 #[command(
     name = "ghostline",
-    about = "Sign and verify Ghostline channel vouchers, and submit sealed transactions to a local indexer"
+    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, submit to an indexer"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -68,7 +70,11 @@ enum Command {
     },
     /// Print payer_root and channel_id from a full channel spec (computes the tree).
     Spec(OpenArgs),
-    /// Seal a localnet open (key-path input → PayTo::Conditions). Prints tx= and deposit_mask=.
+    /// Print `PayTo::Conditions` JSON for `accounts.stealth_transfer`.
+    PayTo(OpenArgs),
+    /// Print a random Ristretto secret and matching public key as hex.
+    Keygen,
+    /// Seal an open (key-path input → PayTo::Conditions). Prints tx= and deposit_mask=.
     SealOpen {
         #[command(flatten)]
         open: OpenArgs,
@@ -82,8 +88,11 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        /// Ootle network used for UTXO tags and the sealed transaction (`localnet` or `esmeralda`).
+        #[arg(long, default_value = "localnet")]
+        ootle_network: String,
     },
-    /// Seal a localnet settle of a voucher against the channel UTXO.
+    /// Seal a settle of a voucher against the channel UTXO.
     SealSettle {
         #[command(flatten)]
         open: OpenArgs,
@@ -97,8 +106,10 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        #[arg(long, default_value = "localnet")]
+        ootle_network: String,
     },
-    /// Seal a localnet refund of the channel UTXO after expiry.
+    /// Seal a refund of the channel UTXO after expiry.
     SealRefund {
         #[command(flatten)]
         open: OpenArgs,
@@ -110,6 +121,8 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        #[arg(long, default_value = "localnet")]
+        ootle_network: String,
     },
     /// Recover value and mask from a stealth output encrypted to the claim secret.
     Unblind {
@@ -125,6 +138,20 @@ enum Command {
         resource_hex: Option<String>,
         #[arg(long)]
         secret_hex: Option<String>,
+        #[arg(long, default_value = "localnet")]
+        ootle_network: String,
+    },
+    /// Recover every stealth output in a sealed tx hex that matches the claim secret.
+    UnblindTx {
+        #[arg(long)]
+        tx_hex: String,
+        #[arg(long)]
+        secret_hex: Option<String>,
+    },
+    /// Print stealth output fields from a sealed tx hex (no secret).
+    InspectTx {
+        #[arg(long)]
+        tx_hex: String,
     },
 }
 
@@ -346,8 +373,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                 println!("{id}");
             }
         },
+        Command::Keygen => {
+            use tari_crypto::keys::PublicKey as _;
+            use tari_crypto::ristretto::RistrettoPublicKey;
+            let (secret, public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+            println!("secret={}", to_hex(secret.as_bytes()));
+            println!("public={}", to_hex(public.as_bytes()));
+        }
         Command::Spec(args) => {
             seal::print_ids(&seal::channel(open_spec(&args)?)?);
+        }
+        Command::PayTo(args) => {
+            let channel = seal::channel(open_spec(&args)?)?;
+            let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
+            println!("{}", serde_json::to_string(&pay_to).map_err(|e| e.to_string())?);
+            seal::print_ids(&channel);
         }
         Command::SealOpen {
             open,
@@ -356,6 +396,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             seal_secret_hex,
             max_epoch,
             resource_hex,
+            ootle_network,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
             let sealer = secrets::load_secret(
@@ -369,6 +410,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "input mask",
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
+            let scan = seal::parse_scan(&ootle_network, resource)?;
             let (tx, mask) = seal::seal_open(
                 &channel,
                 funded(input_value, &input_mask)?,
@@ -376,6 +418,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 resource,
                 max_epoch,
                 &sealer,
+                scan,
             )?;
             println!("tx={tx}");
             println!("deposit_mask={mask}");
@@ -387,6 +430,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             seal_secret_hex,
             max_epoch,
             resource_hex,
+            ootle_network,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
             let bytes = from_hex(&voucher_hex)
@@ -403,6 +447,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "deposit mask",
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
+            let scan = seal::parse_scan(&ootle_network, resource)?;
             let tx = seal::seal_settle(
                 &channel,
                 funded(channel.params().deposit, &deposit_mask)?,
@@ -411,6 +456,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 resource,
                 max_epoch,
                 &sealer,
+                scan,
             )?;
             println!("{tx}");
         }
@@ -420,6 +466,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             seal_secret_hex,
             max_epoch,
             resource_hex,
+            ootle_network,
         } => {
             let channel = seal::channel(open_spec(&open)?)?;
             let sealer = secrets::load_secret(
@@ -433,6 +480,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "deposit mask",
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
+            let scan = seal::parse_scan(&ootle_network, resource)?;
             let tx = seal::seal_refund(
                 &channel,
                 funded(channel.params().deposit, &deposit_mask)?,
@@ -440,6 +488,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 resource,
                 max_epoch,
                 &sealer,
+                scan,
             )?;
             println!("{tx}");
         }
@@ -450,6 +499,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             tag,
             resource_hex,
             secret_hex,
+            ootle_network,
         } => {
             use tari_template_lib::types::{
                 EncryptedData,
@@ -478,11 +528,44 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &output,
                 UtxoTag::new(tag),
                 &secret,
-                OutputScan::localnet(resource),
+                seal::parse_scan(&ootle_network, resource)?,
             )
             .map_err(|e| e.to_string())?;
             println!("value={}", recovered.value);
             println!("mask={}", to_hex(recovered.mask.as_bytes()));
+        }
+        Command::UnblindTx { tx_hex, secret_hex } => {
+            let secret = secrets::load_secret(
+                secret_hex.as_deref(),
+                secrets::PAYER_SECRET_ENV,
+                "claim secret",
+            )?;
+            let found = unblind_transaction(&decode_tx(&tx_hex)?, &secret).map_err(|e| e.to_string())?;
+            println!("outputs={}", found.len());
+            for (i, out) in found.iter().enumerate() {
+                println!(
+                    "output[{i}] value={} tag={} resource={} mask={}",
+                    out.funds.value,
+                    out.tag.value(),
+                    out.resource,
+                    to_hex(out.funds.mask.as_bytes())
+                );
+            }
+        }
+        Command::InspectTx { tx_hex } => {
+            let views = inspect_transaction(&decode_tx(&tx_hex)?);
+            println!("outputs={}", views.len());
+            for (i, view) in views.iter().enumerate() {
+                println!(
+                    "output[{i}] tag={} resource={} commitment={} nonce={} encrypted={} promise={}",
+                    view.tag.value(),
+                    view.resource,
+                    to_hex(view.output.commitment.as_bytes()),
+                    to_hex(view.output.sender_public_nonce.as_bytes()),
+                    to_hex(view.output.encrypted_data.as_bytes()),
+                    view.output.minimum_value_promise
+                );
+            }
         }
     }
     Ok(())
@@ -525,6 +608,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
 mod seal_tests {
     use super::*;
     use ootle_byte_type::ToByteType;
@@ -559,6 +643,7 @@ mod seal_tests {
             STEALTH_TARI_RESOURCE_ADDRESS,
             1,
             &payer_secret,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
         )
         .unwrap();
         decode_tx(&open_hex).unwrap();
@@ -571,6 +656,7 @@ mod seal_tests {
             STEALTH_TARI_RESOURCE_ADDRESS,
             1,
             &service_secret,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
         )
         .unwrap();
         decode_tx(&settle_hex).unwrap();
@@ -606,5 +692,52 @@ mod seal_tests {
                 .unwrap();
         assert_eq!(recovered.value, 100);
         assert_eq!(recovered.mask, opened.deposit.mask);
+    }
+
+    #[test]
+    fn unblind_tx_recovers_the_same_deposit() {
+        let open_hex = {
+            let (payer_secret, payer_public) = create_key_pair_from_seed(11);
+            let (_, service_public) = create_key_pair_from_seed(13);
+            let channel = seal::channel(seal::OpenSpec {
+                network_tag: 1,
+                deposit: 100,
+                payer: payer_public.to_byte_type(),
+                service: service_public.to_byte_type(),
+                expiry_epoch: u64::MAX,
+                nonce: [42u8; NONCE_LEN],
+                channel_template: Hash32::from_array([7u8; 32]),
+            })
+            .unwrap();
+            let input = MaskAndValue {
+                value: 100,
+                mask: RistrettoSecretKey::random(&mut rand::rng()),
+            };
+            let (hex, _) = seal::seal_open(
+                &channel,
+                input,
+                channel.spec().payer,
+                STEALTH_TARI_RESOURCE_ADDRESS,
+                1,
+                &payer_secret,
+                OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+            )
+            .unwrap();
+            hex
+        };
+        let (payer_secret, _) = create_key_pair_from_seed(11);
+        let found = unblind_transaction(&decode_tx(&open_hex).unwrap(), &payer_secret).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].funds.value, 100);
+        let views = inspect_transaction(&decode_tx(&open_hex).unwrap());
+        assert_eq!(views.len(), 1);
+        let recovered = unblind_output(
+            &views[0].output,
+            views[0].tag,
+            &payer_secret,
+            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        )
+        .unwrap();
+        assert_eq!(recovered.mask, found[0].funds.mask);
     }
 }

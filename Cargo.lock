@@ -1432,6 +1432,7 @@ dependencies = [
  "ghostline-sdk",
  "ootle_byte_type",
  "rand",
+ "serde_json",
  "tari_crypto",
  "tari_ootle_common_types",
  "tari_template_lib",
@@ -1477,8 +1478,10 @@ name = "ghostline-mcp"
 version = "0.1.0"
 dependencies = [
  "ghostline-core",
+ "ghostline-net",
  "ghostline-paywall",
  "ghostline-policy",
+ "ghostline-sdk",
  "ootle_byte_type",
  "reqwest",
  "rmcp",

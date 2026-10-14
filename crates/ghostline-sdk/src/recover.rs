@@ -1,11 +1,29 @@
 // SPDX-License-Identifier: MIT
 
+use ootle_network::Network;
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use tari_ootle_transaction::{Instruction, ResourceAddressRef, Transaction};
 use tari_ootle_wallet_crypto::{MaskAndValue, StealthCryptoApi};
-use tari_template_lib::types::{crypto::UtxoTag, stealth::UnspentOutput};
+use tari_template_lib::types::{ResourceAddress, crypto::UtxoTag, stealth::UnspentOutput};
 use tari_utilities::ByteArray;
 
 use crate::{OutputScan, SdkError};
+
+/// Value and mask recovered from one stealth output in a sealed transaction.
+#[derive(Debug, Clone)]
+pub struct RecoveredOutput {
+    pub resource: ResourceAddress,
+    pub tag: UtxoTag,
+    pub funds: MaskAndValue,
+}
+
+/// Public stealth output fields from a sealed transaction. No secret required.
+#[derive(Debug, Clone)]
+pub struct StealthOutputView {
+    pub resource: ResourceAddress,
+    pub tag: UtxoTag,
+    pub output: UnspentOutput,
+}
 
 /// Recovers value and mask if `tag` matches the Ootle scan KDF for `claim_secret`.
 ///
@@ -39,6 +57,58 @@ pub fn unblind_output(
         )
         .map_err(|err| SdkError::Decrypt(err.to_string()))?;
     Ok(decrypted.into_mask_and_value())
+}
+
+/// Unblinds every tagged stealth output in `tx` that was encrypted to `claim_secret`.
+///
+/// Skips outputs whose tag does not match (other recipients) and transfers whose resource is a
+/// workspace ref rather than a concrete address. Uses the transaction's Ootle network byte, not
+/// Ghostline's voucher `network_tag`.
+pub fn unblind_transaction(
+    tx: &Transaction,
+    claim_secret: &RistrettoSecretKey,
+) -> Result<Vec<RecoveredOutput>, SdkError> {
+    let network = Network::try_from(tx.network()).map_err(|_| SdkError::UnknownNetwork(tx.network()))?;
+    let mut recovered = Vec::new();
+    for view in inspect_transaction(tx) {
+        let scan = OutputScan {
+            network,
+            resource: view.resource,
+        };
+        match unblind_output(&view.output, view.tag, claim_secret, scan) {
+            Ok(funds) => recovered.push(RecoveredOutput {
+                resource: view.resource,
+                tag: view.tag,
+                funds,
+            }),
+            Err(SdkError::TagMismatch) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(recovered)
+}
+
+/// Lists stealth outputs in fee and body instructions. Workspace resource refs are skipped.
+pub fn inspect_transaction(tx: &Transaction) -> Vec<StealthOutputView> {
+    let mut views = Vec::new();
+    for instruction in tx.fee_instructions().iter().chain(tx.instructions()) {
+        let Instruction::StealthTransfer {
+            resource_address_ref: ResourceAddressRef::Address(resource),
+            statement,
+            ..
+        } = instruction
+        else {
+            continue;
+        };
+        for out in &statement.outputs_statement.outputs {
+            views.push(StealthOutputView {
+                resource: *resource,
+                tag: out.tag,
+                output: out.output.clone(),
+            });
+        }
+    }
+    views
 }
 
 #[cfg(test)]
@@ -97,5 +167,44 @@ mod tests {
         let out = &opened.statement.outputs_statement.outputs[0];
         let err = unblind_output(&out.output, out.tag, &other, scan).unwrap_err();
         assert!(matches!(err, SdkError::TagMismatch));
+    }
+
+    #[test]
+    fn payer_unblinds_deposit_from_a_sealed_open() {
+        use crate::seal_localnet_stealth_transfer;
+        use tari_ootle_transaction::Epoch;
+
+        let (secret, opened, scan) = setup();
+        let tx = seal_localnet_stealth_transfer(
+            scan.resource,
+            opened.statement.clone(),
+            Epoch(1),
+            &secret,
+        );
+        let found = unblind_transaction(&tx, &secret).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].funds.value, 100);
+        assert_eq!(found[0].funds.mask, opened.deposit.mask);
+        assert_eq!(found[0].resource, scan.resource);
+    }
+
+    #[test]
+    fn inspect_lists_outputs_that_unblind_can_take() {
+        use crate::seal_localnet_stealth_transfer;
+        use tari_ootle_transaction::Epoch;
+
+        let (secret, opened, scan) = setup();
+        let tx = seal_localnet_stealth_transfer(
+            scan.resource,
+            opened.statement.clone(),
+            Epoch(1),
+            &secret,
+        );
+        let views = inspect_transaction(&tx);
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].tag, opened.statement.outputs_statement.outputs[0].tag);
+        let recovered = unblind_output(&views[0].output, views[0].tag, &secret, scan).unwrap();
+        assert_eq!(recovered.value, 100);
+        assert_eq!(recovered.mask, opened.deposit.mask);
     }
 }

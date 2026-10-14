@@ -12,8 +12,10 @@ path = "src/main.rs"
 
 [dependencies]
 ghostline-core = { path = "../ghostline-core" }
+ghostline-net = { path = "../ghostline-net" }
 ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
 ghostline-policy = { path = "../ghostline-policy" }
+ghostline-sdk = { path = "../ghostline-sdk" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rmcp = { version = "3.5.1", features = ["transport-io"] }
 schemars = "1"

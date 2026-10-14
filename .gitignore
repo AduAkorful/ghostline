@@ -20,7 +20,8 @@ dist/
 *.key
 *.seed
 *.keystore
-secrets/
+secrets/*
+!secrets/README.md
 
 # Local network and wallet state
 .swarm/
