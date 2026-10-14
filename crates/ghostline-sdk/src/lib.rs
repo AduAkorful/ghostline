@@ -19,4 +19,7 @@ pub use ghostline_core::{
 pub use spend::{OpenStatement, fund_open, refund, settle};
 pub use tari_ootle_transaction::TransactionEnvelope;
 pub use tari_ootle_wallet_crypto::MaskAndValue;
-pub use tx::{encode_transaction_envelope, seal_localnet_stealth_transfer};
+pub use tx::{
+    encode_transaction_envelope, seal_localnet_hex, seal_localnet_stealth_transfer,
+    transaction_envelope_hex,
+};

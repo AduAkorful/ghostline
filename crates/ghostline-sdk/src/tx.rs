@@ -28,6 +28,27 @@ pub fn encode_transaction_envelope(
     TransactionEnvelope::encode(transaction).map_err(|_| SdkError::Encode)
 }
 
+/// Hex of the BOR envelope, for `ghostline indexer submit --tx-hex`.
+pub fn transaction_envelope_hex(transaction: Transaction) -> Result<String, SdkError> {
+    let envelope = encode_transaction_envelope(transaction)?;
+    Ok(ghostline_core::to_hex(&envelope.0))
+}
+
+/// Seal a localnet stealth transfer and return the submit hex.
+pub fn seal_localnet_hex(
+    resource: ResourceAddress,
+    statement: StealthTransferStatement,
+    max_epoch: u64,
+    sealer: &RistrettoSecretKey,
+) -> Result<String, SdkError> {
+    transaction_envelope_hex(seal_localnet_stealth_transfer(
+        resource,
+        statement,
+        Epoch(max_epoch),
+        sealer,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,7 +87,8 @@ mod tests {
             &service_secret,
         );
         assert_eq!(tx.calculate_id(), tx.calculate_id());
-        let envelope = encode_transaction_envelope(tx).unwrap();
-        assert!(!envelope.0.is_empty());
+        let hex = transaction_envelope_hex(tx).unwrap();
+        assert!(hex.len() > 2);
+        assert!(hex.len().is_multiple_of(2));
     }
 }

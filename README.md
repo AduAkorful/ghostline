@@ -36,7 +36,8 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `contracts/channel` | The channel template (Rust, compiled to WASM) |
 | `crates/ghostline-core` | Channel id, voucher signing, verification, payer session and service ledger |
 | `crates/ghostline-sdk` | Condition-tree open (`PayTo::Conditions`), settle and refund stealth statements |
-| `crates/ghostline-cli` | `ghostline` CLI: `channel-id`, `sign`, `verify` |
+| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, seal open/settle/refund, indexer submit |
+| `docs/privacy.md` | Plain-language observer view |
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
 | `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
 | `demo/paid-api` | Reference paid endpoint (`/fortune`) |
@@ -66,8 +67,9 @@ cd packages/ghostline && npm test
 Offline voucher commands (no network):
 
 ```bash
-cargo run -p ghostline-cli -- channel-id --network-tag 1 --deposit 100 \
-  --payer-hex <32-byte-hex> --payer-root-hex <32-byte-hex> --nonce-hex <32-byte-hex>
+cargo run -p ghostline-cli -- spec --network-tag 1 --deposit 100 \
+  --payer-hex <32-byte-hex> --service-hex <32-byte-hex> --expiry-epoch 100 \
+  --nonce-hex <32-byte-hex> --template-hex <32-byte-hex>
 ```
 
 MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):

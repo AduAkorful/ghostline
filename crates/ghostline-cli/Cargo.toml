@@ -14,10 +14,13 @@ path = "src/main.rs"
 clap = { version = "4.5", features = ["derive"] }
 ghostline-core = { path = "../ghostline-core" }
 ghostline-net = { path = "../ghostline-net" }
+ghostline-sdk = { path = "../ghostline-sdk" }
 tari_crypto = "0.24.0"
 tari_template_lib = "0.34.0"
 tari_utilities = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
+ootle_byte_type = { version = "0.16", features = ["crypto"] }
 rand = "0.10.1"
+tari_ootle_common_types = "0.45.0"
