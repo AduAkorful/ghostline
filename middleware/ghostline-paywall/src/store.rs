@@ -119,6 +119,25 @@ impl ChannelStore {
         PaymentSession::resume(self.params()?, self.snapshot.cumulative).map_err(PaywallError::from)
     }
 
+    pub fn accepted(&self) -> u64 {
+        self.snapshot.accepted
+    }
+
+    pub fn cumulative(&self) -> u64 {
+        self.snapshot.cumulative
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_totals(
+        &mut self,
+        accepted: u64,
+        cumulative: u64,
+    ) -> Result<(), PaywallError> {
+        self.snapshot.accepted = accepted;
+        self.snapshot.cumulative = cumulative;
+        self.flush()
+    }
+
     pub fn save_ledger(&mut self, ledger: &ServiceLedger) -> Result<(), PaywallError> {
         if ledger.params() != &self.params()? {
             return Err(PaywallError::Voucher(VoucherError::ChannelMismatch));

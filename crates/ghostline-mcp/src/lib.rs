@@ -3,10 +3,11 @@
 use ghostline_core::{ChannelParams, SignedVoucher, VoucherError, from_hex, to_hex};
 use ghostline_net::TransactionEnvelope;
 use ghostline_paywall::{
-    ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
+    ChannelStatus, ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
 };
-use ghostline_sdk::{inspect_transaction, unblind_transaction};
 use ghostline_policy::{Policy, PolicyEngine, env_flag};
+use ghostline_sdk::{inspect_transaction, unblind_transaction};
+use rmcp::{ServerHandler, handler::server::wrapper::Parameters, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -51,6 +52,16 @@ pub struct CallPaidArgs {
 pub struct TxHexArgs {
     /// BOR-encoded sealed transaction hex from `ghostline seal-open` / `seal-settle`.
     pub tx_hex: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct StatusArgs {
+    /// Channel expiry epoch. Falls back to `GHOSTLINE_EXPIRY_EPOCH`.
+    #[serde(default)]
+    pub expiry_epoch: Option<u64>,
+    /// Read-only indexer URL for `current_epoch`. Falls back to `GHOSTLINE_INDEXER_URL`.
+    #[serde(default)]
+    pub indexer_url: Option<String>,
 }
 
 pub fn parse_params(args: &ChannelArgs) -> Result<ChannelParams, String> {
@@ -143,7 +154,7 @@ pub fn verify_voucher(args: &VerifyArgs) -> Result<(), String> {
     voucher.verify(&params).map_err(|e| e.to_string())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaidCall {
     pub status: u16,
     pub body: String,
@@ -243,14 +254,159 @@ pub fn unblind_tx(args: &TxHexArgs) -> Result<Vec<UnblindedOutput>, String> {
         .collect())
 }
 
+pub async fn channel_status(args: &StatusArgs) -> Result<ChannelStatus, String> {
+    let session_path = std::env::var("GHOSTLINE_SESSION").map_err(|_| "set GHOSTLINE_SESSION")?;
+    let session = ChannelStore::open(&session_path).map_err(|e| e.to_string())?;
+    let ledger = match std::env::var("GHOSTLINE_LEDGER") {
+        Ok(path) => Some(ChannelStore::open(path).map_err(|e| e.to_string())?),
+        Err(_) => None,
+    };
+    let expiry_epoch = args.expiry_epoch.or_else(|| {
+        std::env::var("GHOSTLINE_EXPIRY_EPOCH")
+            .ok()
+            .and_then(|s| s.parse().ok())
+    });
+    let indexer_url = args
+        .indexer_url
+        .clone()
+        .or_else(|| std::env::var("GHOSTLINE_INDEXER_URL").ok());
+    let current_epoch = match indexer_url.as_deref() {
+        Some(url) => {
+            let stats = ghostline_net::IndexerClient::connect(url)
+                .map_err(|e| e.to_string())?
+                .epoch_stats()
+                .await
+                .map_err(|e| e.to_string())?;
+            Some(stats.current_epoch.as_u64())
+        }
+        None => None,
+    };
+    match ledger {
+        Some(ledger) => {
+            ChannelStatus::from_session_and_ledger(&session, &ledger, expiry_epoch, current_epoch)
+                .map_err(|e| e.to_string())
+        }
+        None => ChannelStatus::from_store(&session, expiry_epoch, current_epoch)
+            .map_err(|e| e.to_string()),
+    }
+}
+
+#[derive(Clone)]
+pub struct GhostlineMcp {
+    #[allow(dead_code)]
+    tool_router: rmcp::handler::server::router::tool::ToolRouter<Self>,
+}
+
+#[derive(Serialize)]
+struct HexOut {
+    hex: String,
+}
+
+#[derive(Serialize)]
+struct OkOut {
+    ok: bool,
+}
+
+#[tool_router]
+impl GhostlineMcp {
+    pub fn new() -> Self {
+        Self {
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    #[tool(description = "Compute the 32-byte Ghostline channel id from open parameters (hex).")]
+    fn ghostline_channel_id(
+        &self,
+        Parameters(args): Parameters<ChannelArgs>,
+    ) -> Result<String, String> {
+        let hex = channel_id_hex(&args)?;
+        serde_json::to_string(&HexOut { hex }).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Sign the next Ghostline voucher for `price`. Uses GHOSTLINE_PAYER_SECRET, GHOSTLINE_SESSION, and policy env vars. Does not take a secret argument."
+    )]
+    fn ghostline_sign_voucher(
+        &self,
+        Parameters(args): Parameters<SignArgs>,
+    ) -> Result<String, String> {
+        let hex = sign_voucher_hex(&args)?;
+        serde_json::to_string(&HexOut { hex }).map_err(|e| e.to_string())
+    }
+
+    #[tool(description = "Verify a hex-encoded Ghostline voucher against channel parameters.")]
+    fn ghostline_verify_voucher(
+        &self,
+        Parameters(args): Parameters<VerifyArgs>,
+    ) -> Result<String, String> {
+        verify_voucher(&args)?;
+        serde_json::to_string(&OkOut { ok: true }).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "GET a paid HTTP resource. On 402, if GHOSTLINE_SESSION is set, signs a voucher from the session and retries once."
+    )]
+    async fn ghostline_call_paid(
+        &self,
+        Parameters(args): Parameters<CallPaidArgs>,
+    ) -> Result<String, String> {
+        let result = call_paid(&args).await?;
+        serde_json::to_string(&result).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "List stealth outputs in a sealed Ghostline tx hex (resource, tag, commitment, nonce, encrypted data). No secret."
+    )]
+    fn ghostline_inspect_tx(
+        &self,
+        Parameters(args): Parameters<TxHexArgs>,
+    ) -> Result<String, String> {
+        let views = inspect_tx(&args)?;
+        serde_json::to_string(&views).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Recover value and mask from stealth outputs in a sealed tx hex encrypted to GHOSTLINE_PAYER_SECRET. Does not take a secret argument."
+    )]
+    fn ghostline_unblind_tx(
+        &self,
+        Parameters(args): Parameters<TxHexArgs>,
+    ) -> Result<String, String> {
+        let found = unblind_tx(&args)?;
+        serde_json::to_string(&found).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Off-chain channel totals and observer panel from GHOSTLINE_SESSION (optional GHOSTLINE_LEDGER). Does not take secrets. Not a chain confirmation."
+    )]
+    async fn ghostline_channel_status(
+        &self,
+        Parameters(args): Parameters<StatusArgs>,
+    ) -> Result<String, String> {
+        let view = channel_status(&args).await?;
+        serde_json::to_string(&view).map_err(|e| e.to_string())
+    }
+}
+
+#[tool_handler(
+    name = "ghostline",
+    version = "0.1.0",
+    instructions = "Ghostline payment-channel tools. Payer secret comes from GHOSTLINE_PAYER_SECRET, never from a tool argument."
+)]
+impl ServerHandler for GhostlineMcp {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ghostline_core::NONCE_LEN;
     use ootle_byte_type::ToByteType;
+    use std::sync::Mutex;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::Hash32;
     use tari_utilities::ByteArray;
+
+    static ENV: Mutex<()> = Mutex::new(());
 
     #[test]
     fn sign_and_verify_round_trip() {
@@ -356,6 +512,7 @@ mod tests {
             }
         });
 
+        let _env = ENV.lock().unwrap();
         unsafe {
             std::env::set_var("GHOSTLINE_SESSION", &path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
@@ -417,6 +574,7 @@ mod tests {
         .unwrap();
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].promise, 100);
+        let _env = ENV.lock().unwrap();
         unsafe {
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
         }
@@ -427,5 +585,163 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].value, 100);
         assert_eq!(found[0].mask_hex, to_hex(opened.deposit.mask.as_bytes()));
+    }
+
+    #[tokio::test]
+    async fn mcp_protocol_lists_tools_and_retries_402() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        use rmcp::{ServiceExt, model::CallToolRequestParams};
+
+        let (secret, public) = create_key_pair_from_seed(11);
+        let args = ChannelArgs {
+            network_tag: 1,
+            payer_hex: to_hex(public.to_byte_type().as_bytes()),
+            deposit: 100,
+            payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
+            nonce_hex: to_hex(&[3u8; NONCE_LEN]),
+        };
+        let params = parse_params(&args).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-proto-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        ChannelStore::create(&path, params.clone()).unwrap();
+        let quote = serde_json::to_string(&PaymentRequired::new(10, &params.channel_id())).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+                let paid = req.contains("ghostline-voucher:");
+                let (status, body) = if paid {
+                    ("200 OK", "{\"fortune\":\"mcp\"}")
+                } else {
+                    ("402 Payment Required", quote.as_str())
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+
+        let _env = ENV.lock().unwrap();
+        unsafe {
+            std::env::set_var("GHOSTLINE_SESSION", &path);
+            std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
+            std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+        }
+
+        let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
+        let server_handle = tokio::spawn(async move {
+            GhostlineMcp::new()
+                .serve(server_transport)
+                .await
+                .map_err(|e| e.to_string())?
+                .waiting()
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        });
+
+        let client = ().serve(client_transport).await.unwrap();
+        let tools = client.list_all_tools().await.unwrap();
+        let names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
+        for expected in [
+            "ghostline_channel_id",
+            "ghostline_sign_voucher",
+            "ghostline_verify_voucher",
+            "ghostline_call_paid",
+            "ghostline_inspect_tx",
+            "ghostline_unblind_tx",
+            "ghostline_channel_status",
+        ] {
+            assert!(names.contains(&expected), "missing {expected} in {names:?}");
+        }
+
+        let mut arguments = serde_json::Map::new();
+        arguments.insert(
+            "url".into(),
+            serde_json::Value::String(format!("http://{addr}/fortune")),
+        );
+        let result = client
+            .call_tool(CallToolRequestParams::new("ghostline_call_paid").with_arguments(arguments))
+            .await
+            .unwrap();
+        let text = result
+            .content
+            .first()
+            .and_then(|c| c.as_text())
+            .map(|t| t.text.as_str())
+            .expect("tool text");
+        let paid: PaidCall = serde_json::from_str(text).unwrap();
+        assert_eq!(paid.status, 200);
+        assert!(paid.body.contains("fortune"));
+
+        client.cancel().await.unwrap();
+        let _ = server_handle.await;
+        unsafe {
+            std::env::remove_var("GHOSTLINE_SESSION");
+            std::env::remove_var("GHOSTLINE_PAYER_SECRET");
+            std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+        }
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+    }
+
+    #[tokio::test]
+    async fn channel_status_reads_session_without_indexer() {
+        let (_, public) = create_key_pair_from_seed(11);
+        let args = ChannelArgs {
+            network_tag: 1,
+            payer_hex: to_hex(public.to_byte_type().as_bytes()),
+            deposit: 100,
+            payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
+            nonce_hex: to_hex(&[3u8; NONCE_LEN]),
+        };
+        let params = parse_params(&args).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-status-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        ChannelStore::create(&path, params).unwrap();
+        let _env = ENV.lock().unwrap();
+        unsafe {
+            std::env::set_var("GHOSTLINE_SESSION", &path);
+            std::env::remove_var("GHOSTLINE_LEDGER");
+            std::env::remove_var("GHOSTLINE_INDEXER_URL");
+        }
+        let view = channel_status(&StatusArgs {
+            expiry_epoch: Some(50),
+            indexer_url: None,
+        })
+        .await
+        .unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_SESSION");
+        }
+        assert_eq!(view.deposit, 100);
+        assert_eq!(view.cumulative, 0);
+        assert_eq!(view.settle_window, ghostline_paywall::SettleWindow::Unknown);
+        assert!(!view.observer.at_settle.is_empty());
     }
 }

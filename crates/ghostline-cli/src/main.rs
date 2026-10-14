@@ -26,7 +26,7 @@ use tari_utilities::ByteArray;
 #[derive(Parser)]
 #[command(
     name = "ghostline",
-    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, open/settle via a wallet daemon or indexer"
+    about = "Sign and verify Ghostline vouchers, seal stealth transfers, inspect/unblind stealth outputs, operator status/watch, open/settle via a wallet daemon or indexer"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -202,6 +202,51 @@ enum Command {
     InspectTx {
         #[arg(long)]
         tx_hex: String,
+    },
+    /// Off-chain channel totals plus the observer panel (not a chain confirmation).
+    Status {
+        /// Payer session JSON (`ChannelStore`).
+        #[arg(long)]
+        session: Option<PathBuf>,
+        /// Service ledger JSON (`ChannelStore`). Combined with `--session` when both are set.
+        #[arg(long)]
+        ledger: Option<PathBuf>,
+        /// Single store file (session or ledger). Do not combine with `--session` / `--ledger`.
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(long)]
+        expiry_epoch: Option<u64>,
+        /// Fetch `current_epoch` from this indexer (read-only).
+        #[arg(long)]
+        indexer_url: Option<String>,
+        /// Include payer_hex, nonce, and payer_root (operator-only; omit from public reports).
+        #[arg(long)]
+        include_params: bool,
+    },
+    /// Same JSON as `status`. Alias for operator export.
+    Report {
+        #[arg(long)]
+        session: Option<PathBuf>,
+        #[arg(long)]
+        ledger: Option<PathBuf>,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(long)]
+        expiry_epoch: Option<u64>,
+        #[arg(long)]
+        indexer_url: Option<String>,
+        #[arg(long)]
+        include_params: bool,
+    },
+    /// Compare current epoch to channel expiry (settlement-window heartbeat).
+    Watch {
+        #[arg(long)]
+        expiry_epoch: u64,
+        #[arg(long)]
+        indexer_url: String,
+        /// `within_margin` is true when epochs until expiry is at most this value (including overdue).
+        #[arg(long, default_value_t = 0)]
+        margin_epochs: u64,
     },
 }
 
@@ -1076,7 +1121,133 @@ async fn run(cli: Cli) -> Result<(), String> {
                 );
             }
         }
+        Command::Status {
+            session,
+            ledger,
+            store,
+            expiry_epoch,
+            indexer_url,
+            include_params,
+        }
+        | Command::Report {
+            session,
+            ledger,
+            store,
+            expiry_epoch,
+            indexer_url,
+            include_params,
+        } => {
+            print_channel_status(
+                session,
+                ledger,
+                store,
+                expiry_epoch,
+                indexer_url.as_deref(),
+                include_params,
+            )
+            .await?;
+        }
+        Command::Watch {
+            expiry_epoch,
+            indexer_url,
+            margin_epochs,
+        } => {
+            let current_epoch = fetch_epoch(&indexer_url).await?;
+            let epochs_until_expiry = expiry_epoch as i64 - current_epoch as i64;
+            let settle_window = if current_epoch < expiry_epoch {
+                ghostline_paywall::SettleWindow::SettleOpen
+            } else {
+                ghostline_paywall::SettleWindow::RefundOpen
+            };
+            let within_margin = epochs_until_expiry <= margin_epochs as i64;
+            let body = serde_json::json!({
+                "current_epoch": current_epoch,
+                "expiry_epoch": expiry_epoch,
+                "epochs_until_expiry": epochs_until_expiry,
+                "margin_epochs": margin_epochs,
+                "within_margin": within_margin,
+                "settle_window": settle_window,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?
+            );
+        }
     }
+    Ok(())
+}
+
+async fn fetch_epoch(indexer_url: &str) -> Result<u64, String> {
+    Ok(IndexerClient::connect(indexer_url)
+        .map_err(|e| e.to_string())?
+        .epoch_stats()
+        .await
+        .map_err(|e| e.to_string())?
+        .current_epoch
+        .as_u64())
+}
+
+async fn print_channel_status(
+    session: Option<PathBuf>,
+    ledger: Option<PathBuf>,
+    store: Option<PathBuf>,
+    expiry_epoch: Option<u64>,
+    indexer_url: Option<&str>,
+    include_params: bool,
+) -> Result<(), String> {
+    let current_epoch = match indexer_url {
+        Some(url) => Some(fetch_epoch(url).await?),
+        None => None,
+    };
+    let params_path = store
+        .clone()
+        .or_else(|| session.clone())
+        .or_else(|| ledger.clone());
+    let view = match (store, session, ledger) {
+        (Some(path), None, None) => {
+            let opened = ghostline_paywall::ChannelStore::open(path).map_err(|e| e.to_string())?;
+            ghostline_paywall::ChannelStatus::from_store(&opened, expiry_epoch, current_epoch)
+                .map_err(|e| e.to_string())?
+        }
+        (None, Some(session_path), Some(ledger_path)) => {
+            let session_store =
+                ghostline_paywall::ChannelStore::open(session_path).map_err(|e| e.to_string())?;
+            let ledger_store =
+                ghostline_paywall::ChannelStore::open(ledger_path).map_err(|e| e.to_string())?;
+            ghostline_paywall::ChannelStatus::from_session_and_ledger(
+                &session_store,
+                &ledger_store,
+                expiry_epoch,
+                current_epoch,
+            )
+            .map_err(|e| e.to_string())?
+        }
+        (None, Some(path), None) | (None, None, Some(path)) => {
+            let opened = ghostline_paywall::ChannelStore::open(path).map_err(|e| e.to_string())?;
+            ghostline_paywall::ChannelStatus::from_store(&opened, expiry_epoch, current_epoch)
+                .map_err(|e| e.to_string())?
+        }
+        (None, None, None) => {
+            return Err("set --store, or --session and/or --ledger".into());
+        }
+        _ => {
+            return Err("use --store alone, or --session/--ledger without --store".into());
+        }
+    };
+    let mut value = serde_json::to_value(&view).map_err(|e| e.to_string())?;
+    if include_params {
+        let path = params_path.ok_or("set --store, or --session and/or --ledger")?;
+        let opened = ghostline_paywall::ChannelStore::open(path).map_err(|e| e.to_string())?;
+        let params = opened.params().map_err(|e| e.to_string())?;
+        value["network_tag"] = serde_json::json!(params.network_tag);
+        value["payer_hex"] = serde_json::json!(to_hex(params.payer.as_bytes()));
+        value["payer_root_hex"] = serde_json::json!(to_hex(params.payer_root.as_slice()));
+        value["nonce_hex"] = serde_json::json!(to_hex(&params.nonce));
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 

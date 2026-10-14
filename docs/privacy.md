@@ -34,8 +34,7 @@ Because remainder + claimed = deposit, **settlement reveals the deposit**.
 
 - Listing Ghostline UTXOs from the chain indexer (`wallet utxos` / live `wallet open` read a wallet-stored transaction via `transactions.get` and emit `unblind --utxo-json`; wallet-built opens keep the channel output in `fee_instructions`; `inspect-tx` still needs a sealed hex you already have; `stealth_utxos.list` is not the source of truth)
 - TypeScript signing of `ghostline.channel.voucher.v1` is covered by a shared Rust/TS vector; WASM/Ootle JS wallet signing is a separate path
-- Cryptographic unlinkability of settle fees from the opener (a distinct, faucet-funded fee component is proven; the accounts still share one wallet seed)
-- Live settle-after-expiry (refund after expiry is proven; a wallet dry-run settle at the expiry epoch still Accept, and is not a live spend)
+- Hiding the public faucet (or other funding) of the fee-paying account. A distinct same-seed fee component is proven; a second-seed fee wallet is also proven live (opener fee balance unchanged). Same-seed accounts remain correlated to anyone who has that seed.
 - Enforcement of spending limits if the agent signs without the policy engine
 
 Unaudited. Testnet only. Do not use with real funds.

@@ -14,7 +14,8 @@
 //! Submitting Ghostline-sealed envelopes through the public indexer REST API is a
 //! different path: `resolve-inputs` then `seal-unsigned`. That settle is proven live.
 //! A faucet-funded derived fee account (not the opener component) is proven; same-seed
-//! accounts remain correlated.
+//! accounts remain correlated. A live settle from a second-seed walletd (`--url`) is also
+//! proven; that fee wallet's faucet claim is still public.
 
 use std::str::FromStr;
 

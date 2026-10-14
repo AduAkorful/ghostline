@@ -36,7 +36,7 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `contracts/channel` | The channel template (Rust, compiled to WASM) |
 | `crates/ghostline-core` | Channel id, voucher signing, verification, payer session and service ledger |
 | `crates/ghostline-sdk` | Condition-tree open (`PayTo::Conditions`), settle and refund stealth statements |
-| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, `pay-to`, wallet open/submit, seal open/settle/refund, indexer submit |
+| `crates/ghostline-cli` | `ghostline` CLI: vouchers, `spec`, `pay-to`, `status`/`report`/`watch`, wallet open/submit, seal open/settle/refund, indexer submit |
 | `docs/privacy.md` | Plain-language observer view |
 | `docs/threat-model.md` | Assets, actors, attacks, residual risk |
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
@@ -100,6 +100,21 @@ MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 - `ghostline_call_paid`
 - `ghostline_inspect_tx`
 - `ghostline_unblind_tx` (secret from `GHOSTLINE_PAYER_SECRET`)
+- `ghostline_channel_status` (session from `GHOSTLINE_SESSION`; optional `GHOSTLINE_LEDGER` / `GHOSTLINE_EXPIRY_EPOCH` / `GHOSTLINE_INDEXER_URL`)
+
+Live Esmeralda: an MCP client speaking JSON-RPC stdio (`initialize` 2025-11-25, then `tools/call` `ghostline_call_paid`) paid 10 `/fortune` calls at 10 µT against a 0.1 tTARI channel. Policy came from env (`GHOSTLINE_POLICY_BUDGET`, `GHOSTLINE_POLICY_MAX_PER_CALL`, `GHOSTLINE_POLICY_VENDOR_HEX`), not from tool arguments. One settle of cumulative 100 µT Finalized Commit (17637 µT fee from the second-seed fee wallet). The protocol path is also covered by an in-process duplex test.
+
+Operator view (off-chain store, not a UTXO balance). `status` / `report` print the same JSON: totals, remainder *if* you settled at those totals, settle vs refund window, and the observer panel. `--include-params` adds keys; omit it from anything you publish. `watch` is a one-shot epoch heartbeat against an indexer.
+
+```bash
+cargo run -p ghostline-cli -- status \
+  --session /tmp/ghostline/session.json --ledger /tmp/ghostline/ledger.json \
+  --expiry-epoch <epoch> --indexer-url <indexer-url>
+cargo run -p ghostline-cli -- watch \
+  --expiry-epoch <epoch> --indexer-url <indexer-url> --margin-epochs 100
+```
+
+Live Esmeralda: `status` on the MCP channel's session+ledger (accepted 100, cumulative 100) with indexer epoch showed `settle_open` and the observer panel. That channel had already settled on-chain; remainder in the JSON is hypothetical at those off-chain totals.
 
 Localnet (needs tens of GB free; refused below `GHOSTLINE_MIN_FREE_GB`, default 40):
 
@@ -129,7 +144,9 @@ cargo run -p ghostline-cli -- wallet utxos --transaction-id <64-hex> \
   --utxo-json-out /tmp/channel.utxo.json
 ```
 
-Wallet-daemon settle: the sealer is the service key imported into the wallet. `pay_fee` is public. A live settle paid fees from a derived account funded by an independent faucet (not a transfer from the opener). `wallet submit` does not default to derived account index 0 (the usual opener). Same-seed accounts remain correlated.
+Wallet-daemon settle: the sealer is the service key imported into the wallet. `pay_fee` is public. A live settle paid fees from a derived account funded by an independent faucet (not a transfer from the opener). `wallet submit` does not default to derived account index 0 (the usual opener). Same-seed accounts remain correlated: anyone who has that seed, or who maps both components to one wallet, can still link them.
+
+A live settle also paid fees from a **second wallet seed** (separate walletd data dir and faucet claim). Indexer Finalized Commit; the opener fee account's revealed balance did not move. Import the service key into that fee wallet and pass `--url` so submit talks to it. The faucet transaction that funded the fee wallet is still public.
 
 ```bash
 cargo run -p ghostline-cli -- wallet account-create --name <service-fee-account> --key-index 1
@@ -146,9 +163,15 @@ cargo run -p ghostline-cli -- wallet submit \
   --seal-key-id-file /path/to/service.key_id.json \
   --fee-account-name <service-fee-account> \
   --dry-run
+
+# second-seed fee wallet (after importing the service key into that daemon):
+# cargo run -p ghostline-cli -- wallet submit --url http://127.0.0.1:<fee-walletd-port> \
+#   --unsigned-json /tmp/settle.unsigned.json \
+#   --seal-key-id-file /path/to/fee-wallet.service.key_id.json \
+#   --fee-account-name <service-fee-account>
 ```
 
-Refund after expiry uses the same unsigned + `wallet submit` path. The sealer is the Ghostline payer key (import it as `GeneralPurpose`). Fees come from the payer's account, not the service fee account. Live Esmeralda: 0.1 tTARI channel, refund before `AfterEpoch` left the UTXO unspent; at expiry a stealth-transfer refund Finalized Commit (9502 µT fee from the opener). Live settle-after-expiry is not separately proven.
+Refund after expiry uses the same unsigned + `wallet submit` path. The sealer is the Ghostline payer key (import it as `GeneralPurpose`). Fees come from the payer's account, not the service fee account. Live Esmeralda: 0.1 tTARI channel, refund before `AfterEpoch` left the UTXO unspent; at expiry a stealth-transfer refund Finalized Commit (9502 µT fee from the opener). A live settle at the expiry epoch is `OnlyFeeAccepted` (`BeforeEpoch` fails; channel UTXO unspent; 16921 µT fee still taken).
 
 ```bash
 cargo run -p ghostline-cli -- seal-refund --unsigned-json \

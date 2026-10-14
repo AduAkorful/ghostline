@@ -36,14 +36,14 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 - Hiding transaction fees or the account that paid them
 - Hiding the settled amount, remainder, channel id, or keys revealed in the settle leaf
 - Stopping an agent that signs with `--unsafe-no-policy` or a raw secret
-- Unlinkable fees from a named wallet account (not proven)
+- Hiding the faucet (or other public funding) of the fee-paying account
 - Anonymity on the HTTP path (IP, TLS, logs)
 
 ## Main attacks
 
 **Replay / stale voucher.** Cumulative amounts only increase. Redeeming pays the delta over what was already redeemed. A lower voucher after a higher one must fail.
 
-**Settle after expiry / refund before.** The condition tree is two leaves: settle (`BeforeEpoch` + service key + template `settle`) and refund (`AfterEpoch` + payer key). In-process tests cover the epoch cut. Live Esmeralda: a refund before `AfterEpoch` does not spend the channel UTXO (`OnlyFeeAccepted` / `AcceptFeeRejectRest`). A refund at/after expiry Finalized Commit (stealth transfer of the deposit; opener paid the public fee). A wallet dry-run settle at the indexer expiry epoch still returned Accept; that was not a live spend. Live settle-after-expiry is not separately proven.
+**Settle after expiry / refund before.** The condition tree is two leaves: settle (`BeforeEpoch` + service key + template `settle`) and refund (`AfterEpoch` + payer key). In-process tests cover the epoch cut. Live Esmeralda: a refund before `AfterEpoch` does not spend the channel UTXO (`OnlyFeeAccepted` / `AcceptFeeRejectRest`). A refund at/after expiry Finalized Commit (stealth transfer of the deposit; opener paid the public fee). A live settle at the expiry epoch is `OnlyFeeAccepted`: `BeforeEpoch` fails, the channel UTXO stays unspent, public fees are still taken. A wallet dry-run settle at that epoch can still print Accept; that is not a live spend.
 
 **Wrong-channel voucher.** Vouchers are bound to `channel_id` (network tag, payer, deposit, payer root, nonce). A voucher for another channel must fail verification.
 
@@ -51,7 +51,9 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 **Wallet-built deposit encrypted to the view key.** `accounts.stealth_transfer` with a wallet `destination_address` encrypts the output to the wallet view key, not the Ghostline payer key. Unblinding with the payer secret fails. Settlement needs the view-key mask (or a wallet that already holds it).
 
-**Fee linkage.** `pay_fee` always names an account component. Using the opener for settle fees publishes that the same account opened and settled. `wallet submit` requires `--fee-account-name` or `--other-signer` so that path is not implied. A live settle paid fees from a derived account (index 1) that was funded by a community faucet, not by a transfer from the opener. The public fee component is therefore distinct. Those two accounts still share the wallet seed, so they are not unlinkable to someone who has that seed or who maps both addresses to one wallet. A second wallet (or a second seed) is still required for that stronger claim. That is a privacy leak, not a theft path.
+**Fee linkage.** `pay_fee` always names an account component. Using the opener for settle fees publishes that the same account opened and settled. `wallet submit` requires `--fee-account-name` or `--other-signer` so that path is not implied. A live settle paid fees from a derived account (index 1) that was funded by a community faucet, not by a transfer from the opener. The public fee component is therefore distinct. Those two accounts still share the wallet seed, so they are not unlinkable to someone who has that seed or who maps both addresses to one wallet.
+
+A later live settle paid fees from a second wallet seed (separate walletd, separate faucet claim). Indexer Finalized Commit; the first seed's fee account balance did not move. An observer who only sees the open and settle components cannot derive one from the other. The faucet claim that funded the fee wallet is still public, and timing correlation remains possible. That is a privacy leak, not a theft path.
 
 New derived accounts are not scanned until `keys.create` has produced that index on the `view_only_key` and `account` branches; `accounts.create` alone left the faucet stealth UTXO invisible. `wallet account-create` now derives those keys and associates stealth tTARI. `accounts.create` also does not publish the component; the first spend from that key does.
 

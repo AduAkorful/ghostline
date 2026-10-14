@@ -8,6 +8,7 @@ mod agent;
 mod error;
 mod gate;
 mod protocol;
+mod status;
 mod store;
 
 pub use agent::{AgentPayer, gated_sign};
@@ -19,4 +20,5 @@ pub use protocol::{
     PaymentRejection, PaymentRequired, SCHEME, VOUCHER_HEADER, decode_voucher_header,
     encode_voucher_header,
 };
+pub use status::{ChannelStatus, ObserverView, SettleWindow};
 pub use store::ChannelStore;
