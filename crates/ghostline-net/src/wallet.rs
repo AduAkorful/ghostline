@@ -35,7 +35,15 @@ const STEALTH_TRANSFER: &str = "accounts.stealth_transfer";
 const GET_DEFAULT: &str = "accounts.get_default";
 const ACCOUNTS_GET: &str = "accounts.get";
 const ACCOUNTS_CREATE: &str = "accounts.create";
+const ASSOCIATE_STEALTH: &str = "accounts.associate_stealth_resource";
+const KEYS_LIST: &str = "keys.list";
+const KEYS_CREATE: &str = "keys.create";
 const TRANSACTIONS_GET: &str = "transactions.get";
+
+/// `keys.list` / `keys.create` branch for account spend keys (`tari_ootle_walletd` 0.45).
+pub const ACCOUNT_KEY_BRANCH: &str = "account";
+/// View keys that decrypt wallet-destination stealth outputs.
+pub const VIEW_ONLY_KEY_BRANCH: &str = "view_only_key";
 
 /// Default `KeyId` JSON for the first derived account key (`tari_ootle_walletd_client` 0.45 `KeyId::Derived`).
 ///
@@ -274,6 +282,23 @@ impl AccountWithAddress {
     pub fn address_display(&self) -> String {
         json_as_plain(&self.address)
     }
+}
+
+fn keys_list_has_index(entries: &[Value], index: u64) -> bool {
+    entries.iter().any(|entry| {
+        let key_id = match entry {
+            Value::Array(row) => row.first().unwrap_or(entry),
+            other => other,
+        };
+        derived_key_index(key_id) == Some(index)
+    })
+}
+
+fn derived_key_index(key_id: &Value) -> Option<u64> {
+    key_id
+        .get("Derived")
+        .and_then(|d| d.get("index"))
+        .and_then(Value::as_u64)
 }
 
 fn json_as_plain(value: &Value) -> String {
@@ -518,6 +543,67 @@ impl WalletClient {
         self.rpc(ACCOUNTS_CREATE, request).await
     }
 
+    /// `keys.list` — `[[KeyId, public_key_hex, is_active], …]` (live Esmeralda 0.45 daemon).
+    pub async fn keys_list(&self, branch: &str) -> Result<Vec<Value>, NetError> {
+        let resp: Value = self
+            .rpc(KEYS_LIST, serde_json::json!({ "branch": branch }))
+            .await?;
+        let keys = resp
+            .get("keys")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| NetError::Decode {
+                path: KEYS_LIST.into(),
+                details: "keys.list missing keys array".into(),
+            })?;
+        Ok(keys)
+    }
+
+    /// `keys.create` — allocates the next derived index on `branch`.
+    pub async fn keys_create(&self, branch: &str) -> Result<Value, NetError> {
+        self.rpc(KEYS_CREATE, serde_json::json!({ "branch": branch }))
+            .await
+    }
+
+    /// Derive `account` / `view_only_key` through `index` so the wallet can scan and spend.
+    ///
+    /// `accounts.create --key-index 1` does not allocate those key-manager rows. A faucet
+    /// stealth UTXO to that Ootle address stays invisible until this runs.
+    pub async fn ensure_derived_key(&self, branch: &str, index: u64) -> Result<(), NetError> {
+        for _ in 0..=index {
+            if keys_list_has_index(&self.keys_list(branch).await?, index) {
+                return Ok(());
+            }
+            self.keys_create(branch).await?;
+        }
+        if keys_list_has_index(&self.keys_list(branch).await?, index) {
+            Ok(())
+        } else {
+            Err(NetError::Decode {
+                path: KEYS_CREATE.into(),
+                details: format!("keys.create on {branch} did not reach index {index}"),
+            })
+        }
+    }
+
+    /// `accounts.associate_stealth_resource` so `stealth_utxos.list` includes this account.
+    pub async fn associate_stealth_resource(
+        &self,
+        name: &str,
+        resource_address: &str,
+    ) -> Result<(), NetError> {
+        let _: Value = self
+            .rpc(
+                ASSOCIATE_STEALTH,
+                serde_json::json!({
+                    "account": account_name(name),
+                    "resource_address": resource_address,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
     pub async fn stealth_transfer(
         &self,
         request: &StealthTransferRequest,
@@ -663,6 +749,28 @@ mod tests {
         assert_eq!(xfer["pay_to"], pay_to);
         assert!(xfer["output_memo"].is_null());
         assert!(xfer["pay_ref"].is_null());
+    }
+
+    #[test]
+    fn keys_list_shape_matches_live_walletd() {
+        let keys: Vec<Value> = serde_json::from_value(serde_json::json!([
+            [{"Derived":{"index":0,"key_branch":"view_only_key"}}, "aa", true],
+            [{"Derived":{"index":1,"key_branch":"view_only_key"}}, "bb", false]
+        ]))
+        .unwrap();
+        assert!(keys_list_has_index(&keys, 1));
+        assert!(!keys_list_has_index(&keys, 2));
+        assert_eq!(derived_key_index(&keys[1].as_array().unwrap()[0]), Some(1));
+    }
+
+    #[test]
+    fn associate_stealth_body_uses_name_tag() {
+        let json = serde_json::json!({
+            "account": account_name("ghostline-fee"),
+            "resource_address": "resource_01",
+        });
+        assert_eq!(json["account"]["Name"], "ghostline-fee");
+        assert_eq!(json["resource_address"], "resource_01");
     }
 
     #[test]

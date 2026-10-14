@@ -82,6 +82,8 @@ GHOSTLINE_PAYER_SECRET=<32-byte-hex> cargo run -p ghostline-paid-api -- call \
 
 Ten paid calls still settle as one cumulative amount. Do not share one store file between `serve` and `call`.
 
+Live Esmeralda: 100 `/fortune` calls at 10 µT (policy-gated 402) against a 1 tTARI channel, then one settle of cumulative 1000 µT. Indexer Finalized Commit; fees from the faucet-funded derived fee account (17640 µT). The chain sees one settlement, not 100 transfers.
+
 Offline voucher commands (no network):
 
 ```bash
@@ -131,6 +133,7 @@ Wallet-daemon settle: the sealer is the service key imported into the wallet. `p
 
 ```bash
 cargo run -p ghostline-cli -- wallet account-create --name <service-fee-account> --key-index 1
+# also derives view_only_key/account at that index and associates stealth tTARI
 cargo run -p ghostline-cli -- wallet account-get --name <service-fee-account>
 
 cargo run -p ghostline-cli -- seal-settle --unsigned-json \

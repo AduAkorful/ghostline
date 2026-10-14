@@ -10,7 +10,7 @@ It is **not** anonymity against the service you are paying. That service sees ev
 - Per-call prices and timing
 - Which APIs or vendors you hit
 
-Those facts never go on-chain if you settle once at the end.
+Those facts never go on-chain if you settle once at the end. Proven live: 100 HTTP 402 calls at 10 µT, one settle of 1000 µT.
 
 ## Visible on-chain
 

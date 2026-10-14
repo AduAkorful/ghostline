@@ -263,7 +263,7 @@ enum WalletCommand {
         #[arg(long)]
         utxo_json_out: Option<PathBuf>,
     },
-    /// Create a named wallet account (`accounts.create`). Fund it from an unlinked source before using it for settle fees.
+    /// Create a named wallet account (`accounts.create`), derive its keys, associate stealth tTARI. Fund it from an unlinked source before using it for settle fees.
     AccountCreate {
         #[arg(long, default_value = "http://127.0.0.1:5100")]
         url: String,
@@ -692,13 +692,30 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let wallet = connect_wallet(&url).await?;
                 let created = wallet
                     .account_create(&AccountsCreateRequest {
-                        account_name: Some(name),
+                        account_name: Some(name.clone()),
                         is_default: Some(is_default),
                         key_index,
                     })
                     .await
                     .map_err(|e| e.to_string())?;
                 print_wallet_account(&created);
+                let index = key_index.unwrap_or(0);
+                wallet
+                    .ensure_derived_key(ghostline_net::ACCOUNT_KEY_BRANCH, index)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                wallet
+                    .ensure_derived_key(ghostline_net::VIEW_ONLY_KEY_BRANCH, index)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let resource =
+                    tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS.to_string();
+                wallet
+                    .associate_stealth_resource(&name, &resource)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("derived_keys={index}");
+                println!("associated_resource={resource}");
             }
             WalletCommand::AccountGet { url, name } => {
                 let wallet = connect_wallet(&url).await?;
