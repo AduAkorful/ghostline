@@ -152,10 +152,10 @@ impl IndexerClient {
                         report.down += 1;
                     }
                 }
-                if id.starts_with("component_") {
-                    if let Some(body) = body {
-                        component_bodies.push(body);
-                    }
+                if id.starts_with("component_")
+                    && let Some(body) = body
+                {
+                    component_bodies.push(body);
                 }
             }
         }
@@ -319,14 +319,12 @@ fn collect_vault_ids(value: &Value, out: &mut Vec<String>) {
         Value::Object(map) => {
             if map.get("@cbor").and_then(Value::as_str) == Some("tag")
                 && map.get("tag").and_then(Value::as_u64) == Some(VAULT_CBOR_TAG)
-            {
-                if let Some(hex) = value
+                && let Some(hex) = value
                     .pointer("/value/hex")
                     .and_then(Value::as_str)
                     .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
-                {
-                    out.push(format!("vault_{hex}"));
-                }
+            {
+                out.push(format!("vault_{hex}"));
             }
             for child in map.values() {
                 collect_vault_ids(child, out);

@@ -165,6 +165,7 @@ mod tests {
     use super::*;
     use crate::NONCE_LEN;
     use ootle_byte_type::ToByteType;
+    use proptest::prelude::*;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::Hash32;
 
@@ -225,5 +226,25 @@ mod tests {
         decoded.verify(&params).unwrap();
         assert_eq!(decoded.amount, 30);
         assert_eq!(decoded.channel_id, voucher.channel_id);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn arbitrary_bytes_do_not_panic_while_decoding_or_verifying(
+            bytes in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            let (_, params) = seeded_params(11);
+            if let Ok(voucher) = SignedVoucher::from_bytes(&bytes) {
+                // An untrusted encoding that decodes must remain safe to verify and re-encode.
+                let _ = voucher.verify(&params);
+                let encoded = voucher.to_bytes();
+                let decoded = SignedVoucher::from_bytes(&encoded).unwrap();
+                prop_assert_eq!(decoded.channel_id, voucher.channel_id);
+                prop_assert_eq!(decoded.amount, voucher.amount);
+                prop_assert_eq!(decoded.to_bytes(), encoded);
+            }
+        }
     }
 }

@@ -65,9 +65,15 @@ mod channel {
             message[..CHANNEL_ID_LEN].copy_from_slice(channel_id.as_slice());
             message[CHANNEL_ID_LEN..].copy_from_slice(&amount.to_le_bytes());
 
-            assert!(signature.verify(&PublicKey::from(payer), &message), "invalid voucher signature");
+            assert!(
+                signature.verify(&PublicKey::from(payer), &message),
+                "invalid voucher signature"
+            );
 
-            ctx.require_output_to(&payer_root, deposit - amount);
+            let remainder = deposit - amount;
+            if remainder > 0 {
+                ctx.require_output_to(&payer_root, remainder);
+            }
         }
     }
 }

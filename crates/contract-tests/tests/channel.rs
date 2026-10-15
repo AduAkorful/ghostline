@@ -153,13 +153,8 @@ fn run(s: Scenario) -> Result<(), String> {
                 .map_err(|e| e.to_string())?
             }
         }
-        Action::Refund => refund(
-            &channel,
-            funded,
-            payer,
-            OutputScan::localnet(resource),
-        )
-        .map_err(|e| e.to_string())?,
+        Action::Refund => refund(&channel, funded, payer, OutputScan::localnet(resource))
+            .map_err(|e| e.to_string())?,
     };
 
     let secret = match s.signer {
@@ -193,6 +188,16 @@ fn assert_rejected(result: Result<(), String>, expected: &str) {
 #[test]
 fn settle_valid_voucher_pays_service_and_returns_remainder() {
     run(Scenario::settle()).expect("valid voucher must settle");
+}
+
+#[test]
+fn settle_full_deposit_omits_zero_remainder_output() {
+    run(Scenario {
+        signed_amount: DEPOSIT,
+        claimed_amount: DEPOSIT,
+        ..Scenario::settle()
+    })
+    .expect("full-deposit voucher must settle without a zero-value payer output");
 }
 
 #[test]
@@ -247,7 +252,7 @@ fn settle_voucher_for_another_channel_is_rejected() {
             voucher_nonce: [43u8; NONCE_LEN],
             ..Scenario::settle()
         }),
-        "invalid voucher signature",
+        "voucher channel id does not match this channel",
     );
 }
 
@@ -258,7 +263,7 @@ fn settle_voucher_for_another_network_is_rejected() {
             voucher_network: NETWORK_TAG + 1,
             ..Scenario::settle()
         }),
-        "invalid voucher signature",
+        "voucher channel id does not match this channel",
     );
 }
 

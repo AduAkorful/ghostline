@@ -185,6 +185,20 @@ pub struct StealthTransferRequest {
     pub dry_run: bool,
 }
 
+/// Values that identify the channel output and its wallet fee/input selections.
+#[derive(Debug, Clone)]
+pub struct ChannelOpenParams {
+    pub account_name: String,
+    pub destination_address: String,
+    pub resource_address: String,
+    pub deposit: u64,
+    pub pay_to: Value,
+    pub input_selection: UtxoInputSelection,
+    pub fee_input_selection: UtxoInputSelection,
+    pub max_fee: u64,
+    pub dry_run: bool,
+}
+
 /// Fields from `StealthTransfer` (`tari_ootle_walletd_client` 0.45).
 #[derive(Debug, Clone, Serialize)]
 pub struct StealthTransfer {
@@ -199,36 +213,26 @@ pub struct StealthTransfer {
 
 impl StealthTransferRequest {
     /// One `PayTo::Conditions` output, no badge, fees from revealed UTXOs by default.
-    pub fn channel_open(
-        account_name: &str,
-        destination_address: String,
-        resource_address: String,
-        deposit: u64,
-        pay_to: Value,
-        input_selection: UtxoInputSelection,
-        fee_input_selection: UtxoInputSelection,
-        max_fee: u64,
-        dry_run: bool,
-    ) -> Self {
+    pub fn channel_open(params: ChannelOpenParams) -> Self {
         Self {
-            owner_account: serde_json::json!({ "Name": account_name }),
+            owner_account: serde_json::json!({ "Name": params.account_name }),
             fee_params: TransferFeeParams {
-                input_selection: fee_input_selection,
+                input_selection: params.fee_input_selection,
             },
-            input_selection,
-            resource_address,
+            input_selection: params.input_selection,
+            resource_address: params.resource_address,
             badge_usage: "None",
             transfers: vec![StealthTransfer {
-                destination_address,
-                blinded_output_amount: deposit,
+                destination_address: params.destination_address,
+                blinded_output_amount: params.deposit,
                 revealed_output_amount: 0,
                 output_memo: None,
-                pay_to,
+                pay_to: params.pay_to,
                 attach_sender_address: false,
                 pay_ref: None,
             }],
-            max_fee,
-            dry_run,
+            max_fee: params.max_fee,
+            dry_run: params.dry_run,
         }
     }
 }
@@ -724,17 +728,18 @@ mod tests {
     #[test]
     fn stealth_open_body_matches_proven_walletd_shape() {
         let pay_to = serde_json::json!({ "Conditions": [[]] });
-        let req = StealthTransferRequest::channel_open(
-            "ghostline",
-            "otl_esm_example".into(),
-            "resource_0101010101010101010101010101010101010101010101010101010101010101".into(),
-            1_000_000,
-            pay_to.clone(),
-            UtxoInputSelection::PreferConfidential,
-            UtxoInputSelection::PreferRevealed,
-            100_000,
-            true,
-        );
+        let req = StealthTransferRequest::channel_open(ChannelOpenParams {
+            account_name: "ghostline".into(),
+            destination_address: "otl_esm_example".into(),
+            resource_address:
+                "resource_0101010101010101010101010101010101010101010101010101010101010101".into(),
+            deposit: 1_000_000,
+            pay_to: pay_to.clone(),
+            input_selection: UtxoInputSelection::PreferConfidential,
+            fee_input_selection: UtxoInputSelection::PreferRevealed,
+            max_fee: 100_000,
+            dry_run: true,
+        });
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["owner_account"]["Name"], "ghostline");
         assert_eq!(json["fee_params"]["input_selection"], "PreferRevealed");

@@ -125,13 +125,7 @@ pub fn settle(
     service_output_key: RistrettoPublicKeyBytes,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
-    if voucher.amount > channel.params().deposit {
-        return Err(VoucherError::ExceedsDeposit {
-            amount: voucher.amount,
-            deposit: channel.params().deposit,
-        }
-        .into());
-    }
+    voucher.verify(channel.params())?;
     if deposit.value != channel.params().deposit {
         return Err(SdkError::DepositMismatch {
             expected: channel.params().deposit,
@@ -139,11 +133,12 @@ pub fn settle(
         });
     }
 
-    let remainder = channel
-        .params()
-        .deposit
-        .checked_sub(voucher.amount)
-        .expect("verify rejected amounts above the deposit");
+    let remainder = channel.params().deposit.checked_sub(voucher.amount).ok_or(
+        VoucherError::ExceedsDeposit {
+            amount: voucher.amount,
+            deposit: channel.params().deposit,
+        },
+    )?;
 
     let (witness, root) = stealth::script_path_witness_with_data(
         &channel.leaves_vec(),
@@ -338,6 +333,19 @@ mod tests {
                 expected: 100,
                 actual: 99
             }
+        ));
+    }
+
+    #[test]
+    fn settle_rejects_invalid_voucher_before_building_transaction() {
+        let (_secret, channel, service) = channel_and_keys();
+        let (wrong_secret, _) = create_key_pair_from_seed(12);
+        let voucher = SignedVoucher::sign(&wrong_secret, channel.params(), 30).unwrap();
+        assert!(matches!(
+            settle(&channel, funded(100), &voucher, service, scan()),
+            Err(SdkError::Voucher(
+                ghostline_core::VoucherError::InvalidSignature
+            ))
         ));
     }
 

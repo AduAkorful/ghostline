@@ -7,6 +7,7 @@
 
 mod error;
 mod params;
+mod private_file;
 mod session;
 mod voucher;
 
@@ -20,6 +21,7 @@ use tari_template_lib::types::crypto::{NoSignatureDomain, Signature};
 
 pub use error::VoucherError;
 pub use params::ChannelParams;
+pub use private_file::write_private_file;
 pub use session::{PaymentSession, ServiceLedger};
 pub use voucher::{SignedVoucher, sign_voucher, voucher_message, witness_data};
 
