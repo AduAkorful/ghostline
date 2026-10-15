@@ -35,6 +35,9 @@ pub struct ChannelFile {
     pub payer_wallet_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ledger: Option<PathBuf>,
+    /// Payer session JSON. MCP `ghostline_call_paid` uses this when `GHOSTLINE_SESSION` is unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub utxo_json: Option<PathBuf>,
     /// View-key mask of the channel output. Not a wallet seed, but enough to build settle and refund.
@@ -319,6 +322,7 @@ mod tests {
             payer_fee_account_name: None,
             payer_wallet_url: None,
             ledger: None,
+            session: None,
             utxo_json: None,
             deposit_mask_hex: None,
         };
@@ -350,6 +354,7 @@ mod tests {
             payer_fee_account_name: None,
             payer_wallet_url: None,
             ledger: None,
+            session: None,
             utxo_json: None,
             deposit_mask_hex: Some("55".repeat(32)),
         };
@@ -425,6 +430,7 @@ mod tests {
             payer_fee_account_name: None,
             payer_wallet_url: None,
             ledger: None,
+            session: None,
             utxo_json: None,
             deposit_mask_hex: Some("55".repeat(32)),
         }

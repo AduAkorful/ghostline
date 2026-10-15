@@ -395,6 +395,9 @@ enum ChannelCommand {
         payer_wallet_url: Option<String>,
         #[arg(long)]
         ledger: Option<PathBuf>,
+        /// Payer session JSON. Used by MCP when `GHOSTLINE_SESSION` is unset.
+        #[arg(long)]
+        session: Option<PathBuf>,
     },
     /// Wallet-open the channel, unblind the output, and store the mask on the file.
     Open {
@@ -404,6 +407,11 @@ enum ChannelCommand {
         dry_run: bool,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
+    },
+    /// Create the payer session from this file, or keep it when the channel id already matches.
+    Session {
+        #[arg(long)]
+        file: PathBuf,
     },
     /// Unblind an existing `--utxo-json` into the channel file.
     Bind {
@@ -1701,6 +1709,46 @@ async fn list_channel_files(
     Ok(rows)
 }
 
+fn default_session_path(channel_file: &std::path::Path) -> PathBuf {
+    let mut name = channel_file
+        .file_stem()
+        .unwrap_or(std::ffi::OsStr::new("channel"))
+        .to_os_string();
+    name.push(".session.json");
+    channel_file.with_file_name(name)
+}
+
+/// Create an empty payer session, or leave an existing one whose channel id matches.
+fn ensure_payer_session(file_path: &std::path::Path) -> Result<(PathBuf, bool, u64), String> {
+    let mut record = channel_file::ChannelFile::load(file_path)?;
+    let params = seal::channel(open_spec(&open_args_from(&record))?)?
+        .params()
+        .clone();
+    let session_path = record
+        .session
+        .clone()
+        .unwrap_or_else(|| default_session_path(file_path));
+    let created = if session_path.exists() {
+        let existing = ghostline_paywall::ChannelStore::open(&session_path)
+            .map_err(|e| format!("session: {e}"))?;
+        if existing.channel_id().map_err(|e| e.to_string())? != params.channel_id() {
+            return Err("session channel id does not match the channel file".into());
+        }
+        false
+    } else {
+        ghostline_paywall::ChannelStore::create(&session_path, params)
+            .map_err(|e| format!("session: {e}"))?;
+        true
+    };
+    let store = ghostline_paywall::ChannelStore::open(&session_path)
+        .map_err(|e| format!("session: {e}"))?;
+    if record.session.as_deref() != Some(session_path.as_path()) {
+        record.session = Some(session_path.clone());
+        record.save(file_path)?;
+    }
+    Ok((session_path, created, store.cumulative()))
+}
+
 async fn channel_command(command: ChannelCommand) -> Result<(), String> {
     match command {
         ChannelCommand::Init {
@@ -1718,6 +1766,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             payer_fee_account_name,
             payer_wallet_url,
             ledger,
+            session,
         } => {
             let file = channel_file::ChannelFile {
                 network_tag: open.network_tag,
@@ -1739,11 +1788,18 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 payer_fee_account_name,
                 payer_wallet_url,
                 ledger,
+                session,
                 utxo_json: None,
                 deposit_mask_hex: None,
             };
             file.save(&out)?;
             println!("wrote={}", out.display());
+        }
+        ChannelCommand::Session { file: path } => {
+            let (session, created, cumulative) = ensure_payer_session(&path)?;
+            println!("session={}", session.display());
+            println!("created={created}");
+            println!("cumulative={cumulative}");
         }
         ChannelCommand::Open {
             file: path,
@@ -1806,6 +1862,10 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             record.save(&path)?;
             println!("value={}", recovered.value);
             println!("mask_stored=true");
+            let (session, created, cumulative) = ensure_payer_session(&path)?;
+            println!("session={}", session.display());
+            println!("session_created={created}");
+            println!("cumulative={cumulative}");
             println!("wrote={}", path.display());
         }
         ChannelCommand::Bind {
@@ -1834,6 +1894,10 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             record.save(&path)?;
             println!("value={}", recovered.value);
             println!("mask_stored=true");
+            let (session, created, cumulative) = ensure_payer_session(&path)?;
+            println!("session={}", session.display());
+            println!("session_created={created}");
+            println!("cumulative={cumulative}");
             println!("wrote={}", path.display());
         }
         ChannelCommand::List { dir } => {
@@ -2594,6 +2658,69 @@ mod tests {
             nonce: [3u8; NONCE_LEN],
         };
         (secret, params)
+    }
+
+    #[test]
+    fn session_is_created_once_and_keeps_cumulative() {
+        let (secret, payer_pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_, service_pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-session-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("channel.json");
+        let mask = "55".repeat(32);
+        channel_file::ChannelFile {
+            network_tag: 1,
+            deposit: 100,
+            payer_hex: to_hex(payer_pk.as_bytes()),
+            service_hex: to_hex(service_pk.as_bytes()),
+            expiry_epoch: 50,
+            nonce_hex: to_hex(&[3u8; 32]),
+            template_hex: to_hex(&[9u8; 32]),
+            indexer_url: "http://127.0.0.1:1/".into(),
+            ootle_network: "esmeralda".into(),
+            max_epoch: 10,
+            opener_account: "ghostline".into(),
+            opener_wallet_url: "http://127.0.0.1:5100".into(),
+            fee_account: None,
+            fee_account_name: None,
+            fee_wallet_url: None,
+            payer_fee_account: None,
+            payer_fee_account_name: None,
+            payer_wallet_url: None,
+            ledger: None,
+            session: None,
+            utxo_json: None,
+            deposit_mask_hex: Some(mask.clone()),
+        }
+        .save(&path)
+        .unwrap();
+        let (session_path, created, cumulative) = ensure_payer_session(&path).unwrap();
+        assert!(created);
+        assert_eq!(cumulative, 0);
+        let loaded = channel_file::ChannelFile::load(&path).unwrap();
+        assert_eq!(loaded.session.as_deref(), Some(session_path.as_path()));
+        assert_eq!(loaded.deposit_mask_hex.as_deref(), Some(mask.as_str()));
+        let mut store = ghostline_paywall::ChannelStore::open(&session_path).unwrap();
+        let mut session = store.session().unwrap();
+        session.sign_next(&secret, 10).unwrap();
+        store.save_session(&session).unwrap();
+        let (_, again, cumulative) = ensure_payer_session(&path).unwrap();
+        assert!(!again);
+        assert_eq!(cumulative, 10);
+        let other = dir.join("other.json");
+        let mut mismatched = loaded;
+        mismatched.nonce_hex = to_hex(&[4u8; 32]);
+        mismatched.session = Some(session_path);
+        mismatched.save(&other).unwrap();
+        let err = ensure_payer_session(&other).unwrap_err();
+        assert!(err.contains("does not match"));
     }
 
     #[test]

@@ -108,6 +108,29 @@ fn session_store(params: ChannelParams) -> Result<ChannelStore, String> {
     ChannelStore::open_or_create(path, params).map_err(|e| e.to_string())
 }
 
+/// `GHOSTLINE_SESSION`, or the `session` path on `GHOSTLINE_CHANNEL_FILE`.
+fn payer_session_path() -> Result<Option<std::path::PathBuf>, String> {
+    if let Ok(path) = std::env::var("GHOSTLINE_SESSION")
+        && !path.trim().is_empty()
+    {
+        return Ok(Some(std::path::PathBuf::from(path)));
+    }
+    let Ok(file) = std::env::var("GHOSTLINE_CHANNEL_FILE") else {
+        return Ok(None);
+    };
+    if file.trim().is_empty() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("channel file: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("channel file: {e}"))?;
+    Ok(value
+        .get("session")
+        .and_then(|v| v.as_str())
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from))
+}
+
 pub fn sign_voucher_hex(args: &SignArgs) -> Result<String, String> {
     let params = parse_params(&args.channel)?;
     let secret = payer_secret_from_env()?;
@@ -115,13 +138,22 @@ pub fn sign_voucher_hex(args: &SignArgs) -> Result<String, String> {
     sign_store(&mut store, &secret, args.price, args.attested)
 }
 
-/// Sign `quote.price` against `GHOSTLINE_SESSION`. The quote's channel id must match the store.
+/// Sign `quote.price` against the payer session. The quote's channel id must match the store.
 pub fn voucher_for_quote(quote: &PaymentRequired, attested: bool) -> Result<String, String> {
-    let path = std::env::var("GHOSTLINE_SESSION").map_err(|_| "set GHOSTLINE_SESSION")?;
+    let path =
+        payer_session_path()?.ok_or("set GHOSTLINE_SESSION or session on the channel file")?;
+    voucher_at(&path, quote, attested)
+}
+
+fn voucher_at(
+    path: &std::path::Path,
+    quote: &PaymentRequired,
+    attested: bool,
+) -> Result<String, String> {
     let mut store = ChannelStore::open(path).map_err(|e| e.to_string())?;
     let id = to_hex(&store.channel_id().map_err(|e| e.to_string())?);
     if id != quote.channel_id {
-        return Err("payment-required channel_id does not match GHOSTLINE_SESSION".into());
+        return Err("payment-required channel_id does not match the payer session".into());
     }
     let secret = payer_secret_from_env()?;
     sign_store(&mut store, &secret, quote.price, attested)
@@ -165,7 +197,7 @@ pub struct PaidCall {
     pub status: u16,
     pub body: String,
     pub payment_required: Option<PaymentRequired>,
-    /// 402 and no `GHOSTLINE_SESSION`. The tool does not open a channel by itself.
+    /// 402 and the channel is not open. The tool does not open a channel by itself.
     #[serde(default)]
     pub needs_channel: bool,
 }
@@ -178,13 +210,41 @@ pub async fn call_paid(args: &CallPaidArgs) -> Result<PaidCall, String> {
     let Some(quote) = first.payment_required.clone() else {
         return Ok(first);
     };
-    if args.voucher_hex.is_some() || std::env::var("GHOSTLINE_SESSION").is_err() {
+    let Some(session) = payer_session_for_pay()? else {
         let mut unpaid = first;
-        unpaid.needs_channel = unpaid.status == 402 && std::env::var("GHOSTLINE_SESSION").is_err();
+        unpaid.needs_channel = unpaid.status == 402;
         return Ok(unpaid);
+    };
+    if args.voucher_hex.is_some() {
+        return Ok(first);
     }
-    let hex = voucher_for_quote(&quote, args.attested)?;
+    let hex = voucher_at(&session, &quote, args.attested)?;
     get_paid(&args.url, Some(&hex)).await
+}
+
+/// An existing session, or a new one when the channel file already holds a deposit mask.
+fn payer_session_for_pay() -> Result<Option<std::path::PathBuf>, String> {
+    if let Some(path) = payer_session_path()? {
+        return Ok(Some(path));
+    }
+    let Ok(file) = std::env::var("GHOSTLINE_CHANNEL_FILE") else {
+        return Ok(None);
+    };
+    if file.trim().is_empty() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("channel file: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("channel file: {e}"))?;
+    let opened = value
+        .get("deposit_mask_hex")
+        .and_then(|v| v.as_str())
+        .is_some_and(|mask| !mask.is_empty());
+    if !opened {
+        return Ok(None);
+    }
+    let outcome = open_channel::ensure_session()?;
+    Ok(Some(std::path::PathBuf::from(outcome.session)))
 }
 
 async fn get_paid(url: &str, voucher_hex: Option<&str>) -> Result<PaidCall, String> {
@@ -441,6 +501,17 @@ impl GhostlineMcp {
         Parameters(_args): Parameters<EnvOnlyArgs>,
     ) -> Result<String, String> {
         let result = open_channel::open_channel().await?;
+        serde_json::to_string(&result).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Create the payer session for GHOSTLINE_CHANNEL_FILE, or keep one whose channel id matches. No arguments. Does not reset a cumulative total or return the deposit mask."
+    )]
+    fn ghostline_channel_session(
+        &self,
+        Parameters(_args): Parameters<EnvOnlyArgs>,
+    ) -> Result<String, String> {
+        let result = open_channel::ensure_session()?;
         serde_json::to_string(&result).map_err(|e| e.to_string())
     }
 }
@@ -728,6 +799,7 @@ mod tests {
             "ghostline_channel_list",
             "ghostline_channel_calls",
             "ghostline_open_channel",
+            "ghostline_channel_session",
         ] {
             assert!(names.contains(&expected), "missing {expected} in {names:?}");
         }
@@ -784,6 +856,7 @@ mod tests {
         let _env = ENV.lock().unwrap();
         unsafe {
             std::env::remove_var("GHOSTLINE_SESSION");
+            std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
         }
         let paid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
@@ -795,6 +868,273 @@ mod tests {
         assert_eq!(paid.status, 402);
         assert!(paid.needs_channel);
         assert!(paid.payment_required.is_some());
+    }
+
+    #[tokio::test]
+    async fn call_paid_uses_the_channel_file_session() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let (secret, public) = create_key_pair_from_seed(11);
+        let params = ChannelParams {
+            network_tag: 1,
+            payer: public.to_byte_type(),
+            deposit: 100,
+            payer_root: Hash32::from_array([9u8; 32]),
+            nonce: [4u8; NONCE_LEN],
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-sess-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let session_path = dir.join("session.json");
+        ChannelStore::create(&session_path, params.clone()).unwrap();
+        let file_path = dir.join("channel.json");
+        std::fs::write(
+            &file_path,
+            serde_json::json!({
+                "session": session_path,
+                "deposit_mask_hex": "55".repeat(32),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let quote = serde_json::to_string(&PaymentRequired::new(10, &params.channel_id())).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let quote_for_thread = quote.clone();
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let paid = req.to_ascii_lowercase().contains("ghostline-voucher:");
+                let (status, body) = if paid {
+                    ("200 OK", "{\"fortune\":\"from-file\"}")
+                } else {
+                    ("402 Payment Required", quote_for_thread.as_str())
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        let _env = ENV.lock().unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_SESSION");
+            std::env::set_var("GHOSTLINE_CHANNEL_FILE", &file_path);
+            std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
+            std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+        }
+        let paid = call_paid(&CallPaidArgs {
+            url: format!("http://{addr}/fortune"),
+            voucher_hex: None,
+            attested: false,
+        })
+        .await
+        .unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
+            std::env::remove_var("GHOSTLINE_PAYER_SECRET");
+            std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+        }
+        assert_eq!(paid.status, 200);
+        assert!(!paid.needs_channel);
+        assert!(paid.body.contains("from-file"));
+        let loaded = ChannelStore::open(&session_path).unwrap();
+        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+        let text = std::fs::read_to_string(&file_path).unwrap();
+        assert!(text.contains("deposit_mask_hex"));
+    }
+
+    #[tokio::test]
+    async fn call_paid_creates_a_session_when_the_mask_is_set() {
+        use ghostline_sdk::{Channel, ChannelSpec};
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let (secret, public) = create_key_pair_from_seed(21);
+        let (_, service) = create_key_pair_from_seed(22);
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-paymask-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("channel.json");
+        let mask = "66".repeat(32);
+        let payer_hex = to_hex(public.to_byte_type().as_bytes());
+        let service_hex = to_hex(service.to_byte_type().as_bytes());
+        let nonce_hex = to_hex(&[6u8; NONCE_LEN]);
+        let template_hex = to_hex(&[9u8; 32]);
+        std::fs::write(
+            &file_path,
+            serde_json::json!({
+                "network_tag": 1,
+                "deposit": 100,
+                "payer_hex": payer_hex,
+                "service_hex": service_hex,
+                "expiry_epoch": 50,
+                "nonce_hex": nonce_hex,
+                "template_hex": template_hex,
+                "opener_account": "ghostline",
+                "opener_wallet_url": "http://127.0.0.1:5100",
+                "deposit_mask_hex": mask,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let channel = Channel::open(ChannelSpec {
+            network_tag: 1,
+            payer: public.to_byte_type(),
+            service: service.to_byte_type(),
+            deposit: 100,
+            expiry_epoch: 50,
+            nonce: [6u8; NONCE_LEN],
+            channel_template: Hash32::from_hex(&template_hex).unwrap(),
+        })
+        .unwrap();
+        let quote =
+            serde_json::to_string(&PaymentRequired::new(10, &channel.params().channel_id()))
+                .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let paid = req.to_ascii_lowercase().contains("ghostline-voucher:");
+                let (status, body) = if paid {
+                    ("200 OK", "{\"fortune\":\"from-mask\"}")
+                } else {
+                    ("402 Payment Required", quote.as_str())
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        let bare = dir.join("unopened.json");
+        std::fs::write(&bare, "{\"opener_account\":\"ghostline\"}").unwrap();
+        let _env = ENV.lock().unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_SESSION");
+            std::env::set_var("GHOSTLINE_CHANNEL_FILE", &bare);
+        }
+        let unpaid = call_paid(&CallPaidArgs {
+            url: format!("http://{addr}/fortune"),
+            voucher_hex: None,
+            attested: false,
+        })
+        .await
+        .unwrap();
+        assert_eq!(unpaid.status, 402);
+        assert!(unpaid.needs_channel);
+        assert!(!dir.join("unopened.session.json").exists());
+        unsafe {
+            std::env::set_var("GHOSTLINE_CHANNEL_FILE", &file_path);
+            std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
+            std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+        }
+        let paid = call_paid(&CallPaidArgs {
+            url: format!("http://{addr}/fortune"),
+            voucher_hex: None,
+            attested: false,
+        })
+        .await
+        .unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
+            std::env::remove_var("GHOSTLINE_PAYER_SECRET");
+            std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+        }
+        assert_eq!(paid.status, 200);
+        assert!(!paid.needs_channel);
+        assert!(paid.body.contains("from-mask"));
+        let text = std::fs::read_to_string(&file_path).unwrap();
+        assert!(text.contains(&mask));
+        assert!(text.contains("session"));
+        let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let loaded = ChannelStore::open(saved["session"].as_str().unwrap()).unwrap();
+        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+    }
+
+    #[test]
+    fn channel_session_keeps_cumulative_and_the_mask() {
+        use tari_crypto::ristretto::RistrettoSecretKey;
+        use tari_utilities::ByteArray;
+        let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service) = create_key_pair_from_seed(12);
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-ensure-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("channel.json");
+        let mask = "55".repeat(32);
+        std::fs::write(
+            &file_path,
+            serde_json::json!({
+                "network_tag": 1,
+                "deposit": 100,
+                "payer_hex": to_hex(public.to_byte_type().as_bytes()),
+                "service_hex": to_hex(service.to_byte_type().as_bytes()),
+                "expiry_epoch": 50,
+                "nonce_hex": to_hex(&[3u8; NONCE_LEN]),
+                "template_hex": to_hex(&[9u8; 32]),
+                "opener_account": "ghostline",
+                "opener_wallet_url": "http://127.0.0.1:5100",
+                "deposit_mask_hex": mask,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let _env = ENV.lock().unwrap();
+        unsafe {
+            std::env::set_var("GHOSTLINE_CHANNEL_FILE", &file_path);
+        }
+        let first = open_channel::ensure_session().unwrap();
+        assert!(first.created);
+        assert_eq!(first.cumulative, 0);
+        let secret = RistrettoSecretKey::from_canonical_bytes(secret.as_bytes()).unwrap();
+        let mut store = ChannelStore::open(&first.session).unwrap();
+        let mut session = store.session().unwrap();
+        session.sign_next(&secret, 10).unwrap();
+        store.save_session(&session).unwrap();
+        let second = open_channel::ensure_session().unwrap();
+        assert!(!second.created);
+        assert_eq!(second.cumulative, 10);
+        let text = std::fs::read_to_string(&file_path).unwrap();
+        assert!(text.contains(&mask));
+        let mut other: serde_json::Value = serde_json::from_str(&text).unwrap();
+        other["nonce_hex"] = serde_json::Value::String(to_hex(&[4u8; NONCE_LEN]));
+        let other_path = dir.join("other.json");
+        std::fs::write(&other_path, other.to_string()).unwrap();
+        unsafe {
+            std::env::set_var("GHOSTLINE_CHANNEL_FILE", &other_path);
+        }
+        let err = open_channel::ensure_session().unwrap_err();
+        assert!(err.contains("does not match"));
+        unsafe {
+            std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
+        }
     }
 
     #[tokio::test]
