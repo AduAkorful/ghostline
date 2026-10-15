@@ -9,6 +9,7 @@ use ghostline_policy::PolicyError;
 pub enum PaywallError {
     MissingVoucher,
     WrongPrice { paid: u64, price: u64 },
+    BadPrice(String),
     Voucher(VoucherError),
     Storage(String),
 }
@@ -20,6 +21,7 @@ impl fmt::Display for PaywallError {
             Self::WrongPrice { paid, price } => {
                 write!(f, "voucher delta {paid} does not match price {price}")
             }
+            Self::BadPrice(details) => write!(f, "{details}"),
             Self::Voucher(err) => write!(f, "{err}"),
             Self::Storage(details) => write!(f, "channel store: {details}"),
         }
@@ -38,7 +40,8 @@ impl PaywallError {
     pub fn status(&self) -> u16 {
         match self {
             Self::MissingVoucher | Self::WrongPrice { .. } => 402,
-            Self::Voucher(VoucherError::Malformed | VoucherError::ZeroAmount) => 400,
+            Self::BadPrice(_)
+            | Self::Voucher(VoucherError::Malformed | VoucherError::ZeroAmount) => 400,
             Self::Voucher(_) | Self::Storage(_) => 403,
         }
     }

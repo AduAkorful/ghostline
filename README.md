@@ -41,7 +41,7 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `docs/threat-model.md` | Assets, actors, attacks, residual risk |
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
 | `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
-| `demo/paid-api` | Reference paid endpoint (`/fortune`) |
+| `demo/paid-api` | Reference paid endpoint (`/fortune` per request, `/meter?units=` per unit) |
 | `packages/ghostline` | TypeScript channel-id encodings and voucher signatures |
 | `crates/ghostline-mcp` | MCP stdio server (`ghostline-mcp`) |
 | `crates/ghostline-net` | Indexer REST and local wallet-daemon JSON-RPC (unsigned submit) |
@@ -169,7 +169,7 @@ cargo run -p ghostline-cli -- channel calls --dir /tmp/channels
 
 Live Esmeralda: that spent channel's ledger has accepted 20 and no call rows, so the export was the note that the total predates the log.
 
-`settle-due` reads the ledger's latest voucher (the paywall stores it on each accepted call; the hex is not printed). It settles when the remaining epochs are within `--margin-epochs` (default 10) and the current epoch is still strictly before expiry. At or after expiry it refuses, including with `--force` (a live settle there is `OnlyFeeAccepted`). Without `--submit` it only prints the decision. `--force` settles early while the window is still open.
+`settle-due` reads the ledger's latest voucher (the paywall stores it on each accepted call; the hex is not printed). It settles when the remaining epochs are within `--margin-epochs` (default 10) and the current epoch is still strictly before expiry. At or after expiry it refuses, including with `--force` (a live settle there is `OnlyFeeAccepted`). Without `--submit` it only prints the decision. `--force` settles early while the window is still open. `channel watch` polls that same decision. It sleeps until the settle is due, then runs `channel settle`. It stops without settling when the epoch reaches expiry, the output is down, or nothing is owed. `--once` prints one decision and returns. `--submit` is what broadcasts.
 
 ```bash
 cargo run -p ghostline-cli -- settle-due \

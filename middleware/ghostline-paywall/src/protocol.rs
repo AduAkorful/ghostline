@@ -12,8 +12,16 @@ pub const VOUCHER_HEADER: &str = "ghostline-voucher";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentRequired {
     pub scheme: String,
+    /// Amount due for this call, in micro-units. For a metered quote this is `unit_price * units`.
     pub price: u64,
     pub channel_id: String,
+    /// `fixed`, `per_request`, or `metered`. Absent on quotes built before pricing bases existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_price: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<u64>,
 }
 
 impl PaymentRequired {
@@ -22,6 +30,20 @@ impl PaymentRequired {
             scheme: SCHEME.to_string(),
             price,
             channel_id: to_hex(channel_id),
+            basis: None,
+            unit_price: None,
+            units: None,
+        }
+    }
+
+    pub fn from_quote(quote: &crate::Quote, channel_id: &[u8; CHANNEL_ID_LEN]) -> Self {
+        Self {
+            scheme: SCHEME.to_string(),
+            price: quote.price,
+            channel_id: to_hex(channel_id),
+            basis: Some(quote.basis.to_string()),
+            unit_price: quote.unit_price,
+            units: quote.units,
         }
     }
 }

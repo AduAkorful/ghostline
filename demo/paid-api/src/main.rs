@@ -135,7 +135,9 @@ async fn run() -> Result<(), String> {
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
                 .map_err(|e| e.to_string())?;
-            eprintln!("ghostline-paid-api listening on {bind}  GET /fortune  price={price}");
+            eprintln!(
+                "ghostline-paid-api listening on {bind}  GET /fortune price={price}  GET /meter?units= unit_price={price}"
+            );
             axum::serve(listener, router(state))
                 .await
                 .map_err(|e| e.to_string())?;

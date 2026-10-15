@@ -58,6 +58,65 @@ pub enum RefundDecision {
     Due { epochs_overdue: u64 },
 }
 
+/// What a settlement watcher should do on this poll. A down output is never settled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum WatchStep {
+    Wait {
+        epochs_until_expiry: u64,
+    },
+    Settle {
+        epochs_until_expiry: u64,
+        amount: u64,
+    },
+    Refund {
+        epochs_overdue: u64,
+    },
+    OutputSpent,
+    NothingOwed,
+    MissingVoucher {
+        accepted: u64,
+    },
+}
+
+pub fn watch_step(
+    accepted: u64,
+    has_voucher: bool,
+    current_epoch: u64,
+    expiry_epoch: u64,
+    margin_epochs: u64,
+    force: bool,
+    output_down: bool,
+) -> WatchStep {
+    if output_down {
+        return WatchStep::OutputSpent;
+    }
+    match decide_settle(
+        accepted,
+        has_voucher,
+        current_epoch,
+        expiry_epoch,
+        margin_epochs,
+        force,
+    ) {
+        SettleDecision::Due {
+            epochs_until_expiry,
+            amount,
+        } => WatchStep::Settle {
+            epochs_until_expiry,
+            amount,
+        },
+        SettleDecision::Wait {
+            epochs_until_expiry,
+        } => WatchStep::Wait {
+            epochs_until_expiry,
+        },
+        SettleDecision::Expired { epochs_overdue } => WatchStep::Refund { epochs_overdue },
+        SettleDecision::NothingOwed => WatchStep::NothingOwed,
+        SettleDecision::MissingVoucher { accepted } => WatchStep::MissingVoucher { accepted },
+    }
+}
+
 pub fn decide_refund(current_epoch: u64, expiry_epoch: u64) -> RefundDecision {
     if current_epoch < expiry_epoch {
         RefundDecision::Wait {
@@ -293,6 +352,35 @@ mod tests {
         assert_eq!(
             decide_settle(40, false, 40, 50, 10, true),
             SettleDecision::MissingVoucher { accepted: 40 }
+        );
+    }
+
+    #[test]
+    fn watcher_settles_only_inside_the_open_window() {
+        assert_eq!(
+            watch_step(20, true, 10, 50, 10, false, true),
+            WatchStep::OutputSpent
+        );
+        assert_eq!(
+            watch_step(20, true, 10, 50, 10, false, false),
+            WatchStep::Wait {
+                epochs_until_expiry: 40
+            }
+        );
+        assert_eq!(
+            watch_step(20, true, 40, 50, 10, false, false),
+            WatchStep::Settle {
+                epochs_until_expiry: 10,
+                amount: 20
+            }
+        );
+        assert_eq!(
+            watch_step(20, true, 50, 50, 10, true, false),
+            WatchStep::Refund { epochs_overdue: 0 }
+        );
+        assert_eq!(
+            watch_step(0, false, 40, 50, 10, true, false),
+            WatchStep::NothingOwed
         );
     }
 

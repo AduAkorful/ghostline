@@ -54,6 +54,67 @@ async fn unpaid_request_returns_402_quote() {
     let body = json_body(response).await;
     assert_eq!(body["scheme"], "ghostline.channel.voucher.v1");
     assert_eq!(body["price"], 10);
+    assert_eq!(body["basis"], "per_request");
+}
+
+#[tokio::test]
+async fn metered_call_charges_unit_price_times_units() {
+    let (secret, public) = create_key_pair_from_seed(11);
+    let payer = public.to_byte_type();
+    let params = ChannelParams {
+        network_tag: 1,
+        payer,
+        deposit: 100,
+        payer_root: Hash32::from_array([9u8; 32]),
+        nonce: [3u8; NONCE_LEN],
+    };
+    let state = AppState::new(ServiceLedger::new(params.clone()));
+    let mut agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 40), payer);
+    let app = router(state);
+    let quote_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/meter?units=3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(quote_response.status(), StatusCode::PAYMENT_REQUIRED);
+    let raw = json_body(quote_response).await;
+    assert_eq!(raw["basis"], "metered");
+    assert_eq!(raw["unit_price"], 10);
+    assert_eq!(raw["units"], 3);
+    assert_eq!(raw["price"], 30);
+    let quote: PaymentRequired = serde_json::from_value(raw).unwrap();
+    let header = agent.voucher_header(&quote, &secret).unwrap();
+    let paid = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/meter?units=3")
+                .header(VOUCHER_HEADER, header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(paid.status(), StatusCode::OK);
+    let body = json_body(paid).await;
+    assert_eq!(body["units"], 3);
+    assert_eq!(body["charged"], 30);
+
+    let zero = app
+        .oneshot(
+            Request::builder()
+                .uri("/meter?units=0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(zero.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

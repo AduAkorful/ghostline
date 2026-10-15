@@ -468,6 +468,30 @@ enum ChannelCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Poll until the settle window is due, then run `settle`. Stops at expiry, on a spent output,
+    /// or when nothing is owed. Does not broadcast unless `--submit`.
+    Watch {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long, default_value_t = 10)]
+        margin_epochs: u64,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        submit: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        seal_key_id_file: Option<PathBuf>,
+        #[arg(long, default_value_t = 90)]
+        timeout_secs: u64,
+        /// Seconds between indexer polls while the settle is not yet due.
+        #[arg(long, default_value_t = 30)]
+        interval_secs: u64,
+        /// Print one decision and return, including `wait`.
+        #[arg(long)]
+        once: bool,
+    },
     /// `refund-due` using the file. `--seal-key-id-file` is the payer key in the opener wallet.
     Refund {
         #[arg(long)]
@@ -2001,6 +2025,30 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             })
             .await?;
         }
+        ChannelCommand::Watch {
+            file: path,
+            margin_epochs,
+            force,
+            submit,
+            dry_run,
+            seal_key_id_file,
+            timeout_secs,
+            interval_secs,
+            once,
+        } => {
+            watch_channel(
+                &path,
+                margin_epochs,
+                force,
+                submit,
+                dry_run,
+                seal_key_id_file,
+                timeout_secs,
+                interval_secs,
+                once,
+            )
+            .await?;
+        }
         ChannelCommand::Refund {
             file: path,
             submit,
@@ -2180,6 +2228,96 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
     );
     Ok(())
+}
+
+async fn watch_channel(
+    path: &std::path::Path,
+    margin_epochs: u64,
+    force: bool,
+    submit: bool,
+    dry_run: bool,
+    seal_key_id_file: Option<PathBuf>,
+    timeout_secs: u64,
+    interval_secs: u64,
+    once: bool,
+) -> Result<(), String> {
+    if !once && interval_secs == 0 {
+        return Err("channel watch: interval_secs must be non-zero".into());
+    }
+    loop {
+        let record = channel_file::ChannelFile::load(path)?;
+        let ledger = record
+            .ledger
+            .clone()
+            .ok_or("channel file has no ledger path")?;
+        let store = ghostline_paywall::ChannelStore::open(&ledger).map_err(|e| e.to_string())?;
+        let current_epoch = fetch_epoch(&record.indexer_url).await?;
+        let output_down = match &record.utxo_json {
+            Some(utxo) => {
+                let hex = commitment_arg(None, Some(utxo.clone()))?
+                    .ok_or("utxo-json has no commitment")?;
+                matches!(
+                    lookup_channel_output(&record.indexer_url, None, &hex)
+                        .await?
+                        .1,
+                    SubstatePresence::Down { .. }
+                )
+            }
+            None => false,
+        };
+        let step = ghostline_paywall::watch_step(
+            store.accepted(),
+            store.latest_voucher_hex().is_some(),
+            current_epoch,
+            record.expiry_epoch,
+            margin_epochs,
+            force,
+            output_down,
+        );
+        println!(
+            "{}",
+            serde_json::to_string(&step).map_err(|e| e.to_string())?
+        );
+        match &step {
+            ghostline_paywall::WatchStep::Wait { .. } if !once => {
+                tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
+                continue;
+            }
+            ghostline_paywall::WatchStep::Settle { .. } => {
+                let fee_account = record
+                    .fee_account
+                    .clone()
+                    .ok_or("channel file has no fee_account")?;
+                return settle_due(SettleDueArgs {
+                    ledger,
+                    open: open_args_from(&record),
+                    indexer_url: record.indexer_url.clone(),
+                    margin_epochs,
+                    force,
+                    commitment_hex: None,
+                    utxo_json: record.utxo_json.clone(),
+                    deposit_mask_hex: record.deposit_mask_hex.clone(),
+                    max_epoch: record.max_epoch,
+                    resource_hex: None,
+                    ootle_network: record.ootle_network.clone(),
+                    fee_account,
+                    max_fee: 100_000,
+                    out: None,
+                    submit,
+                    wallet_url: record
+                        .fee_wallet_url
+                        .clone()
+                        .unwrap_or(record.opener_wallet_url.clone()),
+                    seal_key_id_file,
+                    fee_account_name: record.fee_account_name.clone(),
+                    dry_run,
+                    timeout_secs,
+                })
+                .await;
+            }
+            _ => return Ok(()),
+        }
+    }
 }
 
 struct RefundDueArgs {
