@@ -1,0 +1,28 @@
+{
+  "label": "Verified Esmeralda HTTP paywall run",
+  "network": "Esmeralda",
+  "runDate": null,
+  "serviceRecord": {
+    "source": "local HTTP paywall ledger",
+    "endpoint": "/fortune",
+    "successfulCalls": 1000,
+    "unitPriceMicroTari": 10,
+    "acceptedTotalMicroTari": 10000
+  },
+  "chainRecord": {
+    "source": "Esmeralda indexer",
+    "openTransactionId": "f883fb36acf98f684e0bc71335624b6f0154fd760d9e89bd107b5838884a5a69",
+    "openFinality": "Finalized",
+    "settlementTransactionId": "d2857abcf189b228c173552f284b8926f5da922c4a0cfd57d283c0847bc82400",
+    "settlementFinality": "Finalized",
+    "settledTotalMicroTari": 10000,
+    "settlementFeeMicroTari": 17640,
+    "feePayerRole": "service-side fee account",
+    "channelOutputAfterSettlement": "down"
+  },
+  "notes": [
+    "The 1,000 calls were processed through the local HTTP paywall and were not individual on-chain transactions.",
+    "The service call count is service-recorded; transaction details and finality are indexer/chain-confirmed.",
+    "This static historical evidence is not a live network read."
+  ]
+}
