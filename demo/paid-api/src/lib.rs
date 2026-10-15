@@ -8,9 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use ghostline_core::ServiceLedger;
-use ghostline_paywall::{
-    ChannelStore, PaymentRejection, PaymentRequired, VOUCHER_HEADER, charge,
-};
+use ghostline_paywall::{ChannelStore, PaymentRejection, PaymentRequired, VOUCHER_HEADER, charge};
 use serde::Serialize;
 use tokio::sync::Mutex;
 
@@ -32,7 +30,10 @@ impl AppState {
         }
     }
 
-    pub fn with_store(store: ChannelStore, price: u64) -> Result<Self, ghostline_paywall::PaywallError> {
+    pub fn with_store(
+        store: ChannelStore,
+        price: u64,
+    ) -> Result<Self, ghostline_paywall::PaywallError> {
         let ledger = store.ledger()?;
         Ok(Self {
             ledger: Arc::new(Mutex::new(ledger)),
@@ -67,6 +68,15 @@ async fn fortune(State(state): State<AppState>, headers: HeaderMap) -> Response 
             if let Some(store) = &state.store {
                 let mut store = store.lock().await;
                 if let Err(err) = store.save_ledger(&ledger) {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(PaymentRejection::from_error(&err)),
+                    )
+                        .into_response();
+                }
+                if let Some(hex) = voucher
+                    && let Err(err) = store.remember_voucher(hex)
+                {
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(PaymentRejection::from_error(&err)),

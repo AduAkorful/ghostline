@@ -161,20 +161,19 @@ async fn run() -> Result<(), String> {
             for i in 1..=calls {
                 let unpaid = client.get(&url).send().await.map_err(|e| e.to_string())?;
                 if unpaid.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
-                    return Err(format!(
-                        "call {i}: expected 402, got {}",
-                        unpaid.status()
-                    ));
+                    return Err(format!("call {i}: expected 402, got {}", unpaid.status()));
                 }
-                let quote: PaymentRequired =
-                    unpaid.json().await.map_err(|e| e.to_string())?;
+                let quote: PaymentRequired = unpaid.json().await.map_err(|e| e.to_string())?;
                 let (voucher, next) =
                     gated_sign(&mut store, engine, vendor, quote.price, &secret, attest)
                         .map_err(|e| e.to_string())?;
                 engine = next;
                 let paid = client
                     .get(&url)
-                    .header(VOUCHER_HEADER, ghostline_paywall::encode_voucher_header(&voucher))
+                    .header(
+                        VOUCHER_HEADER,
+                        ghostline_paywall::encode_voucher_header(&voucher),
+                    )
                     .send()
                     .await
                     .map_err(|e| e.to_string())?;

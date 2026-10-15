@@ -116,6 +116,38 @@ cargo run -p ghostline-cli -- watch \
 
 Live Esmeralda: `status` on the MCP channel's session+ledger (accepted 100, cumulative 100) with indexer epoch showed `settle_open` and the observer panel. That channel had already settled on-chain; remainder in the JSON is hypothetical at those off-chain totals.
 
+Pass `--utxo-json` (or `--commitment-hex`) with `--indexer-url` and `status` also reports `channel_output`: `up` or `down` from `GET /substates/utxo_{resource}_{commitment}`. A down output means the channel UTXO is spent; the remainder fields stay the off-chain arithmetic and are not a balance. Without a commitment, `channel_output` is `not_checked`. `settle-due` and `refund-due` with the same flag return `output_spent` and do not submit.
+
+`refund-due` submits only when `current_epoch >= expiry_epoch` (`AfterEpoch` is inclusive). Before that it prints `wait` and does not broadcast, including with `--submit`. Fees come from the payer account. A live refund after expiry was already proven with `seal-refund` (Finalized Commit). `refund-due` itself was checked live on a channel 5000 epochs early (`wait`, not submitted) and on that channel's spent output (`output_spent`).
+
+`channel init` writes one JSON record (open parameters, indexer, fee accounts, ledger path). `channel bind` unblinds an existing UTXO dump into that file. `channel open` is the wallet open plus that unblind. `channel status`, `channel settle`, and `channel refund` read the file instead of repeating the open arguments. Once the deposit mask is stored, treat the file as sensitive. `channel open --dry-run` does not write the mask.
+
+```bash
+cargo run -p ghostline-cli -- channel init --out /tmp/channel.json \
+  …open args… --indexer-url <indexer-url> --ootle-network esmeralda \
+  --max-epoch <epoch> --ledger /tmp/ghostline/ledger.json \
+  --fee-account <service-component_…> --fee-account-name <service-fee-account>
+cargo run -p ghostline-cli -- channel bind --file /tmp/channel.json \
+  --utxo-json /tmp/channel.utxo.json
+cargo run -p ghostline-cli -- channel status --file /tmp/channel.json
+```
+
+Live Esmeralda, using an already-opened channel (no new open): `channel status` showed accepted 20, remainder 99980, `settle_open`, and the channel output `down`. `channel settle --submit` and `channel refund --submit` both returned `output_spent` and did not broadcast. `channel open --dry-run` reached the opener wallet and left the file without a mask.
+
+`settle-due` reads the ledger's latest voucher (the paywall stores it on each accepted call; the hex is not printed). It settles when the remaining epochs are within `--margin-epochs` (default 10) and the current epoch is still strictly before expiry. At or after expiry it refuses, including with `--force` (a live settle there is `OnlyFeeAccepted`). Without `--submit` it only prints the decision. `--force` settles early while the window is still open.
+
+```bash
+cargo run -p ghostline-cli -- settle-due \
+  --ledger /tmp/ghostline/ledger.json \
+  …open args… --indexer-url <indexer-url> --margin-epochs 10 \
+  --max-epoch <epoch> --ootle-network esmeralda \
+  --fee-account <service-component_…> --out /tmp/settle.unsigned.json
+# add --submit --wallet-url <walletd> --seal-key-id-file <service.key_id.json> \
+#   --fee-account-name <service-fee-account> to broadcast
+```
+
+Live Esmeralda: two `/fortune` calls (10 µT) left voucher amount 20 on the ledger. `settle-due` without `--force` printed `wait` (5000 epochs left). `--force --submit` Finalized Commit (17636 µT fee from the second-seed fee wallet).
+
 Localnet (needs tens of GB free; refused below `GHOSTLINE_MIN_FREE_GB`, default 40):
 
 ```bash

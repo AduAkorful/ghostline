@@ -11,7 +11,9 @@ mod client;
 mod error;
 mod wallet;
 
-pub use client::{EpochStats, IndexerClient, ResolvedInputs, indexer_result_status};
+pub use client::{
+    EpochStats, IndexerClient, ResolvedInputs, SubstatePresence, indexer_result_status,
+};
 pub use error::NetError;
 pub use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope, TransactionId};
 pub use wallet::{

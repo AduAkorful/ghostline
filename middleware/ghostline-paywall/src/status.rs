@@ -23,7 +23,83 @@ pub struct ChannelStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub epochs_until_expiry: Option<i64>,
     pub settle_window: SettleWindow,
+    /// Service has accepted a voucher. This is not a chain confirmation that it was settled.
+    pub pending_settlement: bool,
+    pub has_latest_voucher: bool,
     pub observer: ObserverView,
+}
+
+/// Whether `settle-due` should build a settle. At or after expiry the answer is always [`SettleDecision::Expired`]:
+/// a live settle then is `OnlyFeeAccepted` and the channel UTXO stays unspent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SettleDecision {
+    NothingOwed,
+    MissingVoucher {
+        accepted: u64,
+    },
+    Wait {
+        epochs_until_expiry: u64,
+    },
+    Due {
+        epochs_until_expiry: u64,
+        amount: u64,
+    },
+    Expired {
+        epochs_overdue: u64,
+    },
+}
+
+/// Refund is allowed at the expiry epoch (`AfterEpoch` is inclusive). Before that, do not submit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RefundDecision {
+    Wait { epochs_until_expiry: u64 },
+    Due { epochs_overdue: u64 },
+}
+
+pub fn decide_refund(current_epoch: u64, expiry_epoch: u64) -> RefundDecision {
+    if current_epoch < expiry_epoch {
+        RefundDecision::Wait {
+            epochs_until_expiry: expiry_epoch - current_epoch,
+        }
+    } else {
+        RefundDecision::Due {
+            epochs_overdue: current_epoch - expiry_epoch,
+        }
+    }
+}
+
+pub fn decide_settle(
+    accepted: u64,
+    has_voucher: bool,
+    current_epoch: u64,
+    expiry_epoch: u64,
+    margin_epochs: u64,
+    force: bool,
+) -> SettleDecision {
+    if accepted == 0 {
+        return SettleDecision::NothingOwed;
+    }
+    if current_epoch >= expiry_epoch {
+        return SettleDecision::Expired {
+            epochs_overdue: current_epoch - expiry_epoch,
+        };
+    }
+    if !has_voucher {
+        return SettleDecision::MissingVoucher { accepted };
+    }
+    let epochs_until_expiry = expiry_epoch - current_epoch;
+    if force || epochs_until_expiry <= margin_epochs {
+        SettleDecision::Due {
+            epochs_until_expiry,
+            amount: accepted,
+        }
+    } else {
+        SettleDecision::Wait {
+            epochs_until_expiry,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -72,6 +148,7 @@ impl ChannelStatus {
             store.params()?.deposit,
             store.accepted(),
             store.cumulative(),
+            store.latest_voucher_hex().is_some(),
             expiry_epoch,
             current_epoch,
         )
@@ -94,6 +171,7 @@ impl ChannelStatus {
             session.params()?.deposit,
             ledger.accepted(),
             session.cumulative(),
+            ledger.latest_voucher_hex().is_some(),
             expiry_epoch,
             current_epoch,
         )
@@ -104,6 +182,7 @@ impl ChannelStatus {
         deposit: u64,
         accepted: u64,
         cumulative: u64,
+        has_latest_voucher: bool,
         expiry_epoch: Option<u64>,
         current_epoch: Option<u64>,
     ) -> Result<Self, PaywallError> {
@@ -143,6 +222,8 @@ impl ChannelStatus {
             current_epoch,
             epochs_until_expiry,
             settle_window,
+            pending_settlement: accepted > 0,
+            has_latest_voucher,
             observer: ObserverView::default_panel(),
         })
     }
@@ -178,5 +259,58 @@ mod tests {
         let late = ChannelStatus::from_store(&store, Some(50), Some(50)).unwrap();
         assert_eq!(late.settle_window, SettleWindow::RefundOpen);
         assert_eq!(late.epochs_until_expiry, Some(0));
+        assert!(view.pending_settlement);
+        assert!(!view.has_latest_voucher);
+    }
+
+    #[test]
+    fn settle_due_refuses_the_expiry_epoch() {
+        assert_eq!(
+            decide_settle(40, true, 40, 50, 9, false),
+            SettleDecision::Wait {
+                epochs_until_expiry: 10
+            }
+        );
+        assert!(matches!(
+            decide_settle(40, true, 40, 50, 10, true),
+            SettleDecision::Due { amount: 40, .. }
+        ));
+        assert_eq!(
+            decide_settle(40, true, 49, 50, 10, false),
+            SettleDecision::Due {
+                epochs_until_expiry: 1,
+                amount: 40
+            }
+        );
+        assert_eq!(
+            decide_settle(40, true, 50, 50, 10, true),
+            SettleDecision::Expired { epochs_overdue: 0 }
+        );
+        assert_eq!(
+            decide_settle(0, false, 40, 50, 10, true),
+            SettleDecision::NothingOwed
+        );
+        assert_eq!(
+            decide_settle(40, false, 40, 50, 10, true),
+            SettleDecision::MissingVoucher { accepted: 40 }
+        );
+    }
+
+    #[test]
+    fn refund_due_starts_at_the_expiry_epoch() {
+        assert_eq!(
+            decide_refund(49, 50),
+            RefundDecision::Wait {
+                epochs_until_expiry: 1
+            }
+        );
+        assert_eq!(
+            decide_refund(50, 50),
+            RefundDecision::Due { epochs_overdue: 0 }
+        );
+        assert_eq!(
+            decide_refund(51, 50),
+            RefundDecision::Due { epochs_overdue: 1 }
+        );
     }
 }

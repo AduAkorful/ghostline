@@ -9,7 +9,8 @@ use ghostline_sdk::{
 };
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{
-    ComponentAddress, Hash32, ResourceAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    ComponentAddress, Hash32, ResourceAddress, UtxoAddress, UtxoId,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS, crypto::PedersenCommitmentBytes,
     crypto::RistrettoPublicKeyBytes,
 };
 use tari_utilities::ByteArray;
@@ -67,6 +68,13 @@ pub fn parse_secret(label: &str, hex: &str) -> Result<RistrettoSecretKey, String
 
 pub fn parse_component(label: &str, addr: &str) -> Result<ComponentAddress, String> {
     ComponentAddress::from_str(addr).map_err(|e| format!("{label}: {e}"))
+}
+
+/// Indexer substate id for a stealth output: `utxo_{resource_key}_{commitment}`.
+pub fn utxo_substate_id(resource: ResourceAddress, commitment_hex: &str) -> Result<String, String> {
+    let commitment = PedersenCommitmentBytes::from_hex(commitment_hex)
+        .map_err(|e| format!("commitment: {e}"))?;
+    Ok(UtxoAddress::new(resource, UtxoId::from(commitment)).to_string())
 }
 
 pub fn parse_resource(hex: Option<&str>) -> Result<ResourceAddress, String> {
@@ -171,4 +179,17 @@ pub fn seal_refund(
     let statement = refund(channel, deposit, payer_output, scan).map_err(|e| e.to_string())?;
     seal_hex_with_fee(scan.network, resource, statement, max_epoch, sealer, fee)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utxo_id_is_resource_key_and_commitment() {
+        let commitment = "11".repeat(32);
+        let id = utxo_substate_id(STEALTH_TARI_RESOURCE_ADDRESS, &commitment).unwrap();
+        let resource_key = STEALTH_TARI_RESOURCE_ADDRESS.as_object_key().to_string();
+        assert_eq!(id, format!("utxo_{resource_key}_{commitment}"));
+    }
 }

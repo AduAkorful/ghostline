@@ -94,6 +94,16 @@ impl IndexerClient {
         self.send_json(self.http.get(url), &path).await
     }
 
+    /// `GET /substates/{id}`. `Down` is a 404 whose body says `(vN) is down`.
+    pub async fn substate_presence(&self, substate_id: &str) -> Result<SubstatePresence, NetError> {
+        let (version, down, _) = self.substate_lookup(substate_id).await?;
+        Ok(if down {
+            SubstatePresence::Down { version }
+        } else {
+            SubstatePresence::Up { version }
+        })
+    }
+
     /// `GET /substates/{id}` (`tari_indexer_client` 0.45 `get_substate`).
     pub async fn substate(&self, substate_id: &str) -> Result<Value, NetError> {
         let mut url = self.base.clone();
@@ -269,6 +279,14 @@ impl IndexerClient {
     fn join(&self, path: &str) -> Result<Url, NetError> {
         self.base.join(path).map_err(NetError::Url)
     }
+}
+
+/// Whether `GET /substates/{id}` still has the object. `Down` means the indexer 404 said `(vN) is down`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "presence", rename_all = "snake_case")]
+pub enum SubstatePresence {
+    Up { version: u32 },
+    Down { version: u32 },
 }
 
 /// How many unsigned inputs got a version, and how many of those were already down (spent).

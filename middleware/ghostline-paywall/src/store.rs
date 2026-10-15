@@ -21,6 +21,9 @@ struct ChannelSnapshot {
     nonce_hex: String,
     accepted: u64,
     cumulative: u64,
+    /// Latest accepted voucher hex. Absent on stores written before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    latest_voucher_hex: Option<String>,
 }
 
 impl ChannelSnapshot {
@@ -33,6 +36,7 @@ impl ChannelSnapshot {
             nonce_hex: to_hex(&params.nonce),
             accepted,
             cumulative,
+            latest_voucher_hex: None,
         }
     }
 
@@ -127,6 +131,25 @@ impl ChannelStore {
         self.snapshot.cumulative
     }
 
+    pub fn latest_voucher_hex(&self) -> Option<&str> {
+        self.snapshot.latest_voucher_hex.as_deref()
+    }
+
+    /// Record the voucher that matches `accepted`. The hex is a bearer credential; do not print it.
+    pub fn remember_voucher(&mut self, voucher_hex: &str) -> Result<(), PaywallError> {
+        let voucher = crate::decode_voucher_header(voucher_hex)?;
+        let params = self.params()?;
+        voucher.verify(&params)?;
+        if voucher.amount != self.snapshot.accepted {
+            return Err(PaywallError::Storage(format!(
+                "voucher amount {} does not match accepted {}",
+                voucher.amount, self.snapshot.accepted
+            )));
+        }
+        self.snapshot.latest_voucher_hex = Some(voucher_hex.trim().to_string());
+        self.flush()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_totals(
         &mut self,
@@ -193,5 +216,23 @@ mod tests {
         let loaded = ChannelStore::open(&path).unwrap();
         assert_eq!(loaded.ledger().unwrap().accepted(), 30);
         assert_eq!(loaded.session().unwrap().cumulative(), 30);
+        assert!(loaded.latest_voucher_hex().is_none());
+    }
+
+    #[test]
+    fn old_snapshot_without_voucher_still_opens() {
+        let dir = std::env::temp_dir().join(format!("ghostline-store-old-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("old.json");
+        let body = format!(
+            r#"{{"network_tag":1,"payer_hex":"{}","deposit":100,"payer_root_hex":"{}","nonce_hex":"{}","accepted":0,"cumulative":0}}"#,
+            to_hex(&[7u8; 32]),
+            to_hex(&[9u8; 32]),
+            to_hex(&[3u8; NONCE_LEN])
+        );
+        fs::write(&path, body).unwrap();
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.accepted(), 0);
+        assert!(loaded.latest_voucher_hex().is_none());
     }
 }

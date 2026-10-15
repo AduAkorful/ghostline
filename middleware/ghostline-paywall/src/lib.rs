@@ -20,5 +20,8 @@ pub use protocol::{
     PaymentRejection, PaymentRequired, SCHEME, VOUCHER_HEADER, decode_voucher_header,
     encode_voucher_header,
 };
-pub use status::{ChannelStatus, ObserverView, SettleWindow};
+pub use status::{
+    ChannelStatus, ObserverView, RefundDecision, SettleDecision, SettleWindow, decide_refund,
+    decide_settle,
+};
 pub use store::ChannelStore;
