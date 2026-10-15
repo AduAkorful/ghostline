@@ -257,6 +257,31 @@ fn opt_bool(value: Option<bool>) -> String {
     }
 }
 
+/// One accepted charge for `channel calls`. No voucher hex.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallRow {
+    pub file: String,
+    pub price: Option<u64>,
+    pub accepted: Option<u64>,
+    pub note: String,
+}
+
+pub fn calls_csv(rows: &[CallRow]) -> String {
+    let mut out = String::from("file,price,accepted,note\n");
+    for row in rows {
+        let price = row.price.map(|v| v.to_string()).unwrap_or_default();
+        let accepted = row.accepted.map(|v| v.to_string()).unwrap_or_default();
+        out.push_str(&format!(
+            "{},{},{},{}\n",
+            csv_cell(&row.file),
+            price,
+            accepted,
+            csv_cell(&row.note)
+        ));
+    }
+    out
+}
+
 fn csv_cell(value: &str) -> String {
     if value.contains([',', '"', '\n']) {
         format!("\"{}\"", value.replace('"', "\"\""))
@@ -364,6 +389,19 @@ mod tests {
         );
         assert!(report_columns(&["deposit_mask".into()]).is_err());
         assert!(report_columns(&["payer_hex".into()]).is_err());
+    }
+
+    #[test]
+    fn calls_csv_is_price_and_total_only() {
+        let csv = calls_csv(&[CallRow {
+            file: "due.file.json".into(),
+            price: Some(10),
+            accepted: Some(10),
+            note: String::new(),
+        }]);
+        assert_eq!(csv, "file,price,accepted,note\ndue.file.json,10,10,\n");
+        assert!(!csv.contains("voucher"));
+        assert!(!csv.contains(&"55".repeat(32)));
     }
 
     fn sample() -> ChannelFile {

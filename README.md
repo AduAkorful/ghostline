@@ -101,8 +101,13 @@ MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 - `ghostline_inspect_tx`
 - `ghostline_unblind_tx` (secret from `GHOSTLINE_PAYER_SECRET`)
 - `ghostline_channel_status` (session from `GHOSTLINE_SESSION`; optional `GHOSTLINE_LEDGER` / `GHOSTLINE_EXPIRY_EPOCH` / `GHOSTLINE_INDEXER_URL`)
+- `ghostline_channel_file` (`GHOSTLINE_CHANNEL_FILE`; no arguments; omits the deposit mask, keys, and fee accounts)
+- `ghostline_channel_list` (`GHOSTLINE_CHANNEL_DIR`)
+- `ghostline_channel_calls` (`GHOSTLINE_CHANNEL_DIR`; price and accepted total, no voucher hex)
 
 Live Esmeralda: an MCP client speaking JSON-RPC stdio (`initialize` 2025-11-25, then `tools/call` `ghostline_call_paid`) paid 10 `/fortune` calls at 10 µT against a 0.1 tTARI channel. Policy came from env (`GHOSTLINE_POLICY_BUDGET`, `GHOSTLINE_POLICY_MAX_PER_CALL`, `GHOSTLINE_POLICY_VENDOR_HEX`), not from tool arguments. One settle of cumulative 100 µT Finalized Commit (17637 µT fee from the second-seed fee wallet). The protocol path is also covered by an in-process duplex test.
+
+`ghostline_channel_file`, `ghostline_channel_list`, and `ghostline_channel_calls` take no arguments. The path comes from `GHOSTLINE_CHANNEL_FILE` or `GHOSTLINE_CHANNEL_DIR`. Live on the spent channel: accepted 20, remainder 99980, `settle_open`, output `down`, and one call-log note because that total predates the log. The tool result did not contain the deposit mask or the fee-account component.
 
 Operator view (off-chain store, not a UTXO balance). `status` / `report` print the same JSON: totals, remainder *if* you settled at those totals, settle vs refund window, and the observer panel. `--include-params` adds keys; omit it from anything you publish. `watch` is a one-shot epoch heartbeat against an indexer.
 
@@ -150,6 +155,14 @@ cargo run -p ghostline-cli -- channel report --dir /tmp/channels --disclose chan
 ```
 
 Live Esmeralda: the default CSV for that directory was one data row (accepted 20, remainder 99980, `settle_open`, output `down`). `--disclose deposit_mask` was rejected.
+
+`channel calls --dir` exports each accepted charge as `file,price,accepted`. The price is the delta for that call. The voucher hex is not stored in the call log. A ledger written before the log existed is not backfilled: if it already has an accepted total and no calls, the CSV has one note row instead of invented prices.
+
+```bash
+cargo run -p ghostline-cli -- channel calls --dir /tmp/channels
+```
+
+Live Esmeralda: that spent channel's ledger has accepted 20 and no call rows, so the export was the note that the total predates the log.
 
 `settle-due` reads the ledger's latest voucher (the paywall stores it on each accepted call; the hex is not printed). It settles when the remaining epochs are within `--margin-epochs` (default 10) and the current epoch is still strictly before expiry. At or after expiry it refuses, including with `--force` (a live settle there is `OnlyFeeAccepted`). Without `--submit` it only prints the decision. `--force` settles early while the window is still open.
 

@@ -64,10 +64,17 @@ async fn fortune(State(state): State<AppState>, headers: HeaderMap) -> Response 
         .and_then(|value| value.to_str().ok());
     let mut ledger = state.ledger.lock().await;
     match charge(&mut ledger, state.price, voucher) {
-        Ok(_) => {
+        Ok(delta) => {
             if let Some(store) = &state.store {
                 let mut store = store.lock().await;
                 if let Err(err) = store.save_ledger(&ledger) {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(PaymentRejection::from_error(&err)),
+                    )
+                        .into_response();
+                }
+                if let Err(err) = store.record_call(delta) {
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(PaymentRejection::from_error(&err)),

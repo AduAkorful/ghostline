@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+mod channel_file;
+
 use ghostline_core::{ChannelParams, SignedVoucher, VoucherError, from_hex, to_hex};
 use ghostline_net::TransactionEnvelope;
 use ghostline_paywall::{
@@ -53,6 +55,9 @@ pub struct TxHexArgs {
     /// BOR-encoded sealed transaction hex from `ghostline seal-open` / `seal-settle`.
     pub tx_hex: String,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct EnvOnlyArgs {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct StatusArgs {
@@ -387,6 +392,39 @@ impl GhostlineMcp {
         let view = channel_status(&args).await?;
         serde_json::to_string(&view).map_err(|e| e.to_string())
     }
+
+    #[tool(
+        description = "Off-chain totals, expiry window, and channel-output presence for GHOSTLINE_CHANNEL_FILE. No arguments. Does not return the deposit mask, keys, or fee accounts."
+    )]
+    async fn ghostline_channel_file(
+        &self,
+        Parameters(_args): Parameters<EnvOnlyArgs>,
+    ) -> Result<String, String> {
+        let view = channel_file::channel_file_status().await?;
+        serde_json::to_string(&view).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "One row per channel file in GHOSTLINE_CHANNEL_DIR. No arguments. Skips JSON that is not a channel record. Does not return the deposit mask, keys, or fee accounts."
+    )]
+    async fn ghostline_channel_list(
+        &self,
+        Parameters(_args): Parameters<EnvOnlyArgs>,
+    ) -> Result<String, String> {
+        let views = channel_file::channel_file_list().await?;
+        serde_json::to_string(&views).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Accepted-call prices from ledgers under GHOSTLINE_CHANNEL_DIR. No arguments. Does not return voucher hex. Older ledgers are not backfilled."
+    )]
+    fn ghostline_channel_calls(
+        &self,
+        Parameters(_args): Parameters<EnvOnlyArgs>,
+    ) -> Result<String, String> {
+        let rows = channel_file::channel_file_calls()?;
+        serde_json::to_string(&rows).map_err(|e| e.to_string())
+    }
 }
 
 #[tool_handler(
@@ -668,6 +706,9 @@ mod tests {
             "ghostline_inspect_tx",
             "ghostline_unblind_tx",
             "ghostline_channel_status",
+            "ghostline_channel_file",
+            "ghostline_channel_list",
+            "ghostline_channel_calls",
         ] {
             assert!(names.contains(&expected), "missing {expected} in {names:?}");
         }
@@ -743,5 +784,123 @@ mod tests {
         assert_eq!(view.cumulative, 0);
         assert_eq!(view.settle_window, ghostline_paywall::SettleWindow::Unknown);
         assert!(!view.observer.at_settle.is_empty());
+    }
+
+    #[tokio::test]
+    async fn channel_file_tools_omit_the_mask() {
+        use ghostline_core::{PaymentSession, ServiceLedger};
+        let (secret, public) = create_key_pair_from_seed(11);
+        let params = ChannelParams {
+            network_tag: 1,
+            payer: public.to_byte_type(),
+            deposit: 100,
+            payer_root: Hash32::from_array([9u8; 32]),
+            nonce: [3u8; NONCE_LEN],
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-file-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ledger_path = dir.join("ledger.json");
+        let mut session = PaymentSession::new(params.clone());
+        let voucher = session.sign_next(&secret, 10).unwrap();
+        let mut ledger = ServiceLedger::new(params.clone());
+        assert_eq!(ledger.accept(&voucher).unwrap(), 10);
+        let mut store = ChannelStore::create(&ledger_path, params).unwrap();
+        store.save_ledger(&ledger).unwrap();
+        store.record_call(10).unwrap();
+        let mask = "55".repeat(32);
+        let file_path = dir.join("due.file.json");
+        std::fs::write(
+            &file_path,
+            serde_json::json!({
+                "network_tag": 1,
+                "deposit": 100,
+                "payer_hex": "11".repeat(32),
+                "service_hex": "22".repeat(32),
+                "expiry_epoch": 50,
+                "nonce_hex": "33".repeat(32),
+                "template_hex": "44".repeat(32),
+                "indexer_url": "",
+                "ootle_network": "esmeralda",
+                "max_epoch": 10,
+                "opener_account": "ghostline",
+                "opener_wallet_url": "http://127.0.0.1:5100",
+                "fee_account": "component_secret",
+                "ledger": ledger_path,
+                "deposit_mask_hex": mask,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let _env = ENV.lock().unwrap();
+        unsafe {
+            std::env::set_var("GHOSTLINE_CHANNEL_FILE", &file_path);
+            std::env::set_var("GHOSTLINE_CHANNEL_DIR", &dir);
+        }
+        let view = channel_file::channel_file_status().await.unwrap();
+        let listed = channel_file::channel_file_list().await.unwrap();
+        let calls = channel_file::channel_file_calls().unwrap();
+        unsafe {
+            std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
+            std::env::remove_var("GHOSTLINE_CHANNEL_DIR");
+        }
+        let text = serde_json::to_string(&view).unwrap();
+        assert!(!text.contains(&mask));
+        assert!(!text.contains("component_secret"));
+        assert!(!text.contains(&"11".repeat(32)));
+        assert_eq!(view.status.accepted, 10);
+        assert_eq!(view.status.remainder_at_accepted, 90);
+        assert_eq!(view.output_presence, "not_checked");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            calls,
+            vec![channel_file::ChannelCallView {
+                file: "due.file.json".into(),
+                price: Some(10),
+                accepted: Some(10),
+                note: String::new(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "reads a local Esmeralda channel file from GHOSTLINE_CHANNEL_FILE and GHOSTLINE_CHANNEL_DIR"]
+    async fn live_channel_file_omits_mask() {
+        let file = std::env::var("GHOSTLINE_CHANNEL_FILE").expect("GHOSTLINE_CHANNEL_FILE");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mask = parsed["deposit_mask_hex"]
+            .as_str()
+            .expect("mask")
+            .to_string();
+        let fee = parsed["fee_account"].as_str().unwrap_or("").to_string();
+        let view = channel_file::channel_file_status().await.unwrap();
+        let calls = channel_file::channel_file_calls().unwrap();
+        let text = format!(
+            "{}{}",
+            serde_json::to_string(&view).unwrap(),
+            serde_json::to_string(&calls).unwrap()
+        );
+        assert!(!text.contains(&mask));
+        assert!(!fee.is_empty());
+        assert!(!text.contains(&fee));
+        assert_eq!(view.status.accepted, 20);
+        assert_eq!(view.output_presence, "down");
+        assert_eq!(view.output_version, Some(0));
+        assert!(calls.iter().any(|row| row.note.contains("predates")));
+        println!(
+            "accepted={} remainder={} window={:?} presence={} calls={}",
+            view.status.accepted,
+            view.status.remainder_at_accepted,
+            view.status.settle_window,
+            view.output_presence,
+            calls.len()
+        );
     }
 }

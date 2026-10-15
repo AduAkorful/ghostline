@@ -453,6 +453,13 @@ enum ChannelCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Per-call prices from each channel file's ledger. No voucher hex.
+    Calls {
+        #[arg(long)]
+        dir: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// `refund-due` using the file. `--seal-key-id-file` is the payer key in the opener wallet.
     Refund {
         #[arg(long)]
@@ -1498,6 +1505,54 @@ fn recover_utxo(
     Ok(recovered)
 }
 
+fn list_channel_calls(dir: &std::path::Path) -> Result<Vec<channel_file::CallRow>, String> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| format!("channel calls: {e}"))?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+    let mut rows = Vec::new();
+    for path in paths {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("channel.json")
+            .to_string();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(record) = serde_json::from_str::<channel_file::ChannelFile>(&text) else {
+            continue;
+        };
+        let Some(ledger) = record.ledger else {
+            continue;
+        };
+        let store = ghostline_paywall::ChannelStore::open(&ledger)
+            .map_err(|e| format!("channel calls: {name}: {e}"))?;
+        if store.calls().is_empty() {
+            if store.accepted() > 0 {
+                rows.push(channel_file::CallRow {
+                    file: name,
+                    price: None,
+                    accepted: Some(store.accepted()),
+                    note: "no call log; accepted total predates it".into(),
+                });
+            }
+            continue;
+        }
+        for call in store.calls() {
+            rows.push(channel_file::CallRow {
+                file: name.clone(),
+                price: Some(call.price),
+                accepted: Some(call.accepted),
+                note: String::new(),
+            });
+        }
+    }
+    Ok(rows)
+}
+
 async fn list_channel_files(
     dir: &std::path::Path,
 ) -> Result<Vec<channel_file::ChannelListRow>, String> {
@@ -1804,6 +1859,15 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             };
             if let Some(path) = out {
                 std::fs::write(&path, &body).map_err(|e| format!("channel report: {e}"))?;
+                println!("wrote={}", path.display());
+            } else {
+                print!("{body}");
+            }
+        }
+        ChannelCommand::Calls { dir, out } => {
+            let body = channel_file::calls_csv(&list_channel_calls(&dir)?);
+            if let Some(path) = out {
+                std::fs::write(&path, &body).map_err(|e| format!("channel calls: {e}"))?;
                 println!("wrote={}", path.display());
             } else {
                 print!("{body}");

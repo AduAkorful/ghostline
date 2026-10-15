@@ -24,6 +24,16 @@ struct ChannelSnapshot {
     /// Latest accepted voucher hex. Absent on stores written before this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     latest_voucher_hex: Option<String>,
+    /// Each new charge. Empty on stores written before this field existed; those totals are not backfilled.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    calls: Vec<AcceptedCall>,
+}
+
+/// One accepted charge. The price is the delta; `accepted` is the cumulative total after it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AcceptedCall {
+    pub price: u64,
+    pub accepted: u64,
 }
 
 impl ChannelSnapshot {
@@ -37,6 +47,7 @@ impl ChannelSnapshot {
             accepted,
             cumulative,
             latest_voucher_hex: None,
+            calls: Vec::new(),
         }
     }
 
@@ -133,6 +144,42 @@ impl ChannelStore {
 
     pub fn latest_voucher_hex(&self) -> Option<&str> {
         self.snapshot.latest_voucher_hex.as_deref()
+    }
+
+    pub fn calls(&self) -> &[AcceptedCall] {
+        &self.snapshot.calls
+    }
+
+    /// Append one new charge. `price` is the delta from [`ServiceLedger::accept`] (a replay is `0` and is ignored).
+    ///
+    /// When the log is empty, a price at or below the current accepted total is stored as this call only.
+    /// Earlier charges on an older ledger are not invented.
+    pub fn record_call(&mut self, price: u64) -> Result<(), PaywallError> {
+        if price == 0 {
+            return Ok(());
+        }
+        if let Some(last) = self.snapshot.calls.last() {
+            let next = last
+                .accepted
+                .checked_add(price)
+                .ok_or_else(|| PaywallError::Storage("call price overflow".into()))?;
+            if next != self.snapshot.accepted {
+                return Err(PaywallError::Storage(format!(
+                    "call price {price} does not advance accepted from {} to {}",
+                    last.accepted, self.snapshot.accepted
+                )));
+            }
+        } else if price > self.snapshot.accepted {
+            return Err(PaywallError::Storage(format!(
+                "call price {price} exceeds accepted {}",
+                self.snapshot.accepted
+            )));
+        }
+        self.snapshot.calls.push(AcceptedCall {
+            price,
+            accepted: self.snapshot.accepted,
+        });
+        self.flush()
     }
 
     /// Record the voucher that matches `accepted`. The hex is a bearer credential; do not print it.
@@ -234,5 +281,35 @@ mod tests {
         let loaded = ChannelStore::open(&path).unwrap();
         assert_eq!(loaded.accepted(), 0);
         assert!(loaded.latest_voucher_hex().is_none());
+        assert!(loaded.calls().is_empty());
+    }
+
+    #[test]
+    fn record_call_appends_delta_and_ignores_replay() {
+        let dir = std::env::temp_dir().join(format!("ghostline-calls-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("calls.json");
+        let _ = fs::remove_file(&path);
+        let mut store = ChannelStore::create(&path, params()).unwrap();
+        store.set_totals(10, 10).unwrap();
+        store.record_call(10).unwrap();
+        store.record_call(0).unwrap();
+        store.set_totals(30, 30).unwrap();
+        store.record_call(20).unwrap();
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(
+            loaded.calls(),
+            &[
+                AcceptedCall {
+                    price: 10,
+                    accepted: 10
+                },
+                AcceptedCall {
+                    price: 20,
+                    accepted: 30
+                }
+            ]
+        );
+        store.record_call(5).unwrap_err();
     }
 }

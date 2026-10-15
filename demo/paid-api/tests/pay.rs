@@ -195,6 +195,15 @@ async fn ledger_file_keeps_accepted_after_reopen() {
     let session = ChannelStore::open(&session_path).unwrap();
     assert_eq!(ledger.ledger().unwrap().accepted(), 30);
     assert_eq!(session.session().unwrap().cumulative(), 30);
+    assert_eq!(
+        ledger
+            .calls()
+            .iter()
+            .map(|call| (call.price, call.accepted))
+            .collect::<Vec<_>>(),
+        vec![(10, 10), (10, 20), (10, 30)]
+    );
+    assert!(session.calls().is_empty());
 }
 
 #[tokio::test]

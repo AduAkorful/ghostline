@@ -24,4 +24,4 @@ pub use status::{
     ChannelStatus, ObserverView, RefundDecision, SettleDecision, SettleWindow, decide_refund,
     decide_settle,
 };
-pub use store::ChannelStore;
+pub use store::{AcceptedCall, ChannelStore};
