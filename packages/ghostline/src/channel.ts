@@ -21,7 +21,11 @@ export function fromHex(hex: string): Uint8Array {
   }
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    const byte = hex.slice(i * 2, i * 2 + 2);
+    if (!/^[0-9a-fA-F]{2}$/.test(byte)) {
+      throw new Error("invalid hex");
+    }
+    out[i] = Number.parseInt(byte, 16);
   }
   return out;
 }
@@ -47,7 +51,7 @@ export function channelId(params: ChannelParams): Uint8Array {
   if (params.payer.length !== 32 || params.payerRoot.length !== 32 || params.nonce.length !== NONCE_LEN) {
     throw new Error("payer, payerRoot and nonce must be 32 bytes");
   }
-  if (params.networkTag < 0 || params.networkTag > 255) {
+  if (!Number.isInteger(params.networkTag) || params.networkTag < 0 || params.networkTag > 255) {
     throw new Error("networkTag must fit in a u8");
   }
   const parts = [
