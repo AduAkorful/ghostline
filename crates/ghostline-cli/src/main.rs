@@ -434,6 +434,25 @@ enum ChannelCommand {
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
     },
+    /// One row per channel file in a directory. Skips JSON that is not a channel record.
+    List {
+        #[arg(long)]
+        dir: PathBuf,
+    },
+    /// Accounting export of channel files. Default columns omit channel id, keys, and the deposit mask.
+    ///
+    /// `--disclose` adds `channel_id`, `cumulative`, `has_latest_voucher`, `epochs_until_expiry`, or `current_epoch`.
+    Report {
+        #[arg(long)]
+        dir: PathBuf,
+        /// `csv` or `json`.
+        #[arg(long, default_value = "csv")]
+        format: String,
+        #[arg(long)]
+        disclose: Vec<String>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// `refund-due` using the file. `--seal-key-id-file` is the payer key in the opener wallet.
     Refund {
         #[arg(long)]
@@ -1479,6 +1498,154 @@ fn recover_utxo(
     Ok(recovered)
 }
 
+async fn list_channel_files(
+    dir: &std::path::Path,
+) -> Result<Vec<channel_file::ChannelListRow>, String> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| format!("channel list: {e}"))?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+    let mut epochs: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut rows = Vec::new();
+    for path in paths {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("channel.json")
+            .to_string();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) => {
+                rows.push(channel_file::ChannelListRow {
+                    file: name,
+                    channel_id: String::new(),
+                    deposit: 0,
+                    expiry_epoch: 0,
+                    accepted: None,
+                    cumulative: None,
+                    remainder_at_accepted: None,
+                    pending_settlement: None,
+                    has_latest_voucher: None,
+                    settle_window: None,
+                    epochs_until_expiry: None,
+                    current_epoch: None,
+                    output_presence: None,
+                    output_version: None,
+                    note: Some(format!("unreadable: {e}")),
+                });
+                continue;
+            }
+        };
+        let record: channel_file::ChannelFile = match serde_json::from_str(&text) {
+            Ok(record) => record,
+            Err(_) if text.contains("\"opener_account\"") => {
+                rows.push(channel_file::ChannelListRow {
+                    file: name,
+                    channel_id: String::new(),
+                    deposit: 0,
+                    expiry_epoch: 0,
+                    accepted: None,
+                    cumulative: None,
+                    remainder_at_accepted: None,
+                    pending_settlement: None,
+                    has_latest_voucher: None,
+                    settle_window: None,
+                    epochs_until_expiry: None,
+                    current_epoch: None,
+                    output_presence: None,
+                    output_version: None,
+                    note: Some("channel file did not parse".into()),
+                });
+                continue;
+            }
+            Err(_) => continue,
+        };
+        let channel = seal::channel(open_spec(&open_args_from(&record))?)?;
+        let mut row = channel_file::ChannelListRow::identity(
+            &name,
+            to_hex(&channel.params().channel_id()),
+            &record,
+        );
+        if let Some(ledger) = &record.ledger {
+            match ghostline_paywall::ChannelStore::open(ledger) {
+                Ok(store) => {
+                    let current = if let Some(epoch) = epochs.get(&record.indexer_url).copied() {
+                        Some(epoch)
+                    } else {
+                        match fetch_epoch(&record.indexer_url).await {
+                            Ok(epoch) => {
+                                epochs.insert(record.indexer_url.clone(), epoch);
+                                Some(epoch)
+                            }
+                            Err(e) => {
+                                row.note = Some(format!("indexer: {e}"));
+                                None
+                            }
+                        }
+                    };
+                    match ghostline_paywall::ChannelStatus::from_store(
+                        &store,
+                        Some(record.expiry_epoch),
+                        current,
+                    ) {
+                        Ok(view) => {
+                            row.accepted = Some(view.accepted);
+                            row.cumulative = Some(view.cumulative);
+                            row.remainder_at_accepted = Some(view.remainder_at_accepted);
+                            row.pending_settlement = Some(view.pending_settlement);
+                            row.has_latest_voucher = Some(view.has_latest_voucher);
+                            row.settle_window = Some(
+                                match view.settle_window {
+                                    ghostline_paywall::SettleWindow::Unknown => "unknown",
+                                    ghostline_paywall::SettleWindow::SettleOpen => "settle_open",
+                                    ghostline_paywall::SettleWindow::RefundOpen => "refund_open",
+                                }
+                                .to_string(),
+                            );
+                            row.epochs_until_expiry = view.epochs_until_expiry;
+                            row.current_epoch = view.current_epoch;
+                        }
+                        Err(e) => row.note = Some(e.to_string()),
+                    }
+                }
+                Err(e) => row.note = Some(format!("ledger: {e}")),
+            }
+        } else {
+            row.note = Some("no ledger".into());
+        }
+        if let Some(utxo) = &record.utxo_json {
+            match commitment_arg(None, Some(utxo.clone())) {
+                Ok(Some(hex)) => {
+                    match lookup_channel_output(&record.indexer_url, None, &hex).await {
+                        Ok((_, presence)) => match presence {
+                            SubstatePresence::Up { version } => {
+                                row.output_presence = Some("up".into());
+                                row.output_version = Some(version);
+                            }
+                            SubstatePresence::Down { version } => {
+                                row.output_presence = Some("down".into());
+                                row.output_version = Some(version);
+                            }
+                        },
+                        Err(e) => {
+                            row.note = Some(match &row.note {
+                                Some(prev) => format!("{prev}; output: {e}"),
+                                None => format!("output: {e}"),
+                            });
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => row.note = Some(format!("utxo: {e}")),
+            }
+        }
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
 async fn channel_command(command: ChannelCommand) -> Result<(), String> {
     match command {
         ChannelCommand::Init {
@@ -1613,6 +1780,34 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             println!("value={}", recovered.value);
             println!("mask_stored=true");
             println!("wrote={}", path.display());
+        }
+        ChannelCommand::List { dir } => {
+            let rows = list_channel_files(&dir).await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?
+            );
+        }
+        ChannelCommand::Report {
+            dir,
+            format,
+            disclose,
+            out,
+        } => {
+            let rows = list_channel_files(&dir).await?;
+            let columns = channel_file::report_columns(&disclose)?;
+            let body = match format.as_str() {
+                "csv" => channel_file::report_csv(&rows, &columns),
+                "json" => serde_json::to_string_pretty(&channel_file::report_json(&rows, &columns))
+                    .map_err(|e| e.to_string())?,
+                other => return Err(format!("format: expected csv or json, got {other}")),
+            };
+            if let Some(path) = out {
+                std::fs::write(&path, &body).map_err(|e| format!("channel report: {e}"))?;
+                println!("wrote={}", path.display());
+            } else {
+                print!("{body}");
+            }
         }
         ChannelCommand::Status { file: path } => {
             let record = channel_file::ChannelFile::load(&path)?;

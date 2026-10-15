@@ -134,6 +134,23 @@ cargo run -p ghostline-cli -- channel status --file /tmp/channel.json
 
 Live Esmeralda, using an already-opened channel (no new open): `channel status` showed accepted 20, remainder 99980, `settle_open`, and the channel output `down`. `channel settle --submit` and `channel refund --submit` both returned `output_spent` and did not broadcast. `channel open --dry-run` reached the opener wallet and left the file without a mask.
 
+`channel list --dir` prints one row per channel file in that directory (other JSON is skipped). The row has the off-chain totals, expiry window, and output presence. It does not include the deposit mask, keys, or account components. `pending_settlement` means the ledger has accepted a voucher; a `down` output means that UTXO is already spent.
+
+```bash
+cargo run -p ghostline-cli -- channel list --dir /tmp/channels
+```
+
+Live Esmeralda: the directory that holds the spent channel file listed one row (accepted 20, remainder 99980, `settle_open`, output `down`, `pending_settlement` true).
+
+`channel report --dir` writes that directory as CSV (or `--format json`) for accounting. The default columns are the file name, deposit, accepted total, remainder, expiry, settle window, pending settlement, and output presence. They omit the channel id, keys, fee-account components, and the deposit mask. `--disclose channel_id` (also `cumulative`, `has_latest_voucher`, `epochs_until_expiry`, `current_epoch`) adds a column. Any other name is an error. The top-level `report` command is still the full status JSON, including the observer panel.
+
+```bash
+cargo run -p ghostline-cli -- channel report --dir /tmp/channels
+cargo run -p ghostline-cli -- channel report --dir /tmp/channels --disclose channel_id --out /tmp/spend.csv
+```
+
+Live Esmeralda: the default CSV for that directory was one data row (accepted 20, remainder 99980, `settle_open`, output `down`). `--disclose deposit_mask` was rejected.
+
 `settle-due` reads the ledger's latest voucher (the paywall stores it on each accepted call; the hex is not printed). It settles when the remaining epochs are within `--margin-epochs` (default 10) and the current epoch is still strictly before expiry. At or after expiry it refuses, including with `--force` (a live settle there is `OnlyFeeAccepted`). Without `--submit` it only prints the decision. `--force` settles early while the window is still open.
 
 ```bash
