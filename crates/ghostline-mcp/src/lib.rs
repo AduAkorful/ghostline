@@ -219,8 +219,33 @@ pub async fn call_paid(args: &CallPaidArgs) -> Result<PaidCall, String> {
     if args.voucher_hex.is_some() {
         return Ok(first);
     }
+    let session = session_for_quote(&session, &quote.channel_id)?;
     let hex = voucher_at(&session, &quote, args.attested)?;
     get_paid(&args.url, Some(&hex)).await
+}
+
+/// Keep `session` when it matches the quote. Otherwise use the ledger in `GHOSTLINE_SESSION_DIR` with that channel id.
+fn session_for_quote(
+    session: &std::path::Path,
+    channel_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    if let Ok(store) = ChannelStore::open(session) {
+        let id = to_hex(&store.channel_id().map_err(|e| e.to_string())?);
+        if id == channel_id {
+            return Ok(session.to_path_buf());
+        }
+    }
+    let Ok(dir) = std::env::var("GHOSTLINE_SESSION_DIR") else {
+        return Ok(session.to_path_buf());
+    };
+    if dir.trim().is_empty() {
+        return Ok(session.to_path_buf());
+    }
+    ghostline_paywall::ChannelDirectory::open(&dir)
+        .map_err(|e| e.to_string())?
+        .path_for_channel(channel_id)
+        .map(|path| path.to_path_buf())
+        .map_err(|e| e.to_string())
 }
 
 /// An existing session, a new one when the file already holds a deposit mask, or a live open

@@ -41,7 +41,7 @@ Ghostline hides the spending pattern from third parties. It does not hide anythi
 | `docs/threat-model.md` | Assets, actors, attacks, residual risk |
 | `crates/ghostline-policy` | Budget, per-call ceiling, vendor allowlist, rate limit and audit log |
 | `middleware/ghostline-paywall` | HTTP 402 paywall, agent payer, and file-backed channel store |
-| `demo/paid-api` | Reference paid endpoint (`/fortune` per request, `/meter?units=` per unit) |
+| `demo/paid-api` | Reference paid endpoint (`/fortune` per request, `/meter?units=` per unit, many ledgers via `ghostline-channel`) |
 | `packages/ghostline` | TypeScript channel-id encodings and voucher signatures |
 | `crates/ghostline-mcp` | MCP stdio server (`ghostline-mcp`) |
 | `crates/ghostline-net` | Indexer REST and local wallet-daemon JSON-RPC (unsigned submit) |

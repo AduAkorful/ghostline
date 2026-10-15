@@ -8,8 +8,15 @@ use ghostline_policy::PolicyError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaywallError {
     MissingVoucher,
-    WrongPrice { paid: u64, price: u64 },
+    WrongPrice {
+        paid: u64,
+        price: u64,
+    },
     BadPrice(String),
+    /// The voucher names a channel this service does not have a ledger for.
+    UnknownChannel,
+    /// More than one ledger, and the request did not name a channel.
+    AmbiguousChannel,
     Voucher(VoucherError),
     Storage(String),
 }
@@ -22,6 +29,10 @@ impl fmt::Display for PaywallError {
                 write!(f, "voucher delta {paid} does not match price {price}")
             }
             Self::BadPrice(details) => write!(f, "{details}"),
+            Self::UnknownChannel => write!(f, "no ledger for this channel"),
+            Self::AmbiguousChannel => {
+                write!(f, "more than one channel; set the ghostline-channel header")
+            }
             Self::Voucher(err) => write!(f, "{err}"),
             Self::Storage(details) => write!(f, "channel store: {details}"),
         }
@@ -41,8 +52,9 @@ impl PaywallError {
         match self {
             Self::MissingVoucher | Self::WrongPrice { .. } => 402,
             Self::BadPrice(_)
+            | Self::AmbiguousChannel
             | Self::Voucher(VoucherError::Malformed | VoucherError::ZeroAmount) => 400,
-            Self::Voucher(_) | Self::Storage(_) => 403,
+            Self::Voucher(_) | Self::Storage(_) | Self::UnknownChannel => 403,
         }
     }
 }

@@ -232,6 +232,121 @@ impl ChannelStore {
         fs::rename(&tmp, &self.path).map_err(|e| PaywallError::Storage(e.to_string()))?;
         Ok(())
     }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// Ledgers for more than one channel. A voucher is charged on the ledger with the same channel id.
+pub struct ChannelDirectory {
+    stores: Vec<ChannelStore>,
+}
+
+impl ChannelDirectory {
+    pub fn open(dir: impl AsRef<Path>) -> Result<Self, PaywallError> {
+        let dir = dir.as_ref();
+        let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+            .map_err(|e| PaywallError::Storage(e.to_string()))?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .collect();
+        paths.sort();
+        let mut stores = Vec::new();
+        for path in paths {
+            let Ok(store) = ChannelStore::open(&path) else {
+                continue;
+            };
+            let id = store.channel_id()?;
+            if stores
+                .iter()
+                .any(|existing: &ChannelStore| existing.channel_id().ok().as_ref() == Some(&id))
+            {
+                return Err(PaywallError::Storage(format!(
+                    "duplicate channel {}",
+                    to_hex(&id)
+                )));
+            }
+            stores.push(store);
+        }
+        Ok(Self { stores })
+    }
+
+    pub fn len(&self) -> usize {
+        self.stores.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stores.is_empty()
+    }
+
+    pub fn first_params(&self) -> Result<ChannelParams, PaywallError> {
+        self.stores
+            .first()
+            .ok_or_else(|| PaywallError::Storage("no channel ledgers".into()))?
+            .params()
+    }
+
+    /// The channel a 402 should name. One ledger is implied. Several require `requested` (hex channel id).
+    pub fn channel_for_quote(
+        &self,
+        requested: Option<&str>,
+    ) -> Result<[u8; CHANNEL_ID_LEN], PaywallError> {
+        if let Some(hex) = requested.filter(|value| !value.is_empty()) {
+            let bytes =
+                from_hex(hex).map_err(|_| PaywallError::Voucher(VoucherError::Malformed))?;
+            let id: [u8; CHANNEL_ID_LEN] = bytes
+                .try_into()
+                .map_err(|_| PaywallError::Voucher(VoucherError::Malformed))?;
+            if self.store_index(&id).is_none() {
+                return Err(PaywallError::UnknownChannel);
+            }
+            return Ok(id);
+        }
+        match self.stores.len() {
+            0 => Err(PaywallError::Storage("no channel ledgers".into())),
+            1 => self.stores[0].channel_id(),
+            _ => Err(PaywallError::AmbiguousChannel),
+        }
+    }
+
+    pub fn path_for_channel(&self, channel_id_hex: &str) -> Result<&Path, PaywallError> {
+        let id = self.channel_for_quote(Some(channel_id_hex))?;
+        let index = self.store_index(&id).ok_or(PaywallError::UnknownChannel)?;
+        Ok(self.stores[index].path())
+    }
+
+    pub fn accepted(&self, channel_id: &[u8; CHANNEL_ID_LEN]) -> Result<u64, PaywallError> {
+        let index = self
+            .store_index(channel_id)
+            .ok_or(PaywallError::UnknownChannel)?;
+        Ok(self.stores[index].accepted())
+    }
+
+    /// Charge `price` on the ledger named by the voucher. Other ledgers stay unchanged.
+    pub fn charge(&mut self, price: u64, voucher_hex: Option<&str>) -> Result<u64, PaywallError> {
+        let Some(hex) = voucher_hex.filter(|value| !value.is_empty()) else {
+            return Err(PaywallError::MissingVoucher);
+        };
+        let voucher = crate::decode_voucher_header(hex)?;
+        let index = self
+            .store_index(&voucher.channel_id)
+            .ok_or(PaywallError::UnknownChannel)?;
+        let mut ledger = self.stores[index].ledger()?;
+        let delta = crate::charge(&mut ledger, price, Some(hex))?;
+        self.stores[index].save_ledger(&ledger)?;
+        self.stores[index].record_call(delta)?;
+        if delta > 0 {
+            self.stores[index].remember_voucher(hex)?;
+        }
+        Ok(delta)
+    }
+
+    fn store_index(&self, channel_id: &[u8; CHANNEL_ID_LEN]) -> Option<usize> {
+        self.stores
+            .iter()
+            .position(|store| store.channel_id().ok().as_ref() == Some(channel_id))
+    }
 }
 
 #[cfg(test)]
@@ -311,5 +426,58 @@ mod tests {
             ]
         );
         store.record_call(5).unwrap_err();
+    }
+
+    #[test]
+    fn directory_charges_only_the_matching_channel() {
+        use ghostline_core::SignedVoucher;
+        use ootle_byte_type::ToByteType;
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+
+        let (secret, public) = create_key_pair_from_seed(11);
+        let payer = public.to_byte_type();
+        let mut first = params();
+        first.payer = payer;
+        let mut second = first.clone();
+        second.nonce = [4u8; NONCE_LEN];
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-dir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        ChannelStore::create(dir.join("a.json"), first.clone()).unwrap();
+        ChannelStore::create(dir.join("b.json"), second.clone()).unwrap();
+        fs::write(dir.join("notes.json"), b"{\"opener_account\":\"skip\"}").unwrap();
+        let mut directory = ChannelDirectory::open(&dir).unwrap();
+        assert_eq!(directory.len(), 2);
+        assert!(directory.channel_for_quote(None).is_err());
+        let quoted = directory
+            .channel_for_quote(Some(&to_hex(&second.channel_id())))
+            .unwrap();
+        assert_eq!(quoted, second.channel_id());
+        let voucher = SignedVoucher::sign(&secret, &second, 10).unwrap();
+        let hex = crate::encode_voucher_header(&voucher);
+        assert_eq!(directory.charge(10, Some(&hex)).unwrap(), 10);
+        assert_eq!(directory.accepted(&first.channel_id()).unwrap(), 0);
+        assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
+        let mut unknown = first.clone();
+        unknown.nonce = [5u8; NONCE_LEN];
+        let foreign = SignedVoucher::sign(&secret, &unknown, 10).unwrap();
+        let err = directory
+            .charge(10, Some(&crate::encode_voucher_header(&foreign)))
+            .unwrap_err();
+        assert!(matches!(err, PaywallError::UnknownChannel));
+        let voucher = SignedVoucher::sign(&secret, &first, 10).unwrap();
+        assert_eq!(
+            directory
+                .charge(10, Some(&crate::encode_voucher_header(&voucher)))
+                .unwrap(),
+            10
+        );
+        assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
     }
 }

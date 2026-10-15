@@ -8,6 +8,8 @@ use crate::PaywallError;
 /// Ghostline's own payment-required scheme. Not EVM x402.
 pub const SCHEME: &str = "ghostline.channel.voucher.v1";
 pub const VOUCHER_HEADER: &str = "ghostline-voucher";
+/// Hex channel id. Required on a 402 when the service holds more than one ledger.
+pub const CHANNEL_HEADER: &str = "ghostline-channel";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentRequired {

@@ -2,10 +2,11 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use ghostline_core::{ChannelParams, NONCE_LEN, PaymentSession, ServiceLedger};
+use ghostline_core::{ChannelParams, NONCE_LEN, PaymentSession, ServiceLedger, to_hex};
 use ghostline_paid_api::{AppState, router};
 use ghostline_paywall::{
-    AgentPayer, ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
+    AgentPayer, CHANNEL_HEADER, ChannelDirectory, ChannelStore, PaymentRequired, VOUCHER_HEADER,
+    encode_voucher_header, gated_sign,
 };
 use ghostline_policy::{Policy, PolicyEngine};
 use http_body_util::BodyExt;
@@ -301,4 +302,77 @@ async fn retry_of_the_same_voucher_is_served() {
             .unwrap();
         assert_eq!(paid.status(), StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn two_channels_charge_only_the_named_one() {
+    let (secret, public) = create_key_pair_from_seed(11);
+    let payer = public.to_byte_type();
+    let first = ChannelParams {
+        network_tag: 1,
+        payer,
+        deposit: 100,
+        payer_root: Hash32::from_array([9u8; 32]),
+        nonce: [3u8; NONCE_LEN],
+    };
+    let mut second = first.clone();
+    second.nonce = [4u8; NONCE_LEN];
+    let dir = std::env::temp_dir().join(format!(
+        "ghostline-paid-dir-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    ChannelStore::create(dir.join("a.json"), first.clone()).unwrap();
+    ChannelStore::create(dir.join("b.json"), second.clone()).unwrap();
+    let state = AppState::with_directory(ChannelDirectory::open(&dir).unwrap(), 10).unwrap();
+    let app = router(state);
+    let ambiguous = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/fortune")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ambiguous.status(), StatusCode::BAD_REQUEST);
+    let quote_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/fortune")
+                .header(CHANNEL_HEADER, to_hex(&second.channel_id()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(quote_response.status(), StatusCode::PAYMENT_REQUIRED);
+    let quote: PaymentRequired = serde_json::from_value(json_body(quote_response).await).unwrap();
+    assert_eq!(quote.channel_id, to_hex(&second.channel_id()));
+    let mut agent = AgentPayer::new(
+        PaymentSession::new(second.clone()),
+        Policy::new(100, 10),
+        payer,
+    );
+    let header = agent.voucher_header(&quote, &secret).unwrap();
+    let paid = app
+        .oneshot(
+            Request::builder()
+                .uri("/fortune")
+                .header(VOUCHER_HEADER, header)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(paid.status(), StatusCode::OK);
+    let directory = ChannelDirectory::open(&dir).unwrap();
+    assert_eq!(directory.accepted(&first.channel_id()).unwrap(), 0);
+    assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
 }
