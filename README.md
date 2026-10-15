@@ -108,6 +108,30 @@ MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 - `ghostline_channel_session` (`GHOSTLINE_CHANNEL_FILE`; creates the payer session or keeps a matching cumulative total)
 - `ghostline_close_channel` (`GHOSTLINE_CHANNEL_FILE`; settle inside the margin, refund at expiry; broadcasts only with `GHOSTLINE_CLOSE_SUBMIT=1`)
 
+### Proven MCP quickstart
+
+This is the open → paid call → close flow. It uses no tool arguments for secrets or paths; the MCP process reads them from its environment. Start with a newly initialized, unfunded channel file and a funded opener/fee wallet. The default is dry-run; set the submit flags only when you intend to broadcast and wait for the indexer result.
+
+```bash
+export GHOSTLINE_CHANNEL_FILE=/path/to/channel.json
+export GHOSTLINE_POLICY_BUDGET=1000
+export GHOSTLINE_POLICY_MAX_PER_CALL=10
+export GHOSTLINE_POLICY_VENDOR_HEX=<service-public-key-hex>
+export GHOSTLINE_OPEN_SUBMIT=1
+export GHOSTLINE_CLOSE_SUBMIT=1
+export GHOSTLINE_SETTLE_FORCE=1
+
+cargo run -p ghostline-mcp --quiet
+```
+
+In the MCP client, call these tools in order:
+
+1. `ghostline_open_channel` with `{}`.
+2. `ghostline_call_paid` with `{"url":"http://127.0.0.1:<paid-api-port>/fortune"}`.
+3. `ghostline_close_channel` with `{}`.
+
+The proven Esmeralda run locked 0.1 tTARI, accepted one 10 µT call, and finalized one 10 µT settlement. The same flow with an expiry at the current epoch selected the refund branch and finalized the deposit return. Do not reuse a channel file containing `deposit_mask_hex`; it is sensitive and its output can be spent only once.
+
 Live Esmeralda: an MCP client speaking JSON-RPC stdio (`initialize` 2025-11-25, then `tools/call` `ghostline_call_paid`) paid 10 `/fortune` calls at 10 µT against a 0.1 tTARI channel. Policy came from env (`GHOSTLINE_POLICY_BUDGET`, `GHOSTLINE_POLICY_MAX_PER_CALL`, `GHOSTLINE_POLICY_VENDOR_HEX`), not from tool arguments. One settle of cumulative 100 µT Finalized Commit (17637 µT fee from the second-seed fee wallet). The protocol path is also covered by an in-process duplex test.
 
 `ghostline_channel_file`, `ghostline_channel_list`, and `ghostline_channel_calls` take no arguments. The path comes from `GHOSTLINE_CHANNEL_FILE` or `GHOSTLINE_CHANNEL_DIR`. Live on the spent channel: accepted 20, remainder 99980, `settle_open`, output `down`, and one call-log note because that total predates the log. The tool result did not contain the deposit mask or the fee-account component.
@@ -169,12 +193,14 @@ cargo run -p ghostline-cli -- channel calls --dir /tmp/channels
 
 Live Esmeralda: that spent channel's ledger has accepted 20 and no call rows, so the export was the note that the total predates the log.
 
-`channel trace` is the side by side. The left panel is the agent's activity from the ledger (call count, total, smallest and largest price). The right panel is each chain transaction you name with `--open-tx`, `--settle-tx` and `--refund-tx`, with its indexer status. The count of listed transactions is just the ones you named. Fees and the settle's revealed deposit, amount and channel id are public. It prints no mask and no voucher hex. It has unit tests for the panel builder; it has not been run live yet.
+`channel trace` is the side by side. The left panel is the agent's activity from the ledger (call count, total, smallest and largest price). The right panel is each chain transaction you name with `--open-tx`, `--settle-tx` and `--refund-tx`, with its indexer status. The count of listed transactions is just the ones you named. Fees and the settle's revealed deposit, amount and channel id are public. It prints no mask and no voucher hex. A live run on the MCP settle proof showed one 10 µT call beside the open and settle transactions, both `Finalized`. It has unit tests for the panel builder.
 
 ```bash
 cargo run -p ghostline-cli -- channel trace --file /tmp/channel.json \
   --open-tx <64-hex> --settle-tx <64-hex>
 ```
+
+On the already-spent proof channel, `channel watch --once` returned `{"action":"output_spent"}` without submitting anything.
 
 `settle-due` reads the ledger's latest voucher (the paywall stores it on each accepted call; the hex is not printed). It settles when the remaining epochs are within `--margin-epochs` (default 10) and the current epoch is still strictly before expiry. At or after expiry it refuses, including with `--force` (a live settle there is `OnlyFeeAccepted`). Without `--submit` it only prints the decision. `--force` settles early while the window is still open. `channel watch` polls that same decision. It sleeps until the settle is due, then runs `channel settle`. It stops without settling when the epoch reaches expiry, the output is down, or nothing is owed. `--once` prints one decision and returns. `--submit` is what broadcasts.
 
