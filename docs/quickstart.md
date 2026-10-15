@@ -6,10 +6,10 @@ Ghostline is early development, unaudited, and testnet only. Do not use real fun
 
 ## Prerequisites
 
-- The Rust toolchain pinned by `rust-toolchain.toml`, plus the build dependencies in [README](../README.md#running-the-tests).
+- The Ghostline executables. On Linux x86-64, install them with the command in [README](../README.md#install-the-command-line-tools). Otherwise, build them from source using the commands and native dependencies in [README](../README.md#install-the-command-line-tools).
 - A `tari_walletd` connected to Esmeralda at `http://127.0.0.1:5100` (or set the URL below), with a funded opener account and a fee account. Settlement fees are public. A separately funded fee wallet reduces direct linkage but does not guarantee privacy.
 - The real Esmeralda indexer URL, network tag, deployed Ghostline template hash, and wallet account names/components for your setup.
-- An MCP client that supports elicitation if you enable the human approval gate.
+- An MCP client that supports elicitation if you enable the human approval gate. Configure it to launch the installed `ghostline-mcp` executable.
 
 Supply `GHOSTLINE_PAYER_SECRET` from a private secret manager to sign vouchers. Supply `GHOSTLINE_CLAIM_SECRET` from the opener wallet's `view_only_key` at index 0 so Ghostline can unblind the opened output. They are separate keys. Keep both, wallet credentials, and the channel file private. The channel file becomes sensitive after the channel is opened because it contains the deposit mask. Never put secrets in tool arguments, shell history, or a shared MCP server configuration.
 
@@ -20,7 +20,7 @@ Choose a unique 32-byte nonce and a future expiry epoch with a safety margin. Ge
 The paid API also needs the payer condition-tree root. Compute it from the exact open parameters with `ghostline spec` and save the printed `payer_root`:
 
 ```bash
-cargo run -p ghostline-cli -- spec \
+ghostline spec \
   --network-tag <esmeralda-network-tag> \
   --deposit 100000 \
   --payer-hex <payer-public-key-hex> \
@@ -33,7 +33,7 @@ cargo run -p ghostline-cli -- spec \
 Create the channel record. Values in angle brackets are placeholders, not valid network identifiers:
 
 ```bash
-cargo run -p ghostline-cli -- channel init \
+ghostline channel init \
   --out /secure/path/channel.json \
   --network-tag <esmeralda-network-tag> \
   --deposit 100000 \
@@ -61,7 +61,7 @@ The CLI writes a record only; it does not open the channel. Confirm the wallet, 
 In a separate terminal, initialize the service ledger with the same channel parameters, then serve the local `/fortune` endpoint at 10 µT per call:
 
 ```bash
-cargo run -p ghostline-paid-api -- init \
+ghostline-paid-api init \
   --ledger /secure/path/ledger.json \
   --session /secure/path/session.json \
   --network-tag <esmeralda-network-tag> \
@@ -70,7 +70,7 @@ cargo run -p ghostline-paid-api -- init \
   --payer-root-hex <payer-root-from-ghostline-spec> \
   --nonce-hex <unique-32-byte-nonce-hex>
 
-cargo run -p ghostline-paid-api -- serve \
+ghostline-paid-api serve \
   --bind 127.0.0.1:8787 \
   --ledger /secure/path/ledger.json \
   --price 10 \
@@ -85,7 +85,7 @@ Keep the service ledger and payer session at separate paths. The channel record 
 
 ## 3. Connect the MCP server and pay
 
-Configure the MCP client to start `cargo run -p ghostline-mcp --quiet` with this environment. Set the policy vendor to the service public key. Keep broadcast flags unset until you are ready to transact.
+Configure the MCP client to start `ghostline-mcp` with this environment. Set the policy vendor to the service public key. Keep broadcast flags unset until you are ready to transact.
 
 ```text
 GHOSTLINE_CHANNEL_FILE=/secure/path/channel.json
@@ -120,7 +120,7 @@ The 1,000-call run proves the batching flow, not that a 10 µT price is economic
 To exercise 1,000 HTTP paywall calls on one channel, run the paid API client with the payer secret already supplied through its private process environment:
 
 ```bash
-cargo run -p ghostline-paid-api -- call \
+ghostline-paid-api call \
   --url http://127.0.0.1:8787/fortune \
   --session /secure/path/session.json \
   --calls 1000 \

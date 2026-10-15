@@ -32,6 +32,25 @@ deployment-specific values and distinguishes prior live evidence from a fresh se
 
 Ghostline hides the spending pattern from third parties. It does not hide anything from the service you pay.
 
+## Install the command line tools
+
+After a GitHub Release is published, Linux x86-64 users can install the operator CLI, MCP server, and reference paid API without cloning or building the repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
+```
+
+The installer places `ghostline`, `ghostline-mcp`, and `ghostline-paid-api` in `~/.local/bin` by default. Add that directory to `PATH` if needed. To select a specific release, set `GHOSTLINE_VERSION` for the installer, for example `curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.1.0 sh`.
+
+The installer checks the archive against the SHA-256 file attached to that same release. This detects a damaged or incomplete download; it is not a cryptographic signature. Prebuilt downloads initially support glibc-based Linux x86-64. Other systems can build from source using the toolchain and native dependencies below.
+
+For a source build, clone the repository and build the same executables with:
+
+```bash
+cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api
+export PATH="$PWD/target/release:$PATH"
+```
+
 ## Repository layout
 
 | Path | Contents |
