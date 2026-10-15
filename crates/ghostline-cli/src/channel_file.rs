@@ -269,6 +269,94 @@ pub struct CallRow {
     pub note: String,
 }
 
+/// What the agent did, from the service ledger's call log. No timing and no voucher hex.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OffChainPanel {
+    pub calls: u64,
+    pub total: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smallest: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largest: Option<u64>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+}
+
+/// One chain transaction the operator named, with its indexer status.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OnChainTx {
+    pub role: String,
+    pub transaction_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TraceView {
+    pub off_chain: OffChainPanel,
+    pub on_chain: Vec<OnChainTx>,
+    /// Count of the transactions listed above. Fees on them are public.
+    pub on_chain_transactions: u64,
+}
+
+pub fn off_chain_panel(calls: &[(u64, u64)], accepted: u64) -> OffChainPanel {
+    if calls.is_empty() {
+        return OffChainPanel {
+            calls: 0,
+            total: accepted,
+            smallest: None,
+            largest: None,
+            note: if accepted > 0 {
+                "no call log; accepted total predates it".into()
+            } else {
+                String::new()
+            },
+        };
+    }
+    let prices = calls.iter().map(|(price, _)| *price);
+    OffChainPanel {
+        calls: calls.len() as u64,
+        total: accepted,
+        smallest: prices.clone().min(),
+        largest: prices.max(),
+        note: String::new(),
+    }
+}
+
+pub fn trace_view(off_chain: OffChainPanel, on_chain: Vec<OnChainTx>) -> TraceView {
+    TraceView {
+        on_chain_transactions: on_chain.len() as u64,
+        off_chain,
+        on_chain,
+    }
+}
+
+pub fn trace_text(view: &TraceView) -> String {
+    let mut out = String::from("AGENT (off-chain, known only to payer and service)\n");
+    out.push_str(&format!("  calls: {}\n", view.off_chain.calls));
+    out.push_str(&format!("  total: {} µT\n", view.off_chain.total));
+    if let (Some(lo), Some(hi)) = (view.off_chain.smallest, view.off_chain.largest) {
+        out.push_str(&format!("  per call: {lo}..{hi} µT\n"));
+    }
+    if !view.off_chain.note.is_empty() {
+        out.push_str(&format!("  note: {}\n", view.off_chain.note));
+    }
+    out.push_str("CHAIN (public)\n");
+    if view.on_chain.is_empty() {
+        out.push_str("  no transactions named\n");
+    }
+    for tx in &view.on_chain {
+        out.push_str(&format!(
+            "  {}: {} {}\n",
+            tx.role, tx.transaction_id, tx.status
+        ));
+    }
+    out.push_str(&format!(
+        "  transactions listed: {} (fees are public; settle reveals deposit, amount, channel id)\n",
+        view.on_chain_transactions
+    ));
+    out
+}
+
 pub fn calls_csv(rows: &[CallRow]) -> String {
     let mut out = String::from("file,price,accepted,note\n");
     for row in rows {
@@ -296,6 +384,46 @@ fn csv_cell(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trace_pairs_many_calls_with_the_named_transactions() {
+        let calls: Vec<(u64, u64)> = (1..=100).map(|i| (10, i * 10)).collect();
+        let panel = off_chain_panel(&calls, 1000);
+        assert_eq!(panel.calls, 100);
+        assert_eq!(panel.total, 1000);
+        assert_eq!((panel.smallest, panel.largest), (Some(10), Some(10)));
+        let view = trace_view(
+            panel,
+            vec![
+                OnChainTx {
+                    role: "open".into(),
+                    transaction_id: "aa".into(),
+                    status: "Finalized".into(),
+                },
+                OnChainTx {
+                    role: "settle".into(),
+                    transaction_id: "bb".into(),
+                    status: "Finalized".into(),
+                },
+            ],
+        );
+        assert_eq!(view.on_chain_transactions, 2);
+        let text = trace_text(&view);
+        assert!(text.contains("calls: 100"));
+        assert!(text.contains("settle: bb Finalized"));
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(!json.contains("mask"));
+        assert!(!json.contains("voucher"));
+    }
+
+    #[test]
+    fn trace_notes_a_ledger_without_a_call_log() {
+        let panel = off_chain_panel(&[], 20);
+        assert_eq!(panel.calls, 0);
+        assert_eq!(panel.total, 20);
+        assert!(panel.note.contains("predates"));
+        assert!(off_chain_panel(&[], 0).note.is_empty());
+    }
 
     #[test]
     fn round_trip_omits_empty_mask() {

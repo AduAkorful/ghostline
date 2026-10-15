@@ -468,6 +468,20 @@ enum ChannelCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Side by side: the agent's call log against the chain transactions you name. No mask, no voucher hex.
+    Trace {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        open_tx: Option<String>,
+        #[arg(long)]
+        settle_tx: Option<String>,
+        #[arg(long)]
+        refund_tx: Option<String>,
+        /// `text` or `json`.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
     /// Poll until the settle window is due, then run `settle`. Stops at expiry, on a spent output,
     /// or when nothing is owed. Does not broadcast unless `--submit`.
     Watch {
@@ -2024,6 +2038,55 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 timeout_secs,
             })
             .await?;
+        }
+        ChannelCommand::Trace {
+            file: path,
+            open_tx,
+            settle_tx,
+            refund_tx,
+            format,
+        } => {
+            let record = channel_file::ChannelFile::load(&path)?;
+            let ledger = record
+                .ledger
+                .clone()
+                .ok_or("channel file has no ledger path")?;
+            let store =
+                ghostline_paywall::ChannelStore::open(&ledger).map_err(|e| e.to_string())?;
+            let calls: Vec<(u64, u64)> = store
+                .calls()
+                .iter()
+                .map(|call| (call.price, call.accepted))
+                .collect();
+            let off_chain = channel_file::off_chain_panel(&calls, store.accepted());
+            let indexer = IndexerClient::connect(&record.indexer_url).map_err(|e| e.to_string())?;
+            let mut on_chain = Vec::new();
+            for (role, tx) in [
+                ("open", open_tx),
+                ("settle", settle_tx),
+                ("refund", refund_tx),
+            ] {
+                let Some(tx) = tx else { continue };
+                let id = parse_transaction_id(&tx)?;
+                let body = indexer
+                    .transaction_result(id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                on_chain.push(channel_file::OnChainTx {
+                    role: role.to_string(),
+                    transaction_id: tx.trim().to_string(),
+                    status: indexer_result_status(&body).to_string(),
+                });
+            }
+            let view = channel_file::trace_view(off_chain, on_chain);
+            match format.as_str() {
+                "text" => print!("{}", channel_file::trace_text(&view)),
+                "json" => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&view).map_err(|e| e.to_string())?
+                ),
+                other => return Err(format!("format: expected text or json, got {other}")),
+            }
         }
         ChannelCommand::Watch {
             file: path,
