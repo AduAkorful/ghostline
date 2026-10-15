@@ -4,17 +4,20 @@ mod channel_file;
 mod seal;
 mod secrets;
 
-use std::path::PathBuf;
+use std::{
+    io::{self, IsTerminal, Write},
+    path::PathBuf,
+};
 
 use clap::{Parser, Subcommand};
 #[cfg(test)]
 use ghostline_core::{CHANNEL_ID_LEN, NONCE_LEN};
 use ghostline_core::{ChannelParams, SignedVoucher, from_hex, to_hex};
 use ghostline_net::{
-    AccountsCreateRequest, IndexerClient, StealthTransferRequest, SubstatePresence,
-    TransactionEnvelope, TransactionId, UtxoInputSelection, WalletClient, WalletStealthUtxo,
-    WalletSubmitRequest, channel_open_utxo, execution_accepted, indexer_result_status,
-    settle_fee_signers, stealth_utxos_from_wallet_tx,
+    AccountsCreateRequest, ChannelOpenParams, IndexerClient, StealthTransferRequest,
+    SubstatePresence, TransactionEnvelope, TransactionId, UtxoInputSelection, WalletClient,
+    WalletStealthUtxo, WalletSubmitRequest, channel_open_utxo, execution_accepted,
+    indexer_result_status, settle_fee_signers, stealth_utxos_from_wallet_tx,
 };
 #[cfg(test)]
 use ghostline_sdk::OutputScan;
@@ -61,9 +64,6 @@ enum Command {
         budget: Option<u64>,
         #[arg(long)]
         max_per_call: Option<u64>,
-        /// Satisfy a configured human gate for this sign only.
-        #[arg(long)]
-        attest: bool,
         /// Sign an absolute `--amount` without policy or session persistence.
         #[arg(long)]
         unsafe_no_policy: bool,
@@ -370,7 +370,7 @@ enum ChannelCommand {
         #[arg(long)]
         out: PathBuf,
         #[command(flatten)]
-        open: OpenArgs,
+        open: Box<OpenArgs>,
         #[arg(long)]
         indexer_url: String,
         #[arg(long, default_value = "localnet")]
@@ -405,6 +405,9 @@ enum ChannelCommand {
         file: PathBuf,
         #[arg(long)]
         dry_run: bool,
+        /// Maximum µT fee. Required for a live open; dry-runs default to 100000 µT.
+        #[arg(long)]
+        max_fee: Option<u64>,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
     },
@@ -468,7 +471,8 @@ enum ChannelCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Side by side: the agent's call log against the chain transactions you name. No mask, no voucher hex.
+    /// Create a shareable privacy receipt from the local call log and the chain transactions you name.
+    /// No mask or voucher hex is included; the receipt is an operator summary, not a cryptographic proof.
     Trace {
         #[arg(long)]
         file: PathBuf,
@@ -481,6 +485,9 @@ enum ChannelCommand {
         /// `text` or `json`.
         #[arg(long, default_value = "text")]
         format: String,
+        /// Write the receipt to this path instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     /// Poll until the settle window is due, then run `settle`. Stops at expiry, on a spent output,
     /// or when nothing is owed. Does not broadcast unless `--submit`.
@@ -575,8 +582,9 @@ enum WalletCommand {
         input_selection: String,
         #[arg(long, default_value = "PreferRevealed")]
         fee_input_selection: String,
-        #[arg(long, default_value_t = 100_000)]
-        max_fee: u64,
+        /// Maximum µT fee. Required for a live open; dry-runs default to 100000 µT.
+        #[arg(long)]
+        max_fee: Option<u64>,
         #[arg(long)]
         resource_hex: Option<String>,
         #[arg(long)]
@@ -731,10 +739,31 @@ fn funded(value: u64, mask_hex: &str) -> Result<MaskAndValue, String> {
 
 #[tokio::main]
 async fn main() {
+    init_logging();
     if let Err(err) = run(Cli::parse()).await {
         eprintln!("{err}");
         std::process::exit(1);
     }
+}
+
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
+}
+
+fn record_channel_operation(operation: &'static str, outcome: &'static str) {
+    tracing::info!(
+        event = "channel_operation",
+        metric_name = "ghostline_channel_operation_outcomes_total",
+        metric_type = "counter",
+        operation,
+        outcome,
+        value = 1u64,
+    );
 }
 
 async fn run(cli: Cli) -> Result<(), String> {
@@ -751,7 +780,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             vendor_hex,
             budget,
             max_per_call,
-            attest,
             unsafe_no_policy,
             secret_hex,
         } => {
@@ -792,15 +820,22 @@ async fn run(cli: Cli) -> Result<(), String> {
                         return Err("set both --budget and --max-per-call".into());
                     }
                 };
-                let mut engine = ghostline_policy::PolicyEngine::new(policy);
-                if ghostline_policy::env_flag("GHOSTLINE_POLICY_REQUIRE_HUMAN") {
-                    engine = engine.require_human();
-                }
+                let engine = ghostline_policy::PolicyEngine::new(policy)
+                    .with_audit_file_from_env()
+                    .map_err(|e| e.to_string())?
+                    .with_human_rules_from_env()
+                    .map_err(|e| e.to_string())?;
+                let require_human = engine.requires_human_approval(&vendor, price);
+                let attested = if require_human {
+                    confirm_human_approval(price, &params.channel_id())?
+                } else {
+                    false
+                };
                 let mut store =
                     ghostline_paywall::ChannelStore::open_or_create(path, params.clone())
                         .map_err(|e| e.to_string())?;
                 let (voucher, _) = ghostline_paywall::gated_sign(
-                    &mut store, engine, vendor, price, &secret, attest,
+                    &mut store, engine, vendor, price, &secret, attested,
                 )
                 .map_err(|e| e.to_string())?;
                 println!("{}", to_hex(&voucher.to_bytes()));
@@ -884,7 +919,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 );
                 let json = serde_json::to_string(&unsigned).map_err(|e| e.to_string())?;
                 if let Some(path) = out {
-                    std::fs::write(&path, json)
+                    ghostline_core::write_private_file(&path, json.as_bytes())
                         .map_err(|e| format!("resolve-inputs --out: {e}"))?;
                     println!("wrote={}", path.display());
                 } else {
@@ -905,17 +940,17 @@ async fn run(cli: Cli) -> Result<(), String> {
                 timeout_secs,
             } => {
                 let unsigned = read_unsigned_json(&unsigned_json)?;
-                submit_unsigned(
-                    &url,
+                submit_unsigned(SubmitUnsignedArgs {
+                    url: &url,
                     unsigned,
-                    seal_key_id.as_deref(),
-                    seal_key_id_file.as_deref(),
-                    &other_signer,
-                    fee_account_name.as_deref(),
+                    seal_key_id: seal_key_id.as_deref(),
+                    seal_key_id_file: seal_key_id_file.as_deref(),
+                    other_signer: &other_signer,
+                    fee_account_name: fee_account_name.as_deref(),
                     dry_run,
                     no_wait,
                     timeout_secs,
-                )
+                })
                 .await?;
             }
             WalletCommand::Utxos {
@@ -945,6 +980,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 timeout_secs,
                 utxo_json_out,
             } => {
+                let max_fee = open_max_fee(dry_run, max_fee)?;
                 let channel = seal::channel(open_spec(&open)?)?;
                 let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
                 let resource = seal::parse_resource(resource_hex.as_deref())?;
@@ -956,17 +992,17 @@ async fn run(cli: Cli) -> Result<(), String> {
                         .await
                         .map_err(|e| e.to_string())?,
                 };
-                let request = StealthTransferRequest::channel_open(
-                    &account_name,
-                    destination,
-                    resource.to_string(),
-                    open.deposit,
+                let request = StealthTransferRequest::channel_open(ChannelOpenParams {
+                    account_name,
+                    destination_address: destination,
+                    resource_address: resource.to_string(),
+                    deposit: open.deposit,
                     pay_to,
-                    input_selection.parse::<UtxoInputSelection>()?,
-                    fee_input_selection.parse::<UtxoInputSelection>()?,
+                    input_selection: input_selection.parse::<UtxoInputSelection>()?,
+                    fee_input_selection: fee_input_selection.parse::<UtxoInputSelection>()?,
                     max_fee,
                     dry_run,
-                );
+                });
                 seal::print_ids(&channel);
                 let submitted = wallet
                     .stealth_transfer(&request)
@@ -974,6 +1010,8 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|e| e.to_string())?;
                 println!("transaction_id={}", submitted.transaction_id);
                 if dry_run {
+                    print_wallet_open_fee_quote(&wallet, submitted.transaction_id).await?;
+                    println!("max_fee={max_fee}");
                     println!("dry_run=true");
                     println!("utxo dump needs an Accepted live open (dry-run is not stored)");
                 } else if !no_wait {
@@ -1106,13 +1144,15 @@ async fn run(cli: Cli) -> Result<(), String> {
                     None => None,
                 };
                 let unsigned = seal::unsigned_settle(
-                    &channel,
-                    deposit,
-                    &voucher,
-                    channel.spec().service,
-                    resource,
-                    max_epoch,
-                    scan,
+                    seal::SettleArgs {
+                        channel: &channel,
+                        deposit,
+                        voucher: &voucher,
+                        service_output: channel.spec().service,
+                        resource,
+                        max_epoch,
+                        scan,
+                    },
                     fee,
                 )?;
                 println!(
@@ -1147,14 +1187,16 @@ async fn run(cli: Cli) -> Result<(), String> {
                     ),
                 };
                 let tx = seal::seal_settle(
-                    &channel,
-                    deposit,
-                    &voucher,
-                    channel.spec().service,
-                    resource,
-                    max_epoch,
+                    seal::SettleArgs {
+                        channel: &channel,
+                        deposit,
+                        voucher: &voucher,
+                        service_output: channel.spec().service,
+                        resource,
+                        max_epoch,
+                        scan,
+                    },
                     &sealer,
-                    scan,
                     fee,
                 )?;
                 println!("{tx}");
@@ -1270,13 +1312,15 @@ async fn run(cli: Cli) -> Result<(), String> {
                     ),
                 };
                 let tx = seal::seal_refund(
-                    &channel,
-                    deposit,
-                    channel.spec().payer,
-                    resource,
-                    max_epoch,
+                    seal::RefundArgs {
+                        channel: &channel,
+                        deposit,
+                        payer_output: channel.spec().payer,
+                        resource,
+                        max_epoch,
+                        scan,
+                    },
                     &sealer,
-                    scan,
                     fee,
                 )?;
                 println!("{tx}");
@@ -1292,16 +1336,16 @@ async fn run(cli: Cli) -> Result<(), String> {
             secret_hex,
             ootle_network,
         } => {
-            let recovered = recover_utxo(
+            let recovered = recover_utxo(RecoverUtxoArgs {
                 utxo_json,
                 commitment_hex,
                 nonce_hex,
                 encrypted_hex,
                 tag,
-                resource_hex.as_deref(),
-                secret_hex.as_deref(),
-                &ootle_network,
-            )?;
+                resource_hex: resource_hex.as_deref(),
+                secret_hex: secret_hex.as_deref(),
+                ootle_network: &ootle_network,
+            })?;
             println!("value={}", recovered.value);
             println!("mask={}", to_hex(recovered.mask.as_bytes()));
         }
@@ -1361,17 +1405,17 @@ async fn run(cli: Cli) -> Result<(), String> {
             utxo_json,
             resource_hex,
         } => {
-            print_channel_status(
+            print_channel_status(ChannelStatusArgs {
                 session,
                 ledger,
                 store,
                 expiry_epoch,
-                indexer_url.as_deref(),
+                indexer_url: indexer_url.as_deref(),
                 include_params,
                 commitment_hex,
                 utxo_json,
-                resource_hex.as_deref(),
-            )
+                resource_hex: resource_hex.as_deref(),
+            })
             .await?;
         }
         Command::Watch {
@@ -1380,13 +1424,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             margin_epochs,
         } => {
             let current_epoch = fetch_epoch(&indexer_url).await?;
-            let epochs_until_expiry = expiry_epoch as i64 - current_epoch as i64;
+            let epochs_until_expiry = i128::from(expiry_epoch) - i128::from(current_epoch);
             let settle_window = if current_epoch < expiry_epoch {
                 ghostline_paywall::SettleWindow::SettleOpen
             } else {
                 ghostline_paywall::SettleWindow::RefundOpen
             };
-            let within_margin = epochs_until_expiry <= margin_epochs as i64;
+            let within_margin =
+                current_epoch >= expiry_epoch || expiry_epoch - current_epoch <= margin_epochs;
             let body = serde_json::json!({
                 "current_epoch": current_epoch,
                 "expiry_epoch": expiry_epoch,
@@ -1431,6 +1476,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 commitment_hex,
                 utxo_json,
                 deposit_mask_hex,
+                deposit_mask_from_channel_file: false,
                 max_epoch,
                 resource_hex,
                 ootle_network,
@@ -1471,6 +1517,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 commitment_hex,
                 utxo_json,
                 deposit_mask_hex,
+                deposit_mask_from_channel_file: false,
                 max_epoch,
                 resource_hex,
                 ootle_network,
@@ -1490,6 +1537,26 @@ async fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
+fn confirm_human_approval(price: u64, channel_id: &[u8; 32]) -> Result<bool, String> {
+    if !io::stdin().is_terminal() {
+        return Err("human approval requires an interactive terminal".into());
+    }
+    eprint!(
+        "Approve signing a {price} µT voucher for channel {}? [y/N] ",
+        to_hex(channel_id)
+    );
+    io::stderr().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
+    Ok(approval_answer(&answer))
+}
+
+fn approval_answer(answer: &str) -> bool {
+    answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes")
+}
+
 fn open_args_from(file: &channel_file::ChannelFile) -> OpenArgs {
     OpenArgs {
         network_tag: file.network_tag,
@@ -1502,24 +1569,31 @@ fn open_args_from(file: &channel_file::ChannelFile) -> OpenArgs {
     }
 }
 
-fn recover_utxo(
+struct RecoverUtxoArgs<'a> {
     utxo_json: Option<PathBuf>,
     commitment_hex: Option<String>,
     nonce_hex: Option<String>,
     encrypted_hex: Option<String>,
     tag: Option<i64>,
-    resource_hex: Option<&str>,
-    secret_hex: Option<&str>,
-    ootle_network: &str,
-) -> Result<MaskAndValue, String> {
+    resource_hex: Option<&'a str>,
+    secret_hex: Option<&'a str>,
+    ootle_network: &'a str,
+}
+
+fn recover_utxo(args: RecoverUtxoArgs<'_>) -> Result<MaskAndValue, String> {
     use tari_template_lib::types::{
         EncryptedData,
         crypto::{PedersenCommitmentBytes, UtxoTag},
         stealth::UnspentOutput,
     };
-    let (commitment_hex, nonce_hex, encrypted_hex, tag, expected) =
-        load_utxo(utxo_json, commitment_hex, nonce_hex, encrypted_hex, tag)?;
-    let secret = secrets::load_claim_secret(secret_hex)?;
+    let (commitment_hex, nonce_hex, encrypted_hex, tag, expected) = load_utxo(
+        args.utxo_json,
+        args.commitment_hex,
+        args.nonce_hex,
+        args.encrypted_hex,
+        args.tag,
+    )?;
+    let secret = secrets::load_claim_secret(args.secret_hex)?;
     let encrypted_bytes =
         from_hex(&encrypted_hex).map_err(|_| "encrypted: expected even-length hex".to_string())?;
     let encrypted = EncryptedData::try_from(encrypted_bytes)
@@ -1532,12 +1606,12 @@ fn recover_utxo(
         minimum_value_promise: 0,
         viewable_balance_proof: None,
     };
-    let resource = seal::parse_resource(resource_hex)?;
+    let resource = seal::parse_resource(args.resource_hex)?;
     let recovered = unblind_output(
         &output,
         UtxoTag::new(tag),
         &secret,
-        seal::parse_scan(ootle_network, resource)?,
+        seal::parse_scan(args.ootle_network, resource)?,
     )
     .map_err(|e| e.to_string())?;
     if let Some(expected) = expected
@@ -1842,11 +1916,16 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
         ChannelCommand::Open {
             file: path,
             dry_run,
+            max_fee,
             timeout_secs,
         } => {
+            let max_fee = open_max_fee(dry_run, max_fee)?;
             let mut record = channel_file::ChannelFile::load(&path)?;
             let open = open_args_from(&record);
             let channel = seal::channel(open_spec(&open)?)?;
+            if !dry_run {
+                secrets::load_secret(None, secrets::CLAIM_SECRET_ENV, "wallet claim secret")?;
+            }
             let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
             let resource = seal::parse_resource(None)?;
             let wallet = connect_wallet(&record.opener_wallet_url).await?;
@@ -1854,17 +1933,17 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 .default_account_address()
                 .await
                 .map_err(|e| e.to_string())?;
-            let request = StealthTransferRequest::channel_open(
-                &record.opener_account,
-                destination,
-                resource.to_string(),
-                open.deposit,
+            let request = StealthTransferRequest::channel_open(ChannelOpenParams {
+                account_name: record.opener_account.clone(),
+                destination_address: destination,
+                resource_address: resource.to_string(),
+                deposit: open.deposit,
                 pay_to,
-                "PreferConfidential".parse::<UtxoInputSelection>()?,
-                "PreferRevealed".parse::<UtxoInputSelection>()?,
-                100_000,
+                input_selection: "PreferConfidential".parse::<UtxoInputSelection>()?,
+                fee_input_selection: "PreferRevealed".parse::<UtxoInputSelection>()?,
+                max_fee,
                 dry_run,
-            );
+            });
             seal::print_ids(&channel);
             let submitted = wallet
                 .stealth_transfer(&request)
@@ -1872,6 +1951,8 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
             println!("transaction_id={}", submitted.transaction_id);
             if dry_run {
+                print_wallet_open_fee_quote(&wallet, submitted.transaction_id).await?;
+                println!("max_fee={max_fee}");
                 println!("dry_run=true");
                 println!("utxo dump needs an Accepted live open (dry-run is not stored)");
                 return Ok(());
@@ -1879,16 +1960,16 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             print_wait(&wallet, submitted.transaction_id, timeout_secs).await?;
             let utxo_path = path.with_extension("utxo.json");
             dump_wallet_utxos(&wallet, submitted.transaction_id, Some(&utxo_path)).await?;
-            let recovered = recover_utxo(
-                Some(utxo_path.clone()),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                &record.ootle_network,
-            )?;
+            let recovered = recover_utxo(RecoverUtxoArgs {
+                utxo_json: Some(utxo_path.clone()),
+                commitment_hex: None,
+                nonce_hex: None,
+                encrypted_hex: None,
+                tag: None,
+                resource_hex: None,
+                secret_hex: None,
+                ootle_network: &record.ootle_network,
+            })?;
             if recovered.value != record.deposit {
                 return Err(format!(
                     "unblinded value {} does not match deposit {}",
@@ -1911,16 +1992,16 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             utxo_json,
         } => {
             let mut record = channel_file::ChannelFile::load(&path)?;
-            let recovered = recover_utxo(
-                Some(utxo_json.clone()),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                &record.ootle_network,
-            )?;
+            let recovered = recover_utxo(RecoverUtxoArgs {
+                utxo_json: Some(utxo_json.clone()),
+                commitment_hex: None,
+                nonce_hex: None,
+                encrypted_hex: None,
+                tag: None,
+                resource_hex: None,
+                secret_hex: None,
+                ootle_network: &record.ootle_network,
+            })?;
             if recovered.value != record.deposit {
                 return Err(format!(
                     "unblinded value {} does not match deposit {}",
@@ -1960,7 +2041,8 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 other => return Err(format!("format: expected csv or json, got {other}")),
             };
             if let Some(path) = out {
-                std::fs::write(&path, &body).map_err(|e| format!("channel report: {e}"))?;
+                ghostline_core::write_private_file(&path, body.as_bytes())
+                    .map_err(|e| format!("channel report: {e}"))?;
                 println!("wrote={}", path.display());
             } else {
                 print!("{body}");
@@ -1969,7 +2051,8 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
         ChannelCommand::Calls { dir, out } => {
             let body = channel_file::calls_csv(&list_channel_calls(&dir)?);
             if let Some(path) = out {
-                std::fs::write(&path, &body).map_err(|e| format!("channel calls: {e}"))?;
+                ghostline_core::write_private_file(&path, body.as_bytes())
+                    .map_err(|e| format!("channel calls: {e}"))?;
                 println!("wrote={}", path.display());
             } else {
                 print!("{body}");
@@ -1981,17 +2064,17 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 .ledger
                 .clone()
                 .ok_or("channel file has no ledger path")?;
-            print_channel_status(
-                None,
-                Some(ledger),
-                None,
-                Some(record.expiry_epoch),
-                Some(&record.indexer_url),
-                false,
-                None,
-                record.utxo_json.clone(),
-                None,
-            )
+            print_channel_status(ChannelStatusArgs {
+                session: None,
+                ledger: Some(ledger),
+                store: None,
+                expiry_epoch: Some(record.expiry_epoch),
+                indexer_url: Some(&record.indexer_url),
+                include_params: false,
+                commitment_hex: None,
+                utxo_json: record.utxo_json.clone(),
+                resource_hex: None,
+            })
             .await?;
         }
         ChannelCommand::Settle {
@@ -2021,6 +2104,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 commitment_hex: None,
                 utxo_json: record.utxo_json.clone(),
                 deposit_mask_hex: record.deposit_mask_hex.clone(),
+                deposit_mask_from_channel_file: true,
                 max_epoch: record.max_epoch,
                 resource_hex: None,
                 ootle_network: record.ootle_network.clone(),
@@ -2045,6 +2129,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             settle_tx,
             refund_tx,
             format,
+            out,
         } => {
             let record = channel_file::ChannelFile::load(&path)?;
             let ledger = record
@@ -2078,14 +2163,21 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                     status: indexer_result_status(&body).to_string(),
                 });
             }
-            let view = channel_file::trace_view(off_chain, on_chain);
-            match format.as_str() {
-                "text" => print!("{}", channel_file::trace_text(&view)),
-                "json" => println!(
-                    "{}",
+            let view = channel_file::trace_view(&record.ootle_network, off_chain, on_chain);
+            let body = match format.as_str() {
+                "text" => channel_file::trace_text(&view),
+                "json" => format!(
+                    "{}\n",
                     serde_json::to_string_pretty(&view).map_err(|e| e.to_string())?
                 ),
                 other => return Err(format!("format: expected text or json, got {other}")),
+            };
+            if let Some(path) = out {
+                ghostline_core::write_private_file(&path, body.as_bytes())
+                    .map_err(|e| format!("channel trace: {e}"))?;
+                println!("wrote={}", path.display());
+            } else {
+                print!("{body}");
             }
         }
         ChannelCommand::Watch {
@@ -2099,8 +2191,8 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             interval_secs,
             once,
         } => {
-            watch_channel(
-                &path,
+            watch_channel(WatchChannelArgs {
+                path: &path,
                 margin_epochs,
                 force,
                 submit,
@@ -2109,7 +2201,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 timeout_secs,
                 interval_secs,
                 once,
-            )
+            })
             .await?;
         }
         ChannelCommand::Refund {
@@ -2126,6 +2218,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 commitment_hex: None,
                 utxo_json: record.utxo_json.clone(),
                 deposit_mask_hex: record.deposit_mask_hex.clone(),
+                deposit_mask_from_channel_file: true,
                 max_epoch: record.max_epoch,
                 resource_hex: None,
                 ootle_network: record.ootle_network.clone(),
@@ -2157,6 +2250,7 @@ struct SettleDueArgs {
     commitment_hex: Option<String>,
     utxo_json: Option<PathBuf>,
     deposit_mask_hex: Option<String>,
+    deposit_mask_from_channel_file: bool,
     max_epoch: u64,
     resource_hex: Option<String>,
     ootle_network: String,
@@ -2210,6 +2304,13 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         args.force,
     );
     let due = matches!(decision, ghostline_paywall::SettleDecision::Due { .. });
+    let decision_outcome = match &decision {
+        ghostline_paywall::SettleDecision::NothingOwed => "nothing_owed",
+        ghostline_paywall::SettleDecision::MissingVoucher { .. } => "missing_voucher",
+        ghostline_paywall::SettleDecision::Wait { .. } => "wait",
+        ghostline_paywall::SettleDecision::Due { .. } => "due",
+        ghostline_paywall::SettleDecision::Expired { .. } => "expired",
+    };
     let mut report = serde_json::json!({
         "decision": decision,
         "current_epoch": current_epoch,
@@ -2219,6 +2320,7 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
     if let Some((id, presence)) = &output {
         report["channel_output"] = presence_json(id, presence);
         if matches!(presence, SubstatePresence::Down { .. }) {
+            record_channel_operation("settle", "output_spent");
             report["decision"] = serde_json::json!({ "action": "output_spent" });
             println!(
                 "{}",
@@ -2228,6 +2330,7 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         }
     }
     if !due {
+        record_channel_operation("settle", decision_outcome);
         println!(
             "{}",
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -2240,30 +2343,42 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         .to_string();
     let bytes = from_hex(&voucher_hex).map_err(|_| "stored voucher: expected even-length hex")?;
     let voucher = SignedVoucher::from_bytes(&bytes).map_err(|e| e.to_string())?;
-    let deposit_mask = secrets::load_hex(
-        args.deposit_mask_hex.as_deref(),
-        secrets::DEPOSIT_MASK_ENV,
-        "deposit mask",
-    )?;
+    let deposit_mask = if args.deposit_mask_from_channel_file {
+        args.deposit_mask_hex
+            .clone()
+            .ok_or("channel file has no deposit mask")?
+    } else {
+        secrets::load_hex(
+            args.deposit_mask_hex.as_deref(),
+            secrets::DEPOSIT_MASK_ENV,
+            "deposit mask",
+        )?
+    };
     let channel = seal::channel(spec)?;
     let resource = seal::parse_resource(args.resource_hex.as_deref())?;
     let scan = seal::parse_scan(&args.ootle_network, resource)?;
     let unsigned = seal::unsigned_settle(
-        &channel,
-        funded(channel.params().deposit, &deposit_mask)?,
-        &voucher,
-        channel.spec().service,
-        resource,
-        args.max_epoch,
-        scan,
+        seal::SettleArgs {
+            channel: &channel,
+            deposit: funded(channel.params().deposit, &deposit_mask)?,
+            voucher: &voucher,
+            service_output: channel.spec().service,
+            resource,
+            max_epoch: args.max_epoch,
+            scan,
+        },
         Some((
             seal::parse_component("fee-account", &args.fee_account)?,
             args.max_fee,
         )),
     )?;
+    if !args.submit {
+        record_channel_operation("settle", "unsigned_prepared");
+    }
     if let Some(path) = &args.out {
         let json = serde_json::to_string(&unsigned).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| format!("settle-due --out: {e}"))?;
+        ghostline_core::write_private_file(path, json.as_bytes())
+            .map_err(|e| format!("settle-due --out: {e}"))?;
         report["unsigned_written"] = serde_json::json!(true);
         report["out"] = serde_json::json!(path.display().to_string());
     }
@@ -2271,18 +2386,30 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         if args.fee_account_name.is_none() || args.seal_key_id_file.is_none() {
             return Err("submit requires --fee-account-name and --seal-key-id-file".into());
         }
-        submit_unsigned(
-            &args.wallet_url,
+        if let Err(err) = submit_unsigned(SubmitUnsignedArgs {
+            url: &args.wallet_url,
             unsigned,
-            None,
-            args.seal_key_id_file.as_deref(),
-            &[],
-            args.fee_account_name.as_deref(),
-            args.dry_run,
-            false,
-            args.timeout_secs,
-        )
-        .await?;
+            seal_key_id: None,
+            seal_key_id_file: args.seal_key_id_file.as_deref(),
+            other_signer: &[],
+            fee_account_name: args.fee_account_name.as_deref(),
+            dry_run: args.dry_run,
+            no_wait: false,
+            timeout_secs: args.timeout_secs,
+        })
+        .await
+        {
+            record_channel_operation("settle", "submission_error");
+            return Err(err);
+        }
+        record_channel_operation(
+            "settle",
+            if args.dry_run {
+                "dry_run_accepted"
+            } else {
+                "wallet_accepted"
+            },
+        );
         report["submitted"] = serde_json::json!(true);
         report["dry_run"] = serde_json::json!(args.dry_run);
     }
@@ -2293,8 +2420,8 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
     Ok(())
 }
 
-async fn watch_channel(
-    path: &std::path::Path,
+struct WatchChannelArgs<'a> {
+    path: &'a std::path::Path,
     margin_epochs: u64,
     force: bool,
     submit: bool,
@@ -2303,7 +2430,20 @@ async fn watch_channel(
     timeout_secs: u64,
     interval_secs: u64,
     once: bool,
-) -> Result<(), String> {
+}
+
+async fn watch_channel(args: WatchChannelArgs<'_>) -> Result<(), String> {
+    let WatchChannelArgs {
+        path,
+        margin_epochs,
+        force,
+        submit,
+        dry_run,
+        seal_key_id_file,
+        timeout_secs,
+        interval_secs,
+        once,
+    } = args;
     if !once && interval_secs == 0 {
         return Err("channel watch: interval_secs must be non-zero".into());
     }
@@ -2314,20 +2454,18 @@ async fn watch_channel(
             .clone()
             .ok_or("channel file has no ledger path")?;
         let store = ghostline_paywall::ChannelStore::open(&ledger).map_err(|e| e.to_string())?;
-        let current_epoch = fetch_epoch(&record.indexer_url).await?;
-        let output_down = match &record.utxo_json {
-            Some(utxo) => {
-                let hex = commitment_arg(None, Some(utxo.clone()))?
-                    .ok_or("utxo-json has no commitment")?;
-                matches!(
-                    lookup_channel_output(&record.indexer_url, None, &hex)
-                        .await?
-                        .1,
-                    SubstatePresence::Down { .. }
-                )
-            }
-            None => false,
-        };
+        let commitment_hex = record
+            .utxo_json
+            .as_ref()
+            .map(|path| commitment_arg(None, Some(path.clone())))
+            .transpose()?
+            .flatten();
+        let retry_delay = (!once).then_some(std::time::Duration::from_secs(interval_secs));
+        let (current_epoch, output_down) = retry_indexer_read(
+            || read_chain_state_once(&record.indexer_url, commitment_hex.as_deref()),
+            retry_delay,
+        )
+        .await?;
         let step = ghostline_paywall::watch_step(
             store.accepted(),
             store.latest_voucher_hex().is_some(),
@@ -2337,6 +2475,15 @@ async fn watch_channel(
             force,
             output_down,
         );
+        let outcome = match &step {
+            ghostline_paywall::WatchStep::Wait { .. } => "wait",
+            ghostline_paywall::WatchStep::Settle { .. } => "settle_due",
+            ghostline_paywall::WatchStep::Refund { .. } => "refund_due",
+            ghostline_paywall::WatchStep::OutputSpent => "output_spent",
+            ghostline_paywall::WatchStep::NothingOwed => "nothing_owed",
+            ghostline_paywall::WatchStep::MissingVoucher { .. } => "missing_voucher",
+        };
+        record_channel_operation("watch", outcome);
         println!(
             "{}",
             serde_json::to_string(&step).map_err(|e| e.to_string())?
@@ -2360,6 +2507,7 @@ async fn watch_channel(
                     commitment_hex: None,
                     utxo_json: record.utxo_json.clone(),
                     deposit_mask_hex: record.deposit_mask_hex.clone(),
+                    deposit_mask_from_channel_file: true,
                     max_epoch: record.max_epoch,
                     resource_hex: None,
                     ootle_network: record.ootle_network.clone(),
@@ -2383,12 +2531,50 @@ async fn watch_channel(
     }
 }
 
+async fn read_chain_state_once(
+    indexer_url: &str,
+    commitment_hex: Option<&str>,
+) -> Result<(u64, bool), String> {
+    let current_epoch = fetch_epoch(indexer_url).await?;
+    let output_down = match commitment_hex {
+        Some(hex) => matches!(
+            lookup_channel_output(indexer_url, None, hex).await?.1,
+            SubstatePresence::Down { .. }
+        ),
+        None => false,
+    };
+    Ok((current_epoch, output_down))
+}
+
+async fn retry_indexer_read<T, F, Fut>(
+    mut read: F,
+    retry_delay: Option<std::time::Duration>,
+) -> Result<T, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    loop {
+        match read().await {
+            Ok(value) => return Ok(value),
+            Err(error) => match retry_delay {
+                Some(delay) => {
+                    eprintln!("channel watch: indexer read failed ({error}); retrying");
+                    tokio::time::sleep(delay).await;
+                }
+                None => return Err(error),
+            },
+        }
+    }
+}
+
 struct RefundDueArgs {
     open: OpenArgs,
     indexer_url: String,
     commitment_hex: Option<String>,
     utxo_json: Option<PathBuf>,
     deposit_mask_hex: Option<String>,
+    deposit_mask_from_channel_file: bool,
     max_epoch: u64,
     resource_hex: Option<String>,
     ootle_network: String,
@@ -2413,6 +2599,10 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
     };
     let decision = ghostline_paywall::decide_refund(current_epoch, args.open.expiry_epoch);
     let due = matches!(decision, ghostline_paywall::RefundDecision::Due { .. });
+    let decision_outcome = match &decision {
+        ghostline_paywall::RefundDecision::Wait { .. } => "wait",
+        ghostline_paywall::RefundDecision::Due { .. } => "due",
+    };
     let mut report = serde_json::json!({
         "decision": decision,
         "current_epoch": current_epoch,
@@ -2422,6 +2612,7 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
     if let Some((id, presence)) = &output {
         report["channel_output"] = presence_json(id, presence);
         if matches!(presence, SubstatePresence::Down { .. }) {
+            record_channel_operation("refund", "output_spent");
             report["decision"] = serde_json::json!({ "action": "output_spent" });
             println!(
                 "{}",
@@ -2431,6 +2622,7 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
         }
     }
     if !due {
+        record_channel_operation("refund", decision_outcome);
         println!(
             "{}",
             serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
@@ -2438,11 +2630,17 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
         return Ok(());
     }
     let spec = open_spec(&args.open)?;
-    let deposit_mask = secrets::load_hex(
-        args.deposit_mask_hex.as_deref(),
-        secrets::DEPOSIT_MASK_ENV,
-        "deposit mask",
-    )?;
+    let deposit_mask = if args.deposit_mask_from_channel_file {
+        args.deposit_mask_hex
+            .clone()
+            .ok_or("channel file has no deposit mask")?
+    } else {
+        secrets::load_hex(
+            args.deposit_mask_hex.as_deref(),
+            secrets::DEPOSIT_MASK_ENV,
+            "deposit mask",
+        )?
+    };
     let channel = seal::channel(spec)?;
     let resource = seal::parse_resource(args.resource_hex.as_deref())?;
     let scan = seal::parse_scan(&args.ootle_network, resource)?;
@@ -2463,9 +2661,13 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
             args.max_fee,
         )),
     )?;
+    if !args.submit {
+        record_channel_operation("refund", "unsigned_prepared");
+    }
     if let Some(path) = &args.out {
         let json = serde_json::to_string(&unsigned).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| format!("refund-due --out: {e}"))?;
+        ghostline_core::write_private_file(path, json.as_bytes())
+            .map_err(|e| format!("refund-due --out: {e}"))?;
         report["unsigned_written"] = serde_json::json!(true);
         report["out"] = serde_json::json!(path.display().to_string());
     }
@@ -2473,18 +2675,30 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
         if args.fee_account_name.is_none() || args.seal_key_id_file.is_none() {
             return Err("submit requires --fee-account-name and --seal-key-id-file".into());
         }
-        submit_unsigned(
-            &args.wallet_url,
+        if let Err(err) = submit_unsigned(SubmitUnsignedArgs {
+            url: &args.wallet_url,
             unsigned,
-            None,
-            args.seal_key_id_file.as_deref(),
-            &[],
-            args.fee_account_name.as_deref(),
-            args.dry_run,
-            false,
-            args.timeout_secs,
-        )
-        .await?;
+            seal_key_id: None,
+            seal_key_id_file: args.seal_key_id_file.as_deref(),
+            other_signer: &[],
+            fee_account_name: args.fee_account_name.as_deref(),
+            dry_run: args.dry_run,
+            no_wait: false,
+            timeout_secs: args.timeout_secs,
+        })
+        .await
+        {
+            record_channel_operation("refund", "submission_error");
+            return Err(err);
+        }
+        record_channel_operation(
+            "refund",
+            if args.dry_run {
+                "dry_run_accepted"
+            } else {
+                "wallet_accepted"
+            },
+        );
         report["submitted"] = serde_json::json!(true);
         report["dry_run"] = serde_json::json!(args.dry_run);
     }
@@ -2495,17 +2709,30 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
     Ok(())
 }
 
-async fn submit_unsigned(
-    url: &str,
+struct SubmitUnsignedArgs<'a> {
+    url: &'a str,
     unsigned: UnsignedTransaction,
-    seal_key_id: Option<&str>,
-    seal_key_id_file: Option<&std::path::Path>,
-    other_signer: &[String],
-    fee_account_name: Option<&str>,
+    seal_key_id: Option<&'a str>,
+    seal_key_id_file: Option<&'a std::path::Path>,
+    other_signer: &'a [String],
+    fee_account_name: Option<&'a str>,
     dry_run: bool,
     no_wait: bool,
     timeout_secs: u64,
-) -> Result<(), String> {
+}
+
+async fn submit_unsigned(args: SubmitUnsignedArgs<'_>) -> Result<(), String> {
+    let SubmitUnsignedArgs {
+        url,
+        unsigned,
+        seal_key_id,
+        seal_key_id_file,
+        other_signer,
+        fee_account_name,
+        dry_run,
+        no_wait,
+        timeout_secs,
+    } = args;
     let seal_signer = read_key_id(seal_key_id, seal_key_id_file)?;
     let explicit = other_signer
         .iter()
@@ -2605,17 +2832,30 @@ async fn fetch_epoch(indexer_url: &str) -> Result<u64, String> {
         .as_u64())
 }
 
-async fn print_channel_status(
+struct ChannelStatusArgs<'a> {
     session: Option<PathBuf>,
     ledger: Option<PathBuf>,
     store: Option<PathBuf>,
     expiry_epoch: Option<u64>,
-    indexer_url: Option<&str>,
+    indexer_url: Option<&'a str>,
     include_params: bool,
     commitment_hex: Option<String>,
     utxo_json: Option<PathBuf>,
-    resource_hex: Option<&str>,
-) -> Result<(), String> {
+    resource_hex: Option<&'a str>,
+}
+
+async fn print_channel_status(args: ChannelStatusArgs<'_>) -> Result<(), String> {
+    let ChannelStatusArgs {
+        session,
+        ledger,
+        store,
+        expiry_epoch,
+        indexer_url,
+        include_params,
+        commitment_hex,
+        utxo_json,
+        resource_hex,
+    } = args;
     let current_epoch = match indexer_url {
         Some(url) => Some(fetch_epoch(url).await?),
         None => None,
@@ -2725,6 +2965,37 @@ fn print_wallet_account(got: &ghostline_net::AccountWithAddress) {
     println!("address={}", got.address_display());
 }
 
+fn open_max_fee(dry_run: bool, configured: Option<u64>) -> Result<u64, String> {
+    match configured {
+        Some(0) => Err("max-fee must be greater than zero".into()),
+        Some(fee) => Ok(fee),
+        None if dry_run => Ok(100_000),
+        None => Err("live channel open requires an explicit --max-fee; dry-run first".into()),
+    }
+}
+
+async fn print_wallet_open_fee_quote(
+    wallet: &WalletClient,
+    transaction_id: TransactionId,
+) -> Result<(), String> {
+    let transaction = wallet
+        .transaction_get(transaction_id)
+        .await
+        .map_err(|e| format!("open fee quote: {e}"))?;
+    let estimated = transaction
+        .get("final_fee")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("open fee quote is missing final_fee")?;
+    let required = transaction
+        .get("result")
+        .and_then(|result| result.get("total_fees_required"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("open fee quote is missing total_fees_required")?;
+    println!("estimated_fee={estimated}");
+    println!("required_fee={required}");
+    Ok(())
+}
+
 async fn connect_wallet(url: &str) -> Result<WalletClient, String> {
     let mut wallet = WalletClient::connect(url).map_err(|e| e.to_string())?;
     wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
@@ -2750,12 +3021,13 @@ async fn dump_wallet_utxos(
         let Some(channel) = channel_open_utxo(&utxos) else {
             return Err("no body stealth output to write as utxo-json".into());
         };
-        std::fs::write(
+        ghostline_core::write_private_file(
             path,
             format!(
                 "{}\n",
                 serde_json::to_string_pretty(&channel.unblind_json()).map_err(|e| e.to_string())?
-            ),
+            )
+            .as_bytes(),
         )
         .map_err(|e| format!("utxo-json-out: {e}"))?;
         println!("wrote={}", path.display());
@@ -2843,6 +3115,14 @@ fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_open_requires_an_explicit_fee_cap() {
+        assert_eq!(open_max_fee(true, None).unwrap(), 100_000);
+        assert_eq!(open_max_fee(true, Some(15_217)).unwrap(), 15_217);
+        assert!(open_max_fee(false, None).unwrap_err().contains("--max-fee"));
+        assert!(open_max_fee(false, Some(0)).is_err());
+    }
     use tari_crypto::keys::PublicKey as _;
     use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
     use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -2859,6 +3139,66 @@ mod tests {
             nonce: [3u8; NONCE_LEN],
         };
         (secret, params)
+    }
+
+    #[test]
+    fn human_approval_requires_an_explicit_yes() {
+        assert!(approval_answer("y\n"));
+        assert!(approval_answer(" YES "));
+        assert!(!approval_answer(""));
+        assert!(!approval_answer("no"));
+        assert!(!approval_answer("true"));
+    }
+
+    #[tokio::test]
+    async fn continuous_watcher_retries_transient_indexer_read_errors() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed_attempts = Arc::clone(&attempts);
+        let value = retry_indexer_read(
+            move || {
+                let attempt = observed_attempts.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if attempt == 0 {
+                        Err("temporary indexer error".to_string())
+                    } else {
+                        Ok(attempt)
+                    }
+                }
+            },
+            Some(std::time::Duration::ZERO),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(value, 1);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn one_shot_watcher_returns_indexer_error_without_retrying() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed_attempts = Arc::clone(&attempts);
+        let result: Result<(), String> = retry_indexer_read(
+            move || {
+                observed_attempts.fetch_add(1, Ordering::SeqCst);
+                async { Err("indexer unavailable".to_string()) }
+            },
+            None,
+        )
+        .await;
+
+        assert_eq!(result.unwrap_err(), "indexer unavailable");
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -2974,14 +3314,16 @@ mod seal_tests {
         decode_tx(&open_hex).unwrap();
         let voucher = SignedVoucher::sign(&payer_secret, channel.params(), 30).unwrap();
         let settle_hex = seal::seal_settle(
-            &channel,
-            funded(100, &deposit_mask).unwrap(),
-            &voucher,
-            channel.spec().service,
-            STEALTH_TARI_RESOURCE_ADDRESS,
-            1,
+            seal::SettleArgs {
+                channel: &channel,
+                deposit: funded(100, &deposit_mask).unwrap(),
+                voucher: &voucher,
+                service_output: channel.spec().service,
+                resource: STEALTH_TARI_RESOURCE_ADDRESS,
+                max_epoch: 1,
+                scan: OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+            },
             &service_secret,
-            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
             None,
         )
         .unwrap();
@@ -3087,22 +3429,24 @@ mod seal_tests {
         .unwrap();
         let voucher = SignedVoucher::sign(&payer_secret, channel.params(), 30).unwrap();
         let unsigned = seal::unsigned_settle(
-            &channel,
-            MaskAndValue {
-                value: 100,
-                mask: RistrettoSecretKey::random(&mut rand::rng()),
+            seal::SettleArgs {
+                channel: &channel,
+                deposit: MaskAndValue {
+                    value: 100,
+                    mask: RistrettoSecretKey::random(&mut rand::rng()),
+                },
+                voucher: &voucher,
+                service_output: channel.spec().service,
+                resource: STEALTH_TARI_RESOURCE_ADDRESS,
+                max_epoch: 1,
+                scan: OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
             },
-            &voucher,
-            channel.spec().service,
-            STEALTH_TARI_RESOURCE_ADDRESS,
-            1,
-            OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
             None,
         )
         .unwrap();
         let off = serde_json::to_value(&unsigned).unwrap();
         assert_eq!(off["V1"]["dry_run"], false);
-        let on = serde_json::to_value(&unsigned.with_dry_run(true)).unwrap();
+        let on = serde_json::to_value(unsigned.with_dry_run(true)).unwrap();
         assert_eq!(on["V1"]["dry_run"], true);
     }
 

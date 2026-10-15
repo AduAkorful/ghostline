@@ -19,7 +19,7 @@ pub use ghostline_core::{PaymentSession, ServiceLedger, SignedVoucher};
 pub use ghostline_policy::{AuditEvent, Policy, PolicyEngine, PolicyError, RateLimit};
 pub use price::{PriceKind, Quote, quote};
 pub use protocol::{
-    CHANNEL_HEADER, PaymentRejection, PaymentRequired, SCHEME, VOUCHER_HEADER,
+    CHANNEL_HEADER, PaymentRejection, PaymentRequired, PaymentTerms, SCHEME, VOUCHER_HEADER,
     decode_voucher_header, encode_voucher_header,
 };
 pub use status::{

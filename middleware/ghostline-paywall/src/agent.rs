@@ -46,6 +46,7 @@ impl AgentPayer {
         quote: &PaymentRequired,
         secret: &RistrettoSecretKey,
     ) -> Result<SignedVoucher, AgentError> {
+        self.validate_quote(quote)?;
         self.engine.approve(
             &self.vendor,
             quote.price,
@@ -61,6 +62,7 @@ impl AgentPayer {
         quote: &PaymentRequired,
         secret: &RistrettoSecretKey,
     ) -> Result<SignedVoucher, AgentError> {
+        self.validate_quote(quote)?;
         self.engine.approve_attested(
             &self.vendor,
             quote.price,
@@ -68,6 +70,11 @@ impl AgentPayer {
             Instant::now(),
         )?;
         Ok(self.session.sign_next(secret, quote.price)?)
+    }
+
+    fn validate_quote(&self, quote: &PaymentRequired) -> Result<(), AgentError> {
+        quote.validate_for(&self.session.params().channel_id(), &self.vendor)?;
+        Ok(())
     }
 
     pub fn pay_price(
@@ -158,6 +165,42 @@ mod tests {
             Err(AgentError::Policy(PolicyError::NeedsHumanApproval { .. }))
         ));
         agent.pay_attested(&quote, &secret).unwrap();
+    }
+
+    #[test]
+    fn quote_channel_and_recipient_must_match_before_signing() {
+        use crate::{PaymentTerms, PaywallError};
+
+        let (secret, public) = create_key_pair_from_seed(11);
+        let payer = public.to_byte_type();
+        let (_, other_public) = create_key_pair_from_seed(12);
+        let other = other_public.to_byte_type();
+        let params = ChannelParams {
+            network_tag: 1,
+            payer,
+            deposit: 100,
+            payer_root: Hash32::from_array([9u8; 32]),
+            nonce: [3u8; NONCE_LEN],
+        };
+        let mut agent = AgentPayer::new(
+            PaymentSession::new(params.clone()),
+            Policy::new(100, 10),
+            payer,
+        );
+
+        let bad_channel = PaymentRequired::new(10, &[0xabu8; 32]);
+        assert!(matches!(
+            agent.pay(&bad_channel, &secret),
+            Err(AgentError::Paywall(PaywallError::InvalidQuote(_)))
+        ));
+
+        let wrong_recipient = PaymentRequired::new(10, &params.channel_id())
+            .with_terms(&PaymentTerms::new(other, 20, 100).unwrap());
+        assert!(matches!(
+            agent.pay(&wrong_recipient, &secret),
+            Err(AgentError::Paywall(PaywallError::InvalidQuote(_)))
+        ));
+        assert_eq!(agent.session().cumulative(), 0);
     }
 
     #[test]

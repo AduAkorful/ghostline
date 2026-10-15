@@ -21,7 +21,7 @@ pub struct ChannelStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_epoch: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub epochs_until_expiry: Option<i64>,
+    pub epochs_until_expiry: Option<i128>,
     pub settle_window: SettleWindow,
     /// Service has accepted a voucher. This is not a chain confirmation that it was settled.
     pub pending_settlement: bool,
@@ -261,7 +261,7 @@ impl ChannelStatus {
                     },
                 ))?;
         let epochs_until_expiry = match (expiry_epoch, current_epoch) {
-            (Some(exp), Some(cur)) => Some(exp as i64 - cur as i64),
+            (Some(exp), Some(cur)) => Some(i128::from(exp) - i128::from(cur)),
             _ => None,
         };
         let settle_window = match (expiry_epoch, current_epoch) {
@@ -320,6 +320,21 @@ mod tests {
         assert_eq!(late.epochs_until_expiry, Some(0));
         assert!(view.pending_settlement);
         assert!(!view.has_latest_voucher);
+    }
+
+    #[test]
+    fn expiry_distance_preserves_full_u64_epoch_range() {
+        let status = ChannelStatus::from_totals(
+            "channel".to_string(),
+            100,
+            0,
+            0,
+            false,
+            Some(u64::MAX),
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(status.epochs_until_expiry, Some(i128::from(u64::MAX)));
     }
 
     #[test]

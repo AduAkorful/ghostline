@@ -2,6 +2,7 @@
 
 use ghostline_core::{CHANNEL_ID_LEN, SignedVoucher, from_hex, to_hex};
 use serde::{Deserialize, Serialize};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::PaywallError;
 
@@ -24,6 +25,41 @@ pub struct PaymentRequired {
     pub unit_price: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub units: Option<u64>,
+    /// Public key authorized to settle a channel opened for this service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_key: Option<String>,
+    /// Inclusive expiry range accepted by this service for a new channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_expiry_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_expiry_epoch: Option<u64>,
+}
+
+/// Public channel-opening terms advertised by a service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentTerms {
+    pub recipient_key: String,
+    pub min_expiry_epoch: u64,
+    pub max_expiry_epoch: u64,
+}
+
+impl PaymentTerms {
+    pub fn new(
+        recipient_key: RistrettoPublicKeyBytes,
+        min_expiry_epoch: u64,
+        max_expiry_epoch: u64,
+    ) -> Result<Self, PaywallError> {
+        if min_expiry_epoch > max_expiry_epoch {
+            return Err(PaywallError::InvalidTerms(
+                "minimum expiry epoch must be at or before maximum expiry epoch".into(),
+            ));
+        }
+        Ok(Self {
+            recipient_key: to_hex(recipient_key.as_bytes()),
+            min_expiry_epoch,
+            max_expiry_epoch,
+        })
+    }
 }
 
 impl PaymentRequired {
@@ -35,6 +71,9 @@ impl PaymentRequired {
             basis: None,
             unit_price: None,
             units: None,
+            recipient_key: None,
+            min_expiry_epoch: None,
+            max_expiry_epoch: None,
         }
     }
 
@@ -46,6 +85,79 @@ impl PaymentRequired {
             basis: Some(quote.basis.to_string()),
             unit_price: quote.unit_price,
             units: quote.units,
+            recipient_key: None,
+            min_expiry_epoch: None,
+            max_expiry_epoch: None,
+        }
+    }
+
+    pub fn with_terms(mut self, terms: &PaymentTerms) -> Self {
+        self.recipient_key = Some(terms.recipient_key.clone());
+        self.min_expiry_epoch = Some(terms.min_expiry_epoch);
+        self.max_expiry_epoch = Some(terms.max_expiry_epoch);
+        self
+    }
+
+    /// Check that a quote is for the local channel and allowed recipient before signing it.
+    /// Quotes predating opening terms remain valid; when terms are present, all three fields are required.
+    pub fn validate_for(
+        &self,
+        channel_id: &[u8; CHANNEL_ID_LEN],
+        recipient: &RistrettoPublicKeyBytes,
+    ) -> Result<(), PaywallError> {
+        self.validate_opening_terms(recipient)?;
+        let quoted_id = from_hex(&self.channel_id)
+            .map_err(|_| PaywallError::InvalidQuote("malformed channel id".into()))?;
+        if quoted_id.as_slice() != channel_id {
+            return Err(PaywallError::InvalidQuote(
+                "channel id does not match the payer session".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validate the scheme and any advertised recipient/expiry terms before opening a channel.
+    pub fn validate_opening_terms(
+        &self,
+        recipient: &RistrettoPublicKeyBytes,
+    ) -> Result<(), PaywallError> {
+        if self.scheme != SCHEME {
+            return Err(PaywallError::InvalidQuote(format!(
+                "unsupported scheme {}",
+                self.scheme
+            )));
+        }
+        let quoted_id = from_hex(&self.channel_id)
+            .map_err(|_| PaywallError::InvalidQuote("malformed channel id".into()))?;
+        if <[u8; CHANNEL_ID_LEN]>::try_from(quoted_id.as_slice()).is_err() {
+            return Err(PaywallError::InvalidQuote(
+                "channel id has the wrong length".into(),
+            ));
+        }
+        match (
+            self.recipient_key.as_deref(),
+            self.min_expiry_epoch,
+            self.max_expiry_epoch,
+        ) {
+            (None, None, None) => Ok(()),
+            (Some(key), Some(min), Some(max)) => {
+                let key = RistrettoPublicKeyBytes::from_hex(key)
+                    .map_err(|_| PaywallError::InvalidQuote("malformed recipient key".into()))?;
+                if &key != recipient {
+                    return Err(PaywallError::InvalidQuote(
+                        "recipient key does not match the allowed vendor".into(),
+                    ));
+                }
+                if min > max {
+                    return Err(PaywallError::InvalidQuote(
+                        "minimum expiry exceeds maximum expiry".into(),
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(PaywallError::InvalidQuote(
+                "recipient key and both expiry bounds must appear together".into(),
+            )),
         }
     }
 }
@@ -89,5 +201,17 @@ mod tests {
         assert_eq!(back.price, 10);
         assert_eq!(back.scheme, SCHEME);
         assert_eq!(back.channel_id.len(), CHANNEL_ID_LEN * 2);
+    }
+
+    #[test]
+    fn payment_terms_validate_range_and_appear_in_quote() {
+        let key = RistrettoPublicKeyBytes::from_bytes(&[7u8; 32]).unwrap();
+        assert!(PaymentTerms::new(key, 8, 7).is_err());
+        let terms = PaymentTerms::new(key, 8, 12).unwrap();
+        let quote = PaymentRequired::new(10, &[0xab; CHANNEL_ID_LEN]).with_terms(&terms);
+        let json = serde_json::to_value(quote).unwrap();
+        assert_eq!(json["recipient_key"], to_hex(key.as_bytes()));
+        assert_eq!(json["min_expiry_epoch"], 8);
+        assert_eq!(json["max_expiry_epoch"], 12);
     }
 }

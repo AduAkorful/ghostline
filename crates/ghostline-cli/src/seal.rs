@@ -25,6 +25,25 @@ pub struct OpenSpec {
     pub channel_template: Hash32,
 }
 
+pub struct SettleArgs<'a> {
+    pub channel: &'a Channel,
+    pub deposit: MaskAndValue,
+    pub voucher: &'a SignedVoucher,
+    pub service_output: RistrettoPublicKeyBytes,
+    pub resource: ResourceAddress,
+    pub max_epoch: u64,
+    pub scan: OutputScan,
+}
+
+pub struct RefundArgs<'a> {
+    pub channel: &'a Channel,
+    pub deposit: MaskAndValue,
+    pub payer_output: RistrettoPublicKeyBytes,
+    pub resource: ResourceAddress,
+    pub max_epoch: u64,
+    pub scan: OutputScan,
+}
+
 pub fn channel(spec: OpenSpec) -> Result<Channel, String> {
     Channel::open(ChannelSpec {
         network_tag: spec.network_tag,
@@ -110,39 +129,46 @@ pub fn seal_open(
 }
 
 pub fn seal_settle(
-    channel: &Channel,
-    deposit: MaskAndValue,
-    voucher: &SignedVoucher,
-    service_output: RistrettoPublicKeyBytes,
-    resource: ResourceAddress,
-    max_epoch: u64,
+    args: SettleArgs<'_>,
     sealer: &RistrettoSecretKey,
-    scan: OutputScan,
     fee: Option<AccountFee<'_>>,
 ) -> Result<String, String> {
-    let statement =
-        settle(channel, deposit, voucher, service_output, scan).map_err(|e| e.to_string())?;
-    seal_hex_with_fee(scan.network, resource, statement, max_epoch, sealer, fee)
-        .map_err(|e| e.to_string())
+    let statement = settle(
+        args.channel,
+        args.deposit,
+        args.voucher,
+        args.service_output,
+        args.scan,
+    )
+    .map_err(|e| e.to_string())?;
+    seal_hex_with_fee(
+        args.scan.network,
+        args.resource,
+        statement,
+        args.max_epoch,
+        sealer,
+        fee,
+    )
+    .map_err(|e| e.to_string())
 }
 
 pub fn unsigned_settle(
-    channel: &Channel,
-    deposit: MaskAndValue,
-    voucher: &SignedVoucher,
-    service_output: RistrettoPublicKeyBytes,
-    resource: ResourceAddress,
-    max_epoch: u64,
-    scan: OutputScan,
+    args: SettleArgs<'_>,
     fee_account: Option<(ComponentAddress, u64)>,
 ) -> Result<UnsignedTransaction, String> {
-    let statement =
-        settle(channel, deposit, voucher, service_output, scan).map_err(|e| e.to_string())?;
+    let statement = settle(
+        args.channel,
+        args.deposit,
+        args.voucher,
+        args.service_output,
+        args.scan,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(unsigned_stealth_transfer_with_fee(
-        scan.network,
-        resource,
+        args.scan.network,
+        args.resource,
         statement,
-        max_epoch,
+        args.max_epoch,
         fee_account,
     ))
 }
@@ -167,18 +193,21 @@ pub fn unsigned_refund(
 }
 
 pub fn seal_refund(
-    channel: &Channel,
-    deposit: MaskAndValue,
-    payer_output: RistrettoPublicKeyBytes,
-    resource: ResourceAddress,
-    max_epoch: u64,
+    args: RefundArgs<'_>,
     sealer: &RistrettoSecretKey,
-    scan: OutputScan,
     fee: Option<AccountFee<'_>>,
 ) -> Result<String, String> {
-    let statement = refund(channel, deposit, payer_output, scan).map_err(|e| e.to_string())?;
-    seal_hex_with_fee(scan.network, resource, statement, max_epoch, sealer, fee)
-        .map_err(|e| e.to_string())
+    let statement = refund(args.channel, args.deposit, args.payer_output, args.scan)
+        .map_err(|e| e.to_string())?;
+    seal_hex_with_fee(
+        args.scan.network,
+        args.resource,
+        statement,
+        args.max_epoch,
+        sealer,
+        fee,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

@@ -53,12 +53,7 @@ impl ChannelFile {
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            fs::create_dir_all(parent).map_err(|e| format!("channel file: {e}"))?;
-        }
-        fs::write(path, json).map_err(|e| format!("channel file: {e}"))
+        ghostline_core::write_private_file(path, &json).map_err(|e| format!("channel file: {e}"))
     }
 }
 
@@ -82,7 +77,7 @@ pub struct ChannelListRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settle_window: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub epochs_until_expiry: Option<i64>,
+    pub epochs_until_expiry: Option<i128>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_epoch: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -292,10 +287,25 @@ pub struct OnChainTx {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TraceView {
+    /// Stable identifier for consumers of exported privacy receipts.
+    pub schema: &'static str,
+    pub network: String,
     pub off_chain: OffChainPanel,
     pub on_chain: Vec<OnChainTx>,
-    /// Count of the transactions listed above. Fees on them are public.
+    /// Count of the transactions listed above, not a chain-wide transaction count.
     pub on_chain_transactions: u64,
+    pub disclosure: DisclosureSummary,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DisclosureSummary {
+    /// These values come from the local service ledger; they are not independently proven by chain data.
+    pub off_chain_source: &'static str,
+    /// Fees and the listed transaction ids are public. Settlement exposes the deposit, voucher amount,
+    /// channel id, and the selected spend branch.
+    pub public_chain_data: &'static str,
+    /// This report is an operator-assembled summary, not a cryptographic proof or chain-wide scan.
+    pub limitations: &'static str,
 }
 
 pub fn off_chain_panel(calls: &[(u64, u64)], accepted: u64) -> OffChainPanel {
@@ -322,16 +332,31 @@ pub fn off_chain_panel(calls: &[(u64, u64)], accepted: u64) -> OffChainPanel {
     }
 }
 
-pub fn trace_view(off_chain: OffChainPanel, on_chain: Vec<OnChainTx>) -> TraceView {
+pub fn trace_view(
+    network: impl Into<String>,
+    off_chain: OffChainPanel,
+    on_chain: Vec<OnChainTx>,
+) -> TraceView {
     TraceView {
+        schema: "ghostline.privacy-receipt.v1",
+        network: network.into(),
         on_chain_transactions: on_chain.len() as u64,
         off_chain,
         on_chain,
+        disclosure: DisclosureSummary {
+            off_chain_source: "Call count and price range are read from the local Ghostline service ledger, not the chain indexer.",
+            public_chain_data: "Transaction ids and fees are public. Settlement reveals the deposit, voucher amount, channel id, and spend branch.",
+            limitations: "Operator-assembled evidence only: it does not cryptographically prove off-chain calls or scan for every related chain transaction.",
+        },
     }
 }
 
 pub fn trace_text(view: &TraceView) -> String {
-    let mut out = String::from("AGENT (off-chain, known only to payer and service)\n");
+    let mut out = format!(
+        "GHOSTLINE PRIVACY RECEIPT ({})\nnetwork: {}\n",
+        view.schema, view.network
+    );
+    out.push_str("OFF-CHAIN (from local service ledger; not independently proven by chain data)\n");
     out.push_str(&format!("  calls: {}\n", view.off_chain.calls));
     out.push_str(&format!("  total: {} µT\n", view.off_chain.total));
     if let (Some(lo), Some(hi)) = (view.off_chain.smallest, view.off_chain.largest) {
@@ -351,9 +376,15 @@ pub fn trace_text(view: &TraceView) -> String {
         ));
     }
     out.push_str(&format!(
-        "  transactions listed: {} (fees are public; settle reveals deposit, amount, channel id)\n",
+        "  transactions listed: {} (only the transactions supplied to this command)\n",
         view.on_chain_transactions
     ));
+    out.push_str("DISCLOSURE\n");
+    out.push_str(&format!(
+        "  public: {}\n",
+        view.disclosure.public_chain_data
+    ));
+    out.push_str(&format!("  limitation: {}\n", view.disclosure.limitations));
     out
 }
 
@@ -393,6 +424,7 @@ mod tests {
         assert_eq!(panel.total, 1000);
         assert_eq!((panel.smallest, panel.largest), (Some(10), Some(10)));
         let view = trace_view(
+            "esmeralda",
             panel,
             vec![
                 OnChainTx {
@@ -409,11 +441,19 @@ mod tests {
         );
         assert_eq!(view.on_chain_transactions, 2);
         let text = trace_text(&view);
+        assert!(text.contains("GHOSTLINE PRIVACY RECEIPT (ghostline.privacy-receipt.v1)"));
+        assert!(text.contains("network: esmeralda"));
         assert!(text.contains("calls: 100"));
         assert!(text.contains("settle: bb Finalized"));
+        assert!(text.contains("does not cryptographically prove off-chain calls"));
+        assert!(text.contains("only the transactions supplied to this command"));
         let json = serde_json::to_string(&view).unwrap();
-        assert!(!json.contains("mask"));
-        assert!(!json.contains("voucher"));
+        assert!(!json.contains("deposit_mask_hex"));
+        assert!(!json.contains("voucher_hex"));
+        assert!(!json.contains("payer_hex"));
+        assert!(!json.contains("service_hex"));
+        assert!(json.contains("ghostline.privacy-receipt.v1"));
+        assert!(json.contains("esmeralda"));
     }
 
     #[test]

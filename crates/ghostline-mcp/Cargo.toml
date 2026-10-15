@@ -17,7 +17,7 @@ ghostline-paywall = { path = "../../middleware/ghostline-paywall" }
 ghostline-policy = { path = "../ghostline-policy" }
 ghostline-sdk = { path = "../ghostline-sdk" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-rmcp = { version = "3.5.1", features = ["client", "transport-io"] }
+rmcp = { version = "3.5.1", features = ["client", "elicitation", "schemars", "transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -11,7 +11,10 @@ use ghostline_paywall::{
 };
 use ghostline_policy::{Policy, PolicyEngine, env_flag};
 use ghostline_sdk::{inspect_transaction, unblind_transaction};
-use rmcp::{ServerHandler, handler::server::wrapper::Parameters, tool, tool_handler, tool_router};
+use rmcp::{
+    Peer, RoleServer, ServerHandler, handler::server::wrapper::Parameters, service::RequestContext,
+    tool, tool_handler, tool_router,
+};
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -32,9 +35,6 @@ pub struct SignArgs {
     pub channel: ChannelArgs,
     /// Per-call increment, not the cumulative total.
     pub price: u64,
-    /// Required when `GHOSTLINE_POLICY_REQUIRE_HUMAN` is set.
-    #[serde(default)]
-    pub attested: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -48,8 +48,35 @@ pub struct VerifyArgs {
 pub struct CallPaidArgs {
     pub url: String,
     pub voucher_hex: Option<String>,
-    #[serde(default)]
-    pub attested: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct HumanConsent {
+    approve: bool,
+}
+
+rmcp::elicit_safe!(HumanConsent);
+
+async fn request_human_approval(peer: &Peer<RoleServer>, message: String) -> Result<bool, String> {
+    match peer.elicit::<HumanConsent>(message).await {
+        Ok(Some(consent)) => Ok(consent.approve),
+        Ok(None) => Ok(false),
+        Err(err) => Err(format!("human approval unavailable or declined: {err}")),
+    }
+}
+
+fn human_approval_required(price: u64, vendor: &RistrettoPublicKeyBytes) -> Result<bool, String> {
+    if env_flag("GHOSTLINE_POLICY_UNSAFE") {
+        return Ok(false);
+    }
+    let policy = Policy::from_env()?
+        .ok_or("set GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL")?;
+    let engine = PolicyEngine::new(policy)
+        .with_audit_file_from_env()
+        .map_err(|e| e.to_string())?
+        .with_human_rules_from_env()
+        .map_err(|e| e.to_string())?;
+    Ok(engine.requires_human_approval(vendor, price))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -133,17 +160,21 @@ fn payer_session_path() -> Result<Option<std::path::PathBuf>, String> {
 }
 
 pub fn sign_voucher_hex(args: &SignArgs) -> Result<String, String> {
+    sign_voucher_hex_with_attestation(args, false)
+}
+
+fn sign_voucher_hex_with_attestation(args: &SignArgs, attested: bool) -> Result<String, String> {
     let params = parse_params(&args.channel)?;
     let secret = payer_secret_from_env()?;
     let mut store = session_store(params)?;
-    sign_store(&mut store, &secret, args.price, args.attested)
+    sign_store(&mut store, &secret, args.price, attested)
 }
 
 /// Sign `quote.price` against the payer session. The quote's channel id must match the store.
-pub fn voucher_for_quote(quote: &PaymentRequired, attested: bool) -> Result<String, String> {
+pub fn voucher_for_quote(quote: &PaymentRequired) -> Result<String, String> {
     let path =
         payer_session_path()?.ok_or("set GHOSTLINE_SESSION or session on the channel file")?;
-    voucher_at(&path, quote, attested)
+    voucher_at(&path, quote, false)
 }
 
 fn voucher_at(
@@ -155,6 +186,12 @@ fn voucher_at(
     let id = to_hex(&store.channel_id().map_err(|e| e.to_string())?);
     if id != quote.channel_id {
         return Err("payment-required channel_id does not match the payer session".into());
+    }
+    if !env_flag("GHOSTLINE_POLICY_UNSAFE") {
+        let vendor = vendor_from_env()?;
+        quote
+            .validate_for(&store.channel_id().map_err(|e| e.to_string())?, &vendor)
+            .map_err(|e| e.to_string())?;
     }
     let secret = payer_secret_from_env()?;
     sign_store(&mut store, &secret, quote.price, attested)
@@ -177,10 +214,11 @@ fn sign_store(
     let policy = Policy::from_env()?
         .ok_or("set GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL")?;
     let vendor = vendor_from_env()?;
-    let mut engine = PolicyEngine::new(policy);
-    if env_flag("GHOSTLINE_POLICY_REQUIRE_HUMAN") {
-        engine = engine.require_human();
-    }
+    let engine = PolicyEngine::new(policy)
+        .with_audit_file_from_env()
+        .map_err(|e| e.to_string())?
+        .with_human_rules_from_env()
+        .map_err(|e| e.to_string())?;
     let (voucher, _) =
         gated_sign(store, engine, vendor, price, secret, attested).map_err(|e| e.to_string())?;
     Ok(encode_voucher_header(&voucher))
@@ -205,12 +243,50 @@ pub struct PaidCall {
 
 pub async fn call_paid(args: &CallPaidArgs) -> Result<PaidCall, String> {
     let first = get_paid(&args.url, args.voucher_hex.as_deref()).await?;
+    call_paid_after_first(args, first, false).await
+}
+
+async fn call_paid_with_peer(
+    args: &CallPaidArgs,
+    peer: &Peer<RoleServer>,
+) -> Result<PaidCall, String> {
+    let first = get_paid(&args.url, args.voucher_hex.as_deref()).await?;
+    let Some(quote) = first.payment_required.as_ref() else {
+        return call_paid_after_first(args, first, false).await;
+    };
+    let should_sign = first.status == 402
+        && args.voucher_hex.is_none()
+        && will_attempt_payment().await?
+        && human_approval_required(quote.price, &vendor_from_env()?)?;
+    let attested = if should_sign {
+        let message = format!(
+            "Approve payment of {} µT for {}? Channel {}.",
+            quote.price, args.url, quote.channel_id
+        );
+        request_human_approval(peer, message).await?
+    } else {
+        false
+    };
+    if should_sign && !attested {
+        return Err("human approval declined; no payment or channel open was attempted".into());
+    }
+    call_paid_after_first(args, first, attested).await
+}
+
+async fn call_paid_after_first(
+    args: &CallPaidArgs,
+    first: PaidCall,
+    attested: bool,
+) -> Result<PaidCall, String> {
     if first.status != 402 {
         return Ok(first);
     }
     let Some(quote) = first.payment_required.clone() else {
         return Ok(first);
     };
+    if env_flag("GHOSTLINE_OPEN_SUBMIT") && !env_flag("GHOSTLINE_POLICY_UNSAFE") {
+        open_channel::validate_quote_config(&quote)?;
+    }
     let Some(session) = payer_session_for_pay().await? else {
         let mut unpaid = first;
         unpaid.needs_channel = unpaid.status == 402;
@@ -220,8 +296,29 @@ pub async fn call_paid(args: &CallPaidArgs) -> Result<PaidCall, String> {
         return Ok(first);
     }
     let session = session_for_quote(&session, &quote.channel_id)?;
-    let hex = voucher_at(&session, &quote, args.attested)?;
+    let hex = voucher_at(&session, &quote, attested)?;
     get_paid(&args.url, Some(&hex)).await
+}
+
+async fn will_attempt_payment() -> Result<bool, String> {
+    if payer_session_path()?.is_some() {
+        return Ok(true);
+    }
+    let Ok(file) = std::env::var("GHOSTLINE_CHANNEL_FILE") else {
+        return Ok(false);
+    };
+    let text = match std::fs::read_to_string(&file) {
+        Ok(text) => text,
+        Err(_) if !env_flag("GHOSTLINE_OPEN_SUBMIT") => return Ok(false),
+        Err(err) => return Err(format!("channel file: {err}")),
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("channel file: {e}"))?;
+    let opened = value
+        .get("deposit_mask_hex")
+        .and_then(|v| v.as_str())
+        .is_some_and(|mask| !mask.is_empty());
+    Ok(opened || env_flag("GHOSTLINE_OPEN_SUBMIT"))
 }
 
 /// Keep `session` when it matches the quote. Otherwise use the ledger in `GHOSTLINE_SESSION_DIR` with that channel id.
@@ -429,11 +526,24 @@ impl GhostlineMcp {
     #[tool(
         description = "Sign the next Ghostline voucher for `price`. Uses GHOSTLINE_PAYER_SECRET, GHOSTLINE_SESSION, and policy env vars. Does not take a secret argument."
     )]
-    fn ghostline_sign_voucher(
+    async fn ghostline_sign_voucher(
         &self,
         Parameters(args): Parameters<SignArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<String, String> {
-        let hex = sign_voucher_hex(&args)?;
+        let vendor = vendor_from_env()?;
+        let attested = if human_approval_required(args.price, &vendor)? {
+            let params = parse_params(&args.channel)?;
+            let message = format!(
+                "Approve signing a {} µT voucher for channel {}?",
+                args.price,
+                to_hex(&params.channel_id())
+            );
+            request_human_approval(&context.peer, message).await?
+        } else {
+            false
+        };
+        let hex = sign_voucher_hex_with_attestation(&args, attested)?;
         serde_json::to_string(&HexOut { hex }).map_err(|e| e.to_string())
     }
 
@@ -452,8 +562,9 @@ impl GhostlineMcp {
     async fn ghostline_call_paid(
         &self,
         Parameters(args): Parameters<CallPaidArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<String, String> {
-        let result = call_paid(&args).await?;
+        let result = call_paid_with_peer(&args, &context.peer).await?;
         serde_json::to_string(&result).map_err(|e| e.to_string())
     }
 
@@ -524,7 +635,7 @@ impl GhostlineMcp {
     }
 
     #[tool(
-        description = "Open the channel in GHOSTLINE_CHANNEL_FILE. No arguments. Dry-run unless GHOSTLINE_OPEN_SUBMIT=1, which broadcasts, stores the deposit mask, and creates the payer session. Refuses when the file already holds a deposit mask."
+        description = "Open the channel in GHOSTLINE_CHANNEL_FILE. No arguments. Dry-run unless GHOSTLINE_OPEN_SUBMIT=1. Review the returned fee estimate, then set GHOSTLINE_OPEN_MAX_FEE to an explicit µT cap before broadcasting. Live open stores the deposit mask and creates the payer session. Refuses when the file already holds a deposit mask."
     )]
     async fn ghostline_open_channel(
         &self,
@@ -557,6 +668,12 @@ impl GhostlineMcp {
     }
 }
 
+impl Default for GhostlineMcp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tool_handler(
     name = "ghostline",
     version = "0.1.0",
@@ -565,16 +682,105 @@ impl GhostlineMcp {
 impl ServerHandler for GhostlineMcp {}
 
 #[cfg(test)]
+// The std mutex intentionally serializes tests that mutate process-wide environment variables.
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use ghostline_core::NONCE_LEN;
     use ootle_byte_type::ToByteType;
-    use std::sync::Mutex;
+    use rmcp::{
+        ClientHandler, ErrorData as McpError,
+        model::*,
+        service::{RequestContext, RoleClient},
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::Hash32;
     use tari_utilities::ByteArray;
 
     static ENV: Mutex<()> = Mutex::new(());
+
+    struct ApproveClient(Arc<AtomicUsize>);
+
+    impl ClientHandler for ApproveClient {
+        fn get_info(&self) -> ClientConfig {
+            ClientConfig::new(
+                ClientCapabilities::builder().enable_elicitation().build(),
+                Implementation::new("ghostline-test-client", "0.1.0"),
+            )
+        }
+
+        async fn create_elicitation(
+            &self,
+            request: ElicitRequestParams,
+            _context: RequestContext<RoleClient>,
+        ) -> Result<ElicitResult, McpError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            match request {
+                ElicitRequestParams::FormElicitationParams { message, .. } => {
+                    assert!(message.contains("Approve payment of 10 µT"));
+                    Ok(ElicitResult::new(ElicitationAction::Accept)
+                        .with_content(serde_json::json!({"approve": true})))
+                }
+                _ => Ok(ElicitResult::new(ElicitationAction::Decline)),
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_sign_cannot_self_attest_through_tool_arguments() {
+        let _env = ENV.lock().unwrap();
+        let (secret, public) = create_key_pair_from_seed(11);
+        let channel = ChannelArgs {
+            network_tag: 1,
+            payer_hex: to_hex(public.to_byte_type().as_bytes()),
+            deposit: 100,
+            payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
+            nonce_hex: to_hex(&[3u8; NONCE_LEN]),
+        };
+        let params = parse_params(&channel).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-mcp-consent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let session = dir.join("session.json");
+        ChannelStore::create(&session, params).unwrap();
+        unsafe {
+            std::env::set_var("GHOSTLINE_SESSION", &session);
+            std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
+            std::env::set_var("GHOSTLINE_POLICY_BUDGET", "100");
+            std::env::set_var("GHOSTLINE_POLICY_MAX_PER_CALL", "10");
+            std::env::set_var(
+                "GHOSTLINE_POLICY_VENDOR_HEX",
+                to_hex(public.to_byte_type().as_bytes()),
+            );
+            std::env::set_var("GHOSTLINE_POLICY_REQUIRE_HUMAN", "1");
+            std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+        }
+        let args = SignArgs { channel, price: 10 };
+        let mut raw = serde_json::to_value(&args).unwrap();
+        raw["attested"] = serde_json::Value::Bool(true);
+        let parsed: SignArgs = serde_json::from_value(raw).unwrap();
+        let err = sign_voucher_hex(&parsed).unwrap_err();
+        assert!(err.contains("human approval required"));
+        assert_eq!(ChannelStore::open(&session).unwrap().cumulative(), 0);
+        unsafe {
+            std::env::remove_var("GHOSTLINE_SESSION");
+            std::env::remove_var("GHOSTLINE_PAYER_SECRET");
+            std::env::remove_var("GHOSTLINE_POLICY_BUDGET");
+            std::env::remove_var("GHOSTLINE_POLICY_MAX_PER_CALL");
+            std::env::remove_var("GHOSTLINE_POLICY_VENDOR_HEX");
+            std::env::remove_var("GHOSTLINE_POLICY_REQUIRE_HUMAN");
+        }
+    }
 
     #[test]
     fn sign_and_verify_round_trip() {
@@ -685,11 +891,11 @@ mod tests {
             std::env::set_var("GHOSTLINE_SESSION", &path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
             std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+            std::env::remove_var("GHOSTLINE_POLICY_REQUIRE_HUMAN");
         }
         let result = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
             voucher_hex: None,
-            attested: false,
         })
         .await
         .unwrap();
@@ -697,6 +903,7 @@ mod tests {
             std::env::remove_var("GHOSTLINE_SESSION");
             std::env::remove_var("GHOSTLINE_PAYER_SECRET");
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+            std::env::remove_var("GHOSTLINE_POLICY_REQUIRE_HUMAN");
         }
         assert_eq!(result.status, 200);
         assert!(result.body.contains("fortune"));
@@ -810,7 +1017,14 @@ mod tests {
         unsafe {
             std::env::set_var("GHOSTLINE_SESSION", &path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
-            std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+            std::env::set_var("GHOSTLINE_POLICY_BUDGET", "100");
+            std::env::set_var("GHOSTLINE_POLICY_MAX_PER_CALL", "10");
+            std::env::set_var(
+                "GHOSTLINE_POLICY_VENDOR_HEX",
+                to_hex(public.to_byte_type().as_bytes()),
+            );
+            std::env::set_var("GHOSTLINE_POLICY_REQUIRE_HUMAN", "1");
+            std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
         }
 
         let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
@@ -825,7 +1039,11 @@ mod tests {
             Ok::<(), String>(())
         });
 
-        let client = ().serve(client_transport).await.unwrap();
+        let consent_requests = Arc::new(AtomicUsize::new(0));
+        let client = ApproveClient(consent_requests.clone())
+            .serve(client_transport)
+            .await
+            .unwrap();
         let tools = client.list_all_tools().await.unwrap();
         let names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
         for expected in [
@@ -845,6 +1063,15 @@ mod tests {
         ] {
             assert!(names.contains(&expected), "missing {expected} in {names:?}");
         }
+        let sign_tool = tools
+            .iter()
+            .find(|tool| tool.name == "ghostline_sign_voucher")
+            .unwrap();
+        assert!(
+            !serde_json::to_string(sign_tool)
+                .unwrap()
+                .contains("attested")
+        );
 
         let mut arguments = serde_json::Map::new();
         arguments.insert(
@@ -865,12 +1092,17 @@ mod tests {
         assert_eq!(paid.status, 200);
         assert!(!paid.needs_channel);
         assert!(paid.body.contains("fortune"));
+        assert_eq!(consent_requests.load(Ordering::SeqCst), 1);
 
         client.cancel().await.unwrap();
         let _ = server_handle.await;
         unsafe {
             std::env::remove_var("GHOSTLINE_SESSION");
             std::env::remove_var("GHOSTLINE_PAYER_SECRET");
+            std::env::remove_var("GHOSTLINE_POLICY_BUDGET");
+            std::env::remove_var("GHOSTLINE_POLICY_MAX_PER_CALL");
+            std::env::remove_var("GHOSTLINE_POLICY_VENDOR_HEX");
+            std::env::remove_var("GHOSTLINE_POLICY_REQUIRE_HUMAN");
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
         }
         let loaded = ChannelStore::open(&path).unwrap();
@@ -903,7 +1135,6 @@ mod tests {
         let paid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
             voucher_hex: None,
-            attested: false,
         })
         .await
         .unwrap();
@@ -978,7 +1209,6 @@ mod tests {
         let paid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
             voucher_hex: None,
-            attested: false,
         })
         .await
         .unwrap();
@@ -1079,7 +1309,6 @@ mod tests {
         let unpaid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
             voucher_hex: None,
-            attested: false,
         })
         .await
         .unwrap();
@@ -1094,7 +1323,6 @@ mod tests {
         let paid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
             voucher_hex: None,
-            attested: false,
         })
         .await
         .unwrap();

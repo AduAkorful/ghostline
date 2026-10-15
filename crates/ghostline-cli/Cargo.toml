@@ -24,6 +24,8 @@ tari_crypto = "0.24.0"
 tari_template_lib = "0.34.0"
 tari_utilities = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 ootle_byte_type = { version = "0.16", features = ["crypto"] }

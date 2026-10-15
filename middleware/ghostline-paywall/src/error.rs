@@ -13,6 +13,8 @@ pub enum PaywallError {
         price: u64,
     },
     BadPrice(String),
+    InvalidTerms(String),
+    InvalidQuote(String),
     /// The voucher names a channel this service does not have a ledger for.
     UnknownChannel,
     /// More than one ledger, and the request did not name a channel.
@@ -29,6 +31,8 @@ impl fmt::Display for PaywallError {
                 write!(f, "voucher delta {paid} does not match price {price}")
             }
             Self::BadPrice(details) => write!(f, "{details}"),
+            Self::InvalidTerms(details) => write!(f, "invalid payment terms: {details}"),
+            Self::InvalidQuote(details) => write!(f, "invalid payment quote: {details}"),
             Self::UnknownChannel => write!(f, "no ledger for this channel"),
             Self::AmbiguousChannel => {
                 write!(f, "more than one channel; set the ghostline-channel header")
@@ -52,6 +56,8 @@ impl PaywallError {
         match self {
             Self::MissingVoucher | Self::WrongPrice { .. } => 402,
             Self::BadPrice(_)
+            | Self::InvalidTerms(_)
+            | Self::InvalidQuote(_)
             | Self::AmbiguousChannel
             | Self::Voucher(VoucherError::Malformed | VoucherError::ZeroAmount) => 400,
             Self::Voucher(_) | Self::Storage(_) | Self::UnknownChannel => 403,

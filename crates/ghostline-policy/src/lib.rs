@@ -15,6 +15,8 @@ pub enum PolicyError {
     VendorDenied,
     RateLimited,
     NeedsHumanApproval { price: u64, already_owed: u64 },
+    AuditLogFailed,
+    InvalidConfiguration,
 }
 
 impl fmt::Display for PolicyError {
@@ -41,6 +43,8 @@ impl fmt::Display for PolicyError {
                 f,
                 "human approval required for price {price} with {already_owed} already owed"
             ),
+            Self::AuditLogFailed => write!(f, "could not persist policy decision audit event"),
+            Self::InvalidConfiguration => write!(f, "invalid human approval policy configuration"),
         }
     }
 }

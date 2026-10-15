@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use ghostline_core::{
     CHANNEL_ID_LEN, ChannelParams, NONCE_LEN, PaymentSession, ServiceLedger, VoucherError,
-    from_hex, to_hex,
+    from_hex, to_hex, write_private_file,
 };
 use serde::{Deserialize, Serialize};
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -175,11 +175,12 @@ impl ChannelStore {
                 self.snapshot.accepted
             )));
         }
-        self.snapshot.calls.push(AcceptedCall {
+        let mut next = self.snapshot.clone();
+        next.calls.push(AcceptedCall {
             price,
-            accepted: self.snapshot.accepted,
+            accepted: next.accepted,
         });
-        self.flush()
+        self.persist_snapshot(next)
     }
 
     /// Record the voucher that matches `accepted`. The hex is a bearer credential; do not print it.
@@ -193,8 +194,69 @@ impl ChannelStore {
                 voucher.amount, self.snapshot.accepted
             )));
         }
-        self.snapshot.latest_voucher_hex = Some(voucher_hex.trim().to_string());
-        self.flush()
+        let mut next = self.snapshot.clone();
+        next.latest_voucher_hex = Some(voucher_hex.trim().to_string());
+        self.persist_snapshot(next)
+    }
+
+    /// Persist one accepted charge and its settlement voucher in a single file replacement.
+    ///
+    /// Replaying the latest voucher also repairs a previous partial storage failure because the
+    /// voucher is written even when the durable accepted total already matches it.
+    pub fn commit_charge(
+        &mut self,
+        ledger: &ServiceLedger,
+        price: u64,
+        voucher_hex: &str,
+    ) -> Result<u64, PaywallError> {
+        let params = self.params()?;
+        if ledger.params() != &params {
+            return Err(PaywallError::Voucher(VoucherError::ChannelMismatch));
+        }
+        let voucher = crate::decode_voucher_header(voucher_hex)?;
+        voucher.verify(&params)?;
+        if voucher.amount != ledger.accepted() {
+            return Err(PaywallError::Storage(format!(
+                "voucher amount {} does not match accepted {}",
+                voucher.amount,
+                ledger.accepted()
+            )));
+        }
+        if ledger.accepted() < self.snapshot.accepted {
+            return Err(PaywallError::Storage(format!(
+                "accepted total {} is below stored {}",
+                ledger.accepted(),
+                self.snapshot.accepted
+            )));
+        }
+        let delta = ledger.accepted() - self.snapshot.accepted;
+        if delta > 0 && delta != price {
+            return Err(PaywallError::WrongPrice { paid: delta, price });
+        }
+
+        let mut next = self.snapshot.clone();
+        next.accepted = ledger.accepted();
+        if delta > 0 {
+            if let Some(last) = next.calls.last() {
+                let expected = last
+                    .accepted
+                    .checked_add(delta)
+                    .ok_or_else(|| PaywallError::Storage("call price overflow".into()))?;
+                if expected != next.accepted {
+                    return Err(PaywallError::Storage(format!(
+                        "call price {delta} does not advance accepted from {} to {}",
+                        last.accepted, next.accepted
+                    )));
+                }
+            }
+            next.calls.push(AcceptedCall {
+                price: delta,
+                accepted: next.accepted,
+            });
+        }
+        next.latest_voucher_hex = Some(voucher_hex.trim().to_string());
+        self.persist_snapshot(next)?;
+        Ok(delta)
     }
 
     #[cfg(test)]
@@ -203,33 +265,44 @@ impl ChannelStore {
         accepted: u64,
         cumulative: u64,
     ) -> Result<(), PaywallError> {
-        self.snapshot.accepted = accepted;
-        self.snapshot.cumulative = cumulative;
-        self.flush()
+        let mut next = self.snapshot.clone();
+        next.accepted = accepted;
+        next.cumulative = cumulative;
+        self.persist_snapshot(next)
     }
 
     pub fn save_ledger(&mut self, ledger: &ServiceLedger) -> Result<(), PaywallError> {
         if ledger.params() != &self.params()? {
             return Err(PaywallError::Voucher(VoucherError::ChannelMismatch));
         }
-        self.snapshot.accepted = ledger.accepted();
-        self.flush()
+        let mut next = self.snapshot.clone();
+        next.accepted = ledger.accepted();
+        self.persist_snapshot(next)
     }
 
     pub fn save_session(&mut self, session: &PaymentSession) -> Result<(), PaywallError> {
         if session.params() != &self.params()? {
             return Err(PaywallError::Voucher(VoucherError::ChannelMismatch));
         }
-        self.snapshot.cumulative = session.cumulative();
-        self.flush()
+        let mut next = self.snapshot.clone();
+        next.cumulative = session.cumulative();
+        self.persist_snapshot(next)
     }
 
     fn flush(&self) -> Result<(), PaywallError> {
-        let json = serde_json::to_vec_pretty(&self.snapshot)
+        self.flush_snapshot(&self.snapshot)
+    }
+
+    fn flush_snapshot(&self, snapshot: &ChannelSnapshot) -> Result<(), PaywallError> {
+        let json = serde_json::to_vec_pretty(snapshot)
             .map_err(|_| PaywallError::Voucher(VoucherError::Malformed))?;
-        let tmp = self.path.with_extension("json.tmp");
-        fs::write(&tmp, json).map_err(|e| PaywallError::Storage(e.to_string()))?;
-        fs::rename(&tmp, &self.path).map_err(|e| PaywallError::Storage(e.to_string()))?;
+        write_private_file(&self.path, &json).map_err(|e| PaywallError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    fn persist_snapshot(&mut self, next: ChannelSnapshot) -> Result<(), PaywallError> {
+        self.flush_snapshot(&next)?;
+        self.snapshot = next;
         Ok(())
     }
 
@@ -278,6 +351,14 @@ impl ChannelDirectory {
 
     pub fn is_empty(&self) -> bool {
         self.stores.is_empty()
+    }
+
+    /// Number of ledgers with an accepted voucher; this is not chain settlement confirmation.
+    pub fn ledgers_with_accepted_vouchers(&self) -> usize {
+        self.stores
+            .iter()
+            .filter(|store| store.accepted() > 0)
+            .count()
     }
 
     pub fn first_params(&self) -> Result<ChannelParams, PaywallError> {
@@ -333,13 +414,8 @@ impl ChannelDirectory {
             .store_index(&voucher.channel_id)
             .ok_or(PaywallError::UnknownChannel)?;
         let mut ledger = self.stores[index].ledger()?;
-        let delta = crate::charge(&mut ledger, price, Some(hex))?;
-        self.stores[index].save_ledger(&ledger)?;
-        self.stores[index].record_call(delta)?;
-        if delta > 0 {
-            self.stores[index].remember_voucher(hex)?;
-        }
-        Ok(delta)
+        crate::charge(&mut ledger, price, Some(hex))?;
+        self.stores[index].commit_charge(&ledger, price, hex)
     }
 
     fn store_index(&self, channel_id: &[u8; CHANNEL_ID_LEN]) -> Option<usize> {
@@ -352,6 +428,7 @@ impl ChannelDirectory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use ghostline_core::NONCE_LEN;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
@@ -363,6 +440,30 @@ mod tests {
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         }
+    }
+
+    fn signed_charge() -> (ChannelParams, ServiceLedger, String) {
+        use ghostline_core::SignedVoucher;
+        use ootle_byte_type::ToByteType;
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+
+        let (secret, public) = create_key_pair_from_seed(11);
+        let mut params = params();
+        params.payer = public.to_byte_type();
+        let voucher = SignedVoucher::sign(&secret, &params, 10).unwrap();
+        let mut ledger = ServiceLedger::new(params.clone());
+        ledger.accept(&voucher).unwrap();
+        (params, ledger, crate::encode_voucher_header(&voucher))
+    }
+
+    fn unique_store_path(label: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("ghostline-{label}-{}-{stamp}", std::process::id()))
+            .join("channel.json")
     }
 
     #[test]
@@ -426,6 +527,87 @@ mod tests {
             ]
         );
         store.record_call(5).unwrap_err();
+    }
+
+    #[test]
+    fn commit_charge_persists_total_call_and_voucher_together() {
+        let (params, ledger, voucher_hex) = signed_charge();
+        let path = unique_store_path("commit-charge");
+        let mut store = ChannelStore::create(&path, params).unwrap();
+
+        assert_eq!(store.commit_charge(&ledger, 10, &voucher_hex).unwrap(), 10);
+
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(
+            loaded.calls(),
+            &[AcceptedCall {
+                price: 10,
+                accepted: 10
+            }]
+        );
+        assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn failed_charge_write_leaves_store_unchanged_and_can_retry() {
+        let (params, ledger, voucher_hex) = signed_charge();
+        let path = unique_store_path("failed-charge");
+        let mut store = ChannelStore::create(&path, params).unwrap();
+
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(store.commit_charge(&ledger, 10, &voucher_hex).is_err());
+        assert_eq!(store.accepted(), 0);
+        assert!(store.calls().is_empty());
+        assert!(store.latest_voucher_hex().is_none());
+
+        fs::remove_dir(&path).unwrap();
+        assert_eq!(store.commit_charge(&ledger, 10, &voucher_hex).unwrap(), 10);
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn failed_snapshot_writes_do_not_advance_in_memory_totals() {
+        let (params, ledger, _) = signed_charge();
+        let session = PaymentSession::resume(params.clone(), 10).unwrap();
+        let path = unique_store_path("failed-snapshot");
+        let mut store = ChannelStore::create(&path, params).unwrap();
+
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(store.save_ledger(&ledger).is_err());
+        assert!(store.save_session(&session).is_err());
+        assert_eq!(store.accepted(), 0);
+        assert_eq!(store.cumulative(), 0);
+
+        fs::remove_dir(&path).unwrap();
+        store.save_ledger(&ledger).unwrap();
+        store.save_session(&session).unwrap();
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(loaded.cumulative(), 10);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn replay_repairs_a_missing_durable_settlement_voucher() {
+        let (params, ledger, voucher_hex) = signed_charge();
+        let path = unique_store_path("replay-voucher");
+        let mut store = ChannelStore::create(&path, params).unwrap();
+        store.save_ledger(&ledger).unwrap();
+        assert!(store.latest_voucher_hex().is_none());
+
+        assert_eq!(store.commit_charge(&ledger, 10, &voucher_hex).unwrap(), 0);
+
+        let loaded = ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[test]
