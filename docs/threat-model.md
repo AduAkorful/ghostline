@@ -16,7 +16,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 | Actor | Trust |
 |---|---|
 | Payer / agent | Holds the voucher key. Assumed to want to spend, not to protect the operator from itself |
-| Policy engine | Runs outside the agent. Enforces limits only if the agent actually signs through it |
+| Policy engine | Runs outside the agent. Enforces limits only if the agent actually signs through it; the human gate depends on a separate CLI operator or MCP host UI |
 | Service | Sees every voucher. Can settle any valid cumulative amount it holds, once |
 | Public observer | Sees fees always; sees settle/refund amounts and condition branches when those transactions land |
 | Wallet daemon | If used for open/settle, it sees amounts, masks, and keys it holds |
@@ -47,7 +47,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 **Wrong-channel voucher.** Vouchers are bound to `channel_id` (network tag, payer, deposit, payer root, nonce). A voucher for another channel must fail verification.
 
-**Policy bypass.** If the agent can reach the payer secret, policy is advisory. The on-chain limit is the deposit.
+**Policy bypass.** If the agent can reach the payer secret, policy is advisory. The on-chain limit is the deposit. Human rules can gate every payment, calls at or above a configured µT threshold, or a vendor's first payment. The CLI asks for terminal confirmation and MCP requests client elicitation; the MCP host must actually present the prompt to a person. The low-level policy API trusts its caller's attestation boolean. Optional JSONL audit logging is append-only and fails closed on write errors, but it does not protect against an operator who can edit or replace the file.
 
 **Wallet-built deposit encrypted to the view key.** `accounts.stealth_transfer` with a wallet `destination_address` encrypts the output to the wallet view key, not the Ghostline payer key. Unblinding with the payer secret fails. Settlement needs the view-key mask (or a wallet that already holds it).
 

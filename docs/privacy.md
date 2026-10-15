@@ -10,7 +10,9 @@ It is **not** anonymity against the service you are paying. That service sees ev
 - Per-call prices and timing
 - Which APIs or vendors you hit
 
-Those facts never go on-chain if you settle once at the end. Proven live: 100 HTTP 402 calls at 10 µT, one settle of 1000 µT.
+Those facts never go on-chain if you settle once at the end. Proven live on Esmeralda: 1,000 HTTP 402 calls at 10 µT, one finalized settle of 10,000 µT.
+
+`ghostline channel trace` can export a privacy receipt in text or JSON. It combines the call count and price range from the local service ledger with the indexer status of transaction IDs supplied by the operator. The receipt does not contain channel masks, keys, or voucher hex. The off-chain totals in it are still private business data: share the receipt only if you intend to disclose those totals to its recipient. It is an operator-assembled summary, not a cryptographic proof of the call log and not a chain-wide scan.
 
 ## Visible on-chain
 
@@ -22,6 +24,8 @@ Those facts never go on-chain if you settle once at the end. Proven live: 100 HT
 | Refund after expiry | The refund branch, the full deposit returning to the payer key |
 
 Because remainder + claimed = deposit, **settlement reveals the deposit**.
+
+The receipt explains this boundary explicitly. It lists only the transaction IDs the operator names; it does not claim to have found every related transaction or report the exact fee amount. CLI report, call-history, and trace files written with `--out` are owner-only on Unix because they contain private spending activity. If output is redirected by the shell, use `umask 077`; the CLI cannot set permissions on a shell-created file.
 
 ## Things that can re-identify you anyway
 

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang cmake libclang-dev protobuf-compiler
+      - name: Run Rust workspace tests
+        run: cargo test --workspace
+      - name: Build the Ghostline channel template for Ootle
+        run: cargo build --manifest-path contracts/channel/Cargo.toml --target wasm32-unknown-unknown --release
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Run TypeScript tests
+        run: npm ci --prefix packages/ghostline && npm test --prefix packages/ghostline
+      - name: Execute the local quickstart smoke test
+        run: bash scripts/quickstart-smoke.sh

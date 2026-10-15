@@ -93,6 +93,7 @@ case "$cmd" in
     echo "Next: $0 init"
     ;;
   init)
+    require_disk
     [[ -d "$ROOT/ootle" ]] || die "missing $ROOT/ootle — run: $0 clone"
     export_libudev_pkgconfig
     rustup target add wasm32-unknown-unknown

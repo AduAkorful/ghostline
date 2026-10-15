@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::{
+    io::{self, IsTerminal, Write},
+    net::SocketAddr,
+};
 
 use clap::{Parser, Subcommand};
 use ghostline_core::{ChannelParams, NONCE_LEN, from_hex};
-use ghostline_paid_api::{AppState, router};
-use ghostline_paywall::{ChannelStore, PaymentRequired, VOUCHER_HEADER, gated_sign};
+use ghostline_paid_api::{AppState, router, router_with_metrics};
+use ghostline_paywall::{ChannelStore, PaymentRequired, PaymentTerms, VOUCHER_HEADER, gated_sign};
 use ghostline_policy::PolicyEngine;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -46,6 +49,18 @@ enum Command {
         ledger: PathBuf,
         #[arg(long, default_value_t = 10)]
         price: u64,
+        /// Public key authorized to settle channels for this service.
+        #[arg(long)]
+        service_key_hex: String,
+        /// Inclusive lower expiry accepted for newly opened channels.
+        #[arg(long)]
+        min_expiry_epoch: u64,
+        /// Inclusive upper expiry accepted for newly opened channels.
+        #[arg(long)]
+        max_expiry_epoch: u64,
+        /// Expose aggregate, privacy-safe Prometheus metrics at GET /metrics.
+        #[arg(long)]
+        metrics: bool,
     },
     /// Hit a paid URL, signing a voucher on each 402 until `--calls` succeed.
     Call {
@@ -61,8 +76,6 @@ enum Command {
         budget: u64,
         #[arg(long)]
         max_per_call: u64,
-        #[arg(long)]
-        attest: bool,
     },
 }
 
@@ -92,12 +105,32 @@ fn payer_secret() -> Result<RistrettoSecretKey, String> {
     RistrettoSecretKey::from_canonical_bytes(&bytes).map_err(|e| e.to_string())
 }
 
+fn validate_payment_quote(
+    quote: &PaymentRequired,
+    channel_id: &[u8; ghostline_core::CHANNEL_ID_LEN],
+    vendor: &RistrettoPublicKeyBytes,
+) -> Result<(), String> {
+    quote
+        .validate_for(channel_id, vendor)
+        .map_err(|error| error.to_string())
+}
+
 #[tokio::main]
 async fn main() {
+    init_logging();
     if let Err(err) = run().await {
         eprintln!("{err}");
         std::process::exit(1);
     }
+}
+
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
 }
 
 async fn run() -> Result<(), String> {
@@ -129,16 +162,31 @@ async fn run() -> Result<(), String> {
             bind,
             ledger,
             price,
+            service_key_hex,
+            min_expiry_epoch,
+            max_expiry_epoch,
+            metrics,
         } => {
             let store = ChannelStore::open(&ledger).map_err(|e| e.to_string())?;
-            let state = AppState::with_store(store, price).map_err(|e| e.to_string())?;
+            let service_key = RistrettoPublicKeyBytes::from_hex(service_key_hex.trim())
+                .map_err(|e| format!("--service-key-hex: {e}"))?;
+            let terms = PaymentTerms::new(service_key, min_expiry_epoch, max_expiry_epoch)
+                .map_err(|e| e.to_string())?;
+            let state = AppState::with_store(store, price)
+                .map_err(|e| e.to_string())?
+                .with_payment_terms(terms);
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
                 .map_err(|e| e.to_string())?;
             eprintln!(
                 "ghostline-paid-api listening on {bind}  GET /fortune price={price}  GET /meter?units= unit_price={price}"
             );
-            axum::serve(listener, router(state))
+            let app = if metrics {
+                router_with_metrics(state)
+            } else {
+                router(state)
+            };
+            axum::serve(listener, app)
                 .await
                 .map_err(|e| e.to_string())?;
         }
@@ -149,7 +197,6 @@ async fn run() -> Result<(), String> {
             vendor_hex,
             budget,
             max_per_call,
-            attest,
         } => {
             let secret = payer_secret()?;
             let vendor =
@@ -157,7 +204,11 @@ async fn run() -> Result<(), String> {
             let mut store = ChannelStore::open(&session).map_err(|e| e.to_string())?;
             let mut engine = PolicyEngine::new(
                 ghostline_policy::Policy::new(budget, max_per_call).allow_vendor(vendor),
-            );
+            )
+            .with_audit_file_from_env()
+            .map_err(|e| e.to_string())?
+            .with_human_rules_from_env()
+            .map_err(|e| e.to_string())?;
             let client = reqwest::Client::new();
             let mut ok = 0u32;
             for i in 1..=calls {
@@ -166,8 +217,20 @@ async fn run() -> Result<(), String> {
                     return Err(format!("call {i}: expected 402, got {}", unpaid.status()));
                 }
                 let quote: PaymentRequired = unpaid.json().await.map_err(|e| e.to_string())?;
+                let session_state = store.session().map_err(|e| e.to_string())?;
+                validate_payment_quote(&quote, &session_state.params().channel_id(), &vendor)
+                    .map_err(|err| format!("call {i}: invalid payment quote: {err}"))?;
+                let attested = if engine.requires_human_approval(&vendor, quote.price) {
+                    confirm_human_approval(
+                        quote.price,
+                        session_state.cumulative(),
+                        &session_state.params().channel_id(),
+                    )?
+                } else {
+                    false
+                };
                 let (voucher, next) =
-                    gated_sign(&mut store, engine, vendor, quote.price, &secret, attest)
+                    gated_sign(&mut store, engine, vendor, quote.price, &secret, attested)
                         .map_err(|e| e.to_string())?;
                 engine = next;
                 let paid = client
@@ -200,11 +263,50 @@ async fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_parent(path: &PathBuf) -> Result<(), String> {
+fn confirm_human_approval(
+    price: u64,
+    cumulative: u64,
+    channel_id: &[u8; 32],
+) -> Result<bool, String> {
+    if !io::stdin().is_terminal() {
+        return Err("human approval requires an interactive terminal".into());
+    }
+    eprint!(
+        "Approve {price} µT for channel {} (current cumulative: {cumulative} µT)? [y/N] ",
+        ghostline_core::to_hex(channel_id)
+    );
+    io::stderr().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
+    Ok(answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes"))
+}
+
+fn ensure_parent(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payer_rejects_payment_quotes_for_another_channel_or_recipient() {
+        let channel_id = [1u8; ghostline_core::CHANNEL_ID_LEN];
+        let other_channel_id = [2u8; ghostline_core::CHANNEL_ID_LEN];
+        let vendor = RistrettoPublicKeyBytes::from_bytes(&[3u8; 32]).unwrap();
+        let other_vendor = RistrettoPublicKeyBytes::from_bytes(&[4u8; 32]).unwrap();
+        let terms = PaymentTerms::new(vendor, 10, 20).unwrap();
+        let quote = PaymentRequired::new(10, &channel_id).with_terms(&terms);
+
+        assert!(validate_payment_quote(&quote, &channel_id, &vendor).is_ok());
+        assert!(validate_payment_quote(&quote, &other_channel_id, &vendor).is_err());
+        assert!(validate_payment_quote(&quote, &channel_id, &other_vendor).is_err());
+    }
 }

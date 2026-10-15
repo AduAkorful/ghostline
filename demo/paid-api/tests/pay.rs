@@ -5,8 +5,8 @@ use axum::http::{Request, StatusCode};
 use ghostline_core::{ChannelParams, NONCE_LEN, PaymentSession, ServiceLedger, to_hex};
 use ghostline_paid_api::{AppState, router};
 use ghostline_paywall::{
-    AgentPayer, CHANNEL_HEADER, ChannelDirectory, ChannelStore, PaymentRequired, VOUCHER_HEADER,
-    encode_voucher_header, gated_sign,
+    AgentPayer, CHANNEL_HEADER, ChannelDirectory, ChannelStore, PaymentRequired, PaymentTerms,
+    VOUCHER_HEADER, encode_voucher_header, gated_sign,
 };
 use ghostline_policy::{Policy, PolicyEngine};
 use http_body_util::BodyExt;
@@ -30,7 +30,10 @@ fn fixtures() -> (
         nonce: [3u8; NONCE_LEN],
     };
     let state = AppState::new(ServiceLedger::new(params.clone()));
-    let agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 10), payer);
+    let service = service_key();
+    let terms = PaymentTerms::new(service, 20, 100).unwrap();
+    let state = state.with_payment_terms(terms);
+    let agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 10), service);
     (state, agent, secret)
 }
 
@@ -56,6 +59,17 @@ async fn unpaid_request_returns_402_quote() {
     assert_eq!(body["scheme"], "ghostline.channel.voucher.v1");
     assert_eq!(body["price"], 10);
     assert_eq!(body["basis"], "per_request");
+    assert_eq!(
+        body["recipient_key"],
+        ghostline_core::to_hex(service_key().as_bytes())
+    );
+    assert_eq!(body["min_expiry_epoch"], 20);
+    assert_eq!(body["max_expiry_epoch"], 100);
+}
+
+fn service_key() -> tari_template_lib::types::crypto::RistrettoPublicKeyBytes {
+    let (_, public) = create_key_pair_from_seed(12);
+    public.to_byte_type()
 }
 
 #[tokio::test]
