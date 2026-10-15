@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 mod channel_file;
+mod close_channel;
 mod open_channel;
 
 use ghostline_core::{ChannelParams, SignedVoucher, VoucherError, from_hex, to_hex};
@@ -197,7 +198,7 @@ pub struct PaidCall {
     pub status: u16,
     pub body: String,
     pub payment_required: Option<PaymentRequired>,
-    /// 402 and the channel is not open. The tool does not open a channel by itself.
+    /// 402 and the channel is not open. A live open happens only when `GHOSTLINE_OPEN_SUBMIT=1`.
     #[serde(default)]
     pub needs_channel: bool,
 }
@@ -210,7 +211,7 @@ pub async fn call_paid(args: &CallPaidArgs) -> Result<PaidCall, String> {
     let Some(quote) = first.payment_required.clone() else {
         return Ok(first);
     };
-    let Some(session) = payer_session_for_pay()? else {
+    let Some(session) = payer_session_for_pay().await? else {
         let mut unpaid = first;
         unpaid.needs_channel = unpaid.status == 402;
         return Ok(unpaid);
@@ -222,8 +223,9 @@ pub async fn call_paid(args: &CallPaidArgs) -> Result<PaidCall, String> {
     get_paid(&args.url, Some(&hex)).await
 }
 
-/// An existing session, or a new one when the channel file already holds a deposit mask.
-fn payer_session_for_pay() -> Result<Option<std::path::PathBuf>, String> {
+/// An existing session, a new one when the file already holds a deposit mask, or a live open
+/// when `GHOSTLINE_OPEN_SUBMIT=1` and the file has no mask yet.
+async fn payer_session_for_pay() -> Result<Option<std::path::PathBuf>, String> {
     if let Some(path) = payer_session_path()? {
         return Ok(Some(path));
     }
@@ -241,7 +243,10 @@ fn payer_session_for_pay() -> Result<Option<std::path::PathBuf>, String> {
         .and_then(|v| v.as_str())
         .is_some_and(|mask| !mask.is_empty());
     if !opened {
-        return Ok(None);
+        if !env_flag("GHOSTLINE_OPEN_SUBMIT") {
+            return Ok(None);
+        }
+        open_channel::open_channel().await?;
     }
     let outcome = open_channel::ensure_session()?;
     Ok(Some(std::path::PathBuf::from(outcome.session)))
@@ -494,7 +499,7 @@ impl GhostlineMcp {
     }
 
     #[tool(
-        description = "Dry-run a wallet open for GHOSTLINE_CHANNEL_FILE. No arguments. Refuses when the file already holds a deposit mask. Does not broadcast unless GHOSTLINE_OPEN_SUBMIT=1, which this tool rejects."
+        description = "Open the channel in GHOSTLINE_CHANNEL_FILE. No arguments. Dry-run unless GHOSTLINE_OPEN_SUBMIT=1, which broadcasts, stores the deposit mask, and creates the payer session. Refuses when the file already holds a deposit mask."
     )]
     async fn ghostline_open_channel(
         &self,
@@ -512,6 +517,17 @@ impl GhostlineMcp {
         Parameters(_args): Parameters<EnvOnlyArgs>,
     ) -> Result<String, String> {
         let result = open_channel::ensure_session()?;
+        serde_json::to_string(&result).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Close GHOSTLINE_CHANNEL_FILE. No arguments. Settles inside the expiry margin and refunds at or after expiry. A down output is output_spent. Broadcasts only when GHOSTLINE_CLOSE_SUBMIT=1. GHOSTLINE_CLOSE_DRY_RUN=1 prices the transaction and does not broadcast. Does not return the deposit mask."
+    )]
+    async fn ghostline_close_channel(
+        &self,
+        Parameters(_args): Parameters<EnvOnlyArgs>,
+    ) -> Result<String, String> {
+        let result = close_channel::close_channel().await?;
         serde_json::to_string(&result).map_err(|e| e.to_string())
     }
 }
@@ -800,6 +816,7 @@ mod tests {
             "ghostline_channel_calls",
             "ghostline_open_channel",
             "ghostline_channel_session",
+            "ghostline_close_channel",
         ] {
             assert!(names.contains(&expected), "missing {expected} in {names:?}");
         }
@@ -1138,7 +1155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn open_channel_refuses_a_mask_and_a_live_submit() {
+    async fn open_channel_refuses_a_mask_and_submit_needs_a_channel_file() {
         let dir = std::env::temp_dir().join(format!(
             "ghostline-mcp-open-{}-{}",
             std::process::id(),
@@ -1168,7 +1185,11 @@ mod tests {
             std::env::set_var("GHOSTLINE_OPEN_SUBMIT", "1");
         }
         let err = open_channel::open_channel().await.unwrap_err();
-        assert!(err.contains("does not broadcast"));
+        assert!(
+            !err.contains("does not broadcast"),
+            "submit is a live open, not a refusal: {err}"
+        );
+        assert!(err.contains("channel file"), "{err}");
         unsafe {
             std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
             std::env::remove_var("GHOSTLINE_OPEN_SUBMIT");
