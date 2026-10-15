@@ -104,10 +104,13 @@ MCP stdio server (point an MCP client at `cargo run -p ghostline-mcp --quiet`):
 - `ghostline_channel_file` (`GHOSTLINE_CHANNEL_FILE`; no arguments; omits the deposit mask, keys, and fee accounts)
 - `ghostline_channel_list` (`GHOSTLINE_CHANNEL_DIR`)
 - `ghostline_channel_calls` (`GHOSTLINE_CHANNEL_DIR`; price and accepted total, no voucher hex)
+- `ghostline_open_channel` (`GHOSTLINE_CHANNEL_FILE`; dry-run only; refuses a file that already holds a deposit mask)
 
 Live Esmeralda: an MCP client speaking JSON-RPC stdio (`initialize` 2025-11-25, then `tools/call` `ghostline_call_paid`) paid 10 `/fortune` calls at 10 µT against a 0.1 tTARI channel. Policy came from env (`GHOSTLINE_POLICY_BUDGET`, `GHOSTLINE_POLICY_MAX_PER_CALL`, `GHOSTLINE_POLICY_VENDOR_HEX`), not from tool arguments. One settle of cumulative 100 µT Finalized Commit (17637 µT fee from the second-seed fee wallet). The protocol path is also covered by an in-process duplex test.
 
 `ghostline_channel_file`, `ghostline_channel_list`, and `ghostline_channel_calls` take no arguments. The path comes from `GHOSTLINE_CHANNEL_FILE` or `GHOSTLINE_CHANNEL_DIR`. Live on the spent channel: accepted 20, remainder 99980, `settle_open`, output `down`, and one call-log note because that total predates the log. The tool result did not contain the deposit mask or the fee-account component.
+
+`ghostline_call_paid` still pays only when `GHOSTLINE_SESSION` is set. A 402 with no session returns `needs_channel: true` and does not open. `ghostline_open_channel` dry-runs `accounts.stealth_transfer` for that file and does not write a mask. It refuses a file that already holds a deposit mask, and it refuses `GHOSTLINE_OPEN_SUBMIT` (a live deposit stays on `ghostline channel open`). Live Esmeralda: a dry-run against the opener wallet returned `dry_run=true` and left the file without a mask.
 
 Operator view (off-chain store, not a UTXO balance). `status` / `report` print the same JSON: totals, remainder *if* you settled at those totals, settle vs refund window, and the observer panel. `--include-params` adds keys; omit it from anything you publish. `watch` is a one-shot epoch heartbeat against an indexer.
 
