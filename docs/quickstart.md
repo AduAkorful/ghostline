@@ -13,6 +13,8 @@ Ghostline is early development, unaudited, and testnet only. Do not use real fun
 
 Supply `GHOSTLINE_PAYER_SECRET` from a private secret manager to sign vouchers. Supply `GHOSTLINE_CLAIM_SECRET` from the opener wallet's `view_only_key` at index 0 so Ghostline can unblind the opened output. They are separate keys. Keep both, wallet credentials, and the channel file private. The channel file becomes sensitive after the channel is opened because it contains the deposit mask. Never put secrets in tool arguments, shell history, or a shared MCP server configuration.
 
+After funding a new wallet account, confirm its native tTARI output appears as unspent before opening a channel. `ghostline wallet account-create` associates the tTARI resource and requests a scan, but walletd completes it asynchronously. Two Esmeralda rehearsals recovered incoming outputs about 6½ and 10½ minutes after transfer finality; those observations do not establish a guaranteed sync interval. The second wallet's open dry-run succeeded after recovery. If a funded output remains missing, keep the wallet profile and verify the transaction and wallet/indexer state before proceeding. Do not assume waiting alone guarantees recovery; an insufficient-funds dry-run cannot distinguish a genuine shortfall from an undiscovered output.
+
 ## 1. Prepare a channel file
 
 Choose a unique 32-byte nonce and a future expiry epoch with a safety margin. Get the payer and service public keys from your own key setup. Use integer micro-units for `--deposit`; for example, `100000` is 0.1 tTARI when the resource uses 1,000,000 µTARI per tTARI. Set the deployed template hash and network parameters from your deployment records.

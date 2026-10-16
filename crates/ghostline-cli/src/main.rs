@@ -1007,7 +1007,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let submitted = wallet
                     .stealth_transfer(&request)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| wallet_open_error(e.to_string()))?;
                 println!("transaction_id={}", submitted.transaction_id);
                 if dry_run {
                     print_wallet_open_fee_quote(&wallet, submitted.transaction_id).await?;
@@ -1948,7 +1948,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             let submitted = wallet
                 .stealth_transfer(&request)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| wallet_open_error(e.to_string()))?;
             println!("transaction_id={}", submitted.transaction_id);
             if dry_run {
                 print_wallet_open_fee_quote(&wallet, submitted.transaction_id).await?;
@@ -2974,6 +2974,16 @@ fn open_max_fee(dry_run: bool, configured: Option<u64>) -> Result<u64, String> {
     }
 }
 
+fn wallet_open_error(message: String) -> String {
+    if message.to_ascii_lowercase().contains("insufficient funds") {
+        format!(
+            "{message}\nHint: Check that this account has enough available tTARI for the deposit and fee cap. If you just funded or created the account, walletd may still be scanning for its output; wait for the scan to find it, then retry. This error alone cannot distinguish a real shortfall from an output that has not been discovered yet."
+        )
+    } else {
+        message
+    }
+}
+
 async fn print_wallet_open_fee_quote(
     wallet: &WalletClient,
     transaction_id: TransactionId,
@@ -3122,6 +3132,22 @@ mod tests {
         assert_eq!(open_max_fee(true, Some(15_217)).unwrap(), 15_217);
         assert!(open_max_fee(false, None).unwrap_err().contains("--max-fee"));
         assert!(open_max_fee(false, Some(0)).is_err());
+    }
+
+    #[test]
+    fn insufficient_funds_open_error_explains_wallet_scan_lag() {
+        let message = wallet_open_error(
+            "wallet daemon RPC accounts.stealth_transfer failed: Insufficient funds: Available: 0, Required: 110000".into(),
+        );
+        assert!(message.contains("Available: 0, Required: 110000"));
+        assert!(message.contains("walletd may still be scanning"));
+        assert!(message.contains("cannot distinguish a real shortfall"));
+    }
+
+    #[test]
+    fn unrelated_open_errors_are_preserved() {
+        let message = "wallet daemon RPC failed: connection refused";
+        assert_eq!(wallet_open_error(message.into()), message);
     }
     use tari_crypto::keys::PublicKey as _;
     use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
