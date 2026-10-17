@@ -3,115 +3,266 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#17232d" />
-    <meta name="description" content="See how Ghostline turns many private agent payments into one on-chain settlement, with evidence from a verified Tari Esmeralda run." />
+    <meta name="theme-color" content="#090b13" />
+    <meta name="description" content="Follow Ghostline's CLI journey from channel setup through many private calls to one verified settlement." />
     <title>Ghostline — many calls, one settlement</title>
+    <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
     <link rel="stylesheet" href="styles.css" />
     <script src="main.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="topbar">
-      <a class="wordmark" href="#top" aria-label="Ghostline home"><span class="wordmark-mark" aria-hidden="true">g</span>ghostline</a>
+      <a class="wordmark" href="#top" aria-label="Ghostline home"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a>
       <nav aria-label="Main navigation">
-        <a href="#evidence">Evidence</a>
-        <a href="#flow">How it works</a>
+        <a href="#story">How it works</a>
+        <a href="#evidence">Proof</a>
+        <a href="#capabilities">CLI map</a>
         <a href="#privacy">Privacy</a>
-        <a class="nav-cta" href="#start">Get started <span aria-hidden="true">↗</span></a>
+        <a class="nav-cta" href="#start">Get Ghostline <span aria-hidden="true">↗</span></a>
+        <details class="mobile-nav">
+          <summary>Explore <span aria-hidden="true">+</span></summary>
+          <div class="mobile-nav-panel">
+            <a href="#story">How it works</a>
+            <a href="#evidence">Proof</a>
+            <a href="#capabilities">CLI map</a>
+            <a href="#privacy">Privacy</a>
+            <a href="#start">Get Ghostline</a>
+          </div>
+        </details>
       </nav>
     </header>
 
     <main id="main">
-      <section class="hero shell" id="top" aria-labelledby="hero-title">
+      <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Private pay-per-call for AI agents</p>
-          <h1 id="hero-title">Many calls.<br /><span>One settlement.</span></h1>
-          <p class="hero-lede">Ghostline lets an agent pay a service one request at a time, while the chain sees a channel open and one final settlement.</p>
+          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> PRIVATE PAY-PER-CALL · TARI OOTLE</p>
+          <h1 id="hero-title">1,000 calls.<br /><span>One settlement.</span></h1>
+          <p class="hero-lede">Ghostline lets an AI agent pay a service request by request. The chain sees a channel open, then one settlement of the accepted total.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#evidence">Explore the verified run <span aria-hidden="true">↓</span></a>
-            <a class="button button-quiet" href="../../docs/quickstart.md">Run it yourself <span aria-hidden="true">↗</span></a>
+            <a class="button button-primary" href="#story">See the flow <span aria-hidden="true">↓</span></a>
+            <a class="text-link" href="#evidence">Jump to the verified run <span aria-hidden="true">↗</span></a>
           </div>
-          <p class="hero-note">A read-only product tour. No wallet connection or transaction controls.</p>
+          <p class="hero-note">An animated explanation of the real CLI. It does not connect to a wallet or run transactions.</p>
         </div>
+        <div class="hero-art" role="group" aria-label="Illustration of many off-chain calls collapsing into one on-chain settlement">
+          <div class="art-stamp"><span>GHOSTLINE / TRANSACTION TRACE</span><span>NO. 001</span><button class="motion-toggle" id="motion-toggle" type="button" aria-label="Pause animation" aria-pressed="false">Pause motion</button></div>
+          <svg class="ghost-presence" viewBox="0 0 220 280" aria-hidden="true">
+            <defs>
+              <linearGradient id="veil-fill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f5f1ff" stop-opacity=".14" /><stop offset=".52" stop-color="#aaa0ff" stop-opacity=".035" /><stop offset="1" stop-color="#98fff2" stop-opacity=".11" /></linearGradient>
+              <filter id="veil-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8" /></filter>
+            </defs>
+            <path class="veil-halo" d="M108 17 C52 18 26 69 37 126 L49 224 C52 249 70 244 83 220 C92 247 109 246 120 218 C137 248 157 242 166 212 L185 118 C197 59 159 15 108 17Z" />
+            <path class="veil-body" d="M108 17 C52 18 26 69 37 126 L49 224 C52 249 70 244 83 220 C92 247 109 246 120 218 C137 248 157 242 166 212 L185 118 C197 59 159 15 108 17Z" />
+            <path class="veil-fold" d="M108 32 C91 72 101 126 83 220 M126 42 C148 97 129 170 120 218 M68 66 C55 110 73 164 64 202" />
+            <circle class="veil-heart" cx="109" cy="112" r="5" />
+          </svg>
+          <div class="hero-numbers"><span class="many-number">1,000</span><span class="many-label">private requests</span><span class="equals-mark" aria-hidden="true">↓</span><span class="one-number">01</span><span class="one-label">settlement</span></div>
+          <svg class="hero-trace" viewBox="0 0 680 250" role="img" aria-labelledby="trace-title trace-desc">
+            <title id="trace-title">Many calls become one settlement</title>
+            <desc id="trace-desc">Fine voucher marks flow from payer to service, converge into one trace, and end at a public settlement marker.</desc>
+            <path class="trace-bloom" d="M36 33 C180 33 155 94 311 125 S490 127 624 125" />
+            <path class="trace-line" d="M36 33 C180 33 155 94 311 125 S490 127 624 125" />
+            <path class="trace-alternate" d="M310 125 C381 168 465 209 624 212" />
+            <g class="trace-ticks" aria-hidden="true"></g>
+            <circle class="trace-source" cx="36" cy="33" r="9" />
+            <circle class="trace-service" cx="311" cy="125" r="8" />
+            <rect class="trace-settlement" x="613" y="114" width="22" height="22" rx="2" />
+            <circle class="trace-runner" r="5" cx="36" cy="33" />
+          </svg>
+          <div class="art-legend"><span><i class="legend-dot dot-payer"></i>PAYER</span><span><i class="legend-dot dot-service"></i>SERVICE</span><span><i class="legend-dot dot-chain"></i>OOTLE</span></div>
+          <div class="art-caption"><span>OFF-CHAIN · MANY</span><span>ON-CHAIN · ONE</span></div>
+          <p class="art-footnote">Illustrative motion. The trace is not a live network feed or a record of individual calls.</p>
+        </div>
+        <div class="hero-index" aria-hidden="true"><span>01 — 08</span><span>SCROLL TO FOLLOW THE TRACE ↓</span></div>
+      </section>
 
-        <div class="trace-card" aria-label="Illustration of many off-chain calls becoming one settlement">
-          <div class="trace-card-head"><span>PAYMENT TRACE</span><span class="trace-network"><i aria-hidden="true"></i> TARI OOTLE</span></div>
-          <div class="trace-path" aria-hidden="true">
-            <div class="call-stack"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-            <div class="trace-merge"><span></span><span></span><span></span></div>
-            <div class="settlement-mark"><span class="settlement-diamond"></span><span class="settlement-line"></span></div>
-          </div>
-          <div class="trace-labels"><div><strong>Off-chain</strong><small>Requests accumulate</small></div><div><strong>On-chain</strong><small>One final record</small></div></div>
-          <div class="trace-equation"><span>1,000 calls</span><b aria-hidden="true">→</b><span>1 settlement</span></div>
-          <p class="trace-caption">The lines show the payment pattern, not individual calls or a live feed.</p>
+      <section class="story-section" id="story" aria-labelledby="story-title">
+        <div class="story-heading shell">
+          <p class="eyebrow">The CLI, in motion</p>
+          <h2 id="story-title">One channel.<br /><span>Several deliberate steps.</span></h2>
+          <p>Follow the path from installation to close. As you move through it, the same trace changes to show what each command actually does.</p>
         </div>
+        <div class="story-grid shell" id="story-app" data-scene="install">
+          <aside class="story-visual" aria-label="Illustrative Ghostline payment flow; not a live view">
+            <div class="visual-topline"><span>GHOSTLINE / PAYMENT PATH</span><span class="visual-live"><i></i> SCHEMATIC REPLAY</span></div>
+            <div class="visual-explanation"><strong id="visual-explanation-title">Start on your machine.</strong><span id="visual-explanation-copy">Install the tools. Nothing is funded.</span></div>
+            <svg class="story-svg" viewBox="0 0 560 500" role="img" aria-labelledby="story-svg-title story-svg-desc">
+              <title id="story-svg-title">The payer, service, channel and settlement</title>
+              <desc id="story-svg-desc">Payer and service exchange cumulative vouchers off-chain. The channel is the on-chain output that holds funds. The service can settle the latest voucher, or the payer can refund remaining funds after expiry if the output is unspent. Pulses illustrate each step; this is not a live transaction feed.</desc>
+              <defs><pattern id="grain" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".55" fill="#c5baff" opacity=".13" /></pattern></defs>
+              <rect x="0" y="0" width="560" height="500" fill="url(#grain)" />
+              <text class="svg-label svg-micro" x="34" y="46">PRIVATE CHANNEL · OFF-CHAIN CALLS</text>
+              <text class="svg-label svg-micro" x="370" y="46">TARI OOTLE</text>
+              <path id="payment-path" class="svg-lane" d="M90 190 C210 190 220 190 337 190" />
+              <path class="svg-lane-glow" d="M90 190 C210 190 220 190 337 190" />
+              <path id="settlement-path" class="svg-settle-lane" d="M418 190 C456 190 430 310 449 310" />
+              <path id="refund-path" class="svg-refund-lane" d="M418 190 C456 190 430 408 449 408" />
+              <path class="svg-channel-link" d="M364 190 H392" />
+              <g class="svg-vouchers" aria-hidden="true"></g>
+              <g class="svg-motion-layer" aria-hidden="true"></g>
+              <circle class="svg-node svg-payer" cx="90" cy="190" r="27" />
+              <circle class="svg-node-core" cx="90" cy="190" r="6" />
+              <rect class="svg-node svg-service" x="310" y="163" width="54" height="54" rx="5" />
+              <path class="svg-node svg-channel" d="M405 177 L418 190 L405 203 L392 190 Z" />
+              <rect class="svg-node svg-chain" x="449" y="293" width="34" height="34" rx="4" />
+              <circle class="svg-node svg-refund" cx="466" cy="408" r="17" />
+              <text class="svg-label svg-party" x="54" y="241">PAYER</text>
+              <text class="svg-label svg-party" x="303" y="241">SERVICE</text>
+              <text class="svg-label svg-party" x="378" y="241">CHANNEL</text>
+              <text class="svg-label svg-party" x="425" y="348">SETTLE</text>
+              <text class="svg-label svg-party" x="432" y="447">REFUND*</text>
+              <text class="svg-label svg-micro svg-count" x="170" y="152">SUCCESSIVE CUMULATIVE VOUCHERS</text>
+              <text class="svg-label svg-micro svg-expiry" x="337" y="468">*AT / AFTER EXPIRY</text>
+            </svg>
+            <div class="visual-footer"><span id="visual-scene-label">SETUP</span><span>NO WALLET CONNECTED</span></div>
+          </aside>
+
+          <div class="story-chapters">
+            <article class="story-chapter is-active" data-scene="install" aria-labelledby="chapter-install">
+              <p class="chapter-index"><span>01</span><i></i> GET THE TOOLS</p>
+              <h3 id="chapter-install">Install locally.<br /><em>Keep control.</em></h3>
+              <p>One command downloads the CLI, reference API, and MCP server. Wallet setup and funding stay on your machine.</p>
+              <div class="command-card"><div class="command-head"><span>INSTALL THE RELEASE</span><button class="copy-command" type="button">Copy</button></div><pre><code>curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh</code></pre></div>
+              <p class="chapter-aside">The installer verifies the release checksum. It does not create or fund a wallet.</p>
+            </article>
+
+            <article class="story-chapter" data-scene="service" aria-labelledby="chapter-service">
+              <p class="chapter-index"><span>02</span><i></i> START THE OTHER SIDE</p>
+              <h3 id="chapter-service">A provider names<br /><em>its terms.</em></h3>
+              <p>Run the reference paid API, or connect an agent to a compatible provider. The service sets its price and accepted channel terms.</p>
+              <div class="command-card"><div class="command-head"><span>REFERENCE SERVICE · PLACEHOLDERS</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline-paid-api init --ledger /private/ledger.json --session /private/session.json …
+ghostline-paid-api serve --bind 127.0.0.1:8787 --price 10 …</code></pre></div>
+              <p class="chapter-aside">The service sees the requests it serves and the vouchers it accepts.</p>
+            </article>
+
+            <article class="story-chapter" data-scene="prepare" aria-labelledby="chapter-prepare">
+              <p class="chapter-index"><span>03</span><i></i> DEFINE A CHANNEL</p>
+              <h3 id="chapter-prepare">Choose the terms<br /><em>before funding.</em></h3>
+              <p>Compute the payer root and channel id, then write a channel file using your real deployment parameters. This step stays offline.</p>
+              <div class="command-card"><div class="command-head"><span>PREPARE · PLACEHOLDERS</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline spec --network-tag &lt;tag&gt; --deposit 100000 …
+ghostline channel init --out /private/channel.json …</code></pre></div>
+              <p class="chapter-aside">Never use invented template hashes or service keys. The channel file becomes sensitive after it stores a deposit mask.</p>
+            </article>
+
+            <article class="story-chapter" data-scene="open" aria-labelledby="chapter-open">
+              <p class="chapter-index"><span>04</span><i></i> OPEN ONCE</p>
+              <h3 id="chapter-open">Review the fee.<br /><em>Then open.</em></h3>
+              <p>Dry-run through your local wallet first. A live channel open requires a reviewed, explicit fee cap and spends the deposit.</p>
+              <div class="command-card"><div class="command-head"><span>REVIEW BEFORE BROADCAST</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel open --file /private/channel.json --dry-run
+# After review:
+ghostline channel open --file /private/channel.json --max-fee &lt;reviewed-cap&gt;</code></pre></div>
+              <p class="chapter-aside">The channel output is visible on the network; its stealth conditions protect some output details.</p>
+            </article>
+
+            <article class="story-chapter" data-scene="pay" aria-labelledby="chapter-pay">
+              <p class="chapter-index"><span>05</span><i></i> PAY PER REQUEST</p>
+              <h3 id="chapter-pay">Accept a quote.<br /><em>Sign the next total.</em></h3>
+              <p>For each HTTP 402 quote, Ghostline checks the channel terms and spending policy, then signs a cumulative voucher. No per-call transaction is sent to the chain.</p>
+              <div class="command-card"><div class="command-head"><span>REFERENCE PAYER · PLACEHOLDERS</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline-paid-api call --url http://127.0.0.1:8787/fortune \
+  --session /private/session.json --calls 1000 \
+  --vendor-hex &lt;service-key&gt; --budget 10000 --max-per-call 10</code></pre></div>
+              <p class="chapter-aside">A cumulative voucher is an off-chain service record, not proof that every request was made.</p>
+            </article>
+
+            <article class="story-chapter" data-scene="inspect" aria-labelledby="chapter-inspect">
+              <p class="chapter-index"><span>06</span><i></i> CHECK BOTH RECORDS</p>
+              <h3 id="chapter-inspect">Local totals tell<br /><em>only half the story.</em></h3>
+              <p>Read the channel state and export call accounting. Check the indexer separately for transaction results and output state.</p>
+              <div class="command-card"><div class="command-head"><span>LOCAL RECORD · NOT CHAIN PROOF</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel status --file /private/channel.json
+ghostline channel calls --dir /private/channels --out calls.csv</code></pre></div>
+              <p class="chapter-aside">Call details come from the service ledger. Finality and the settlement amount come from the chain/indexer record.</p>
+            </article>
+
+            <article class="story-chapter" data-scene="settle" aria-labelledby="chapter-settle">
+              <p class="chapter-index"><span>07</span><i></i> CLOSE AND VERIFY</p>
+              <h3 id="chapter-settle">Many accepted calls.<br /><em>One settlement.</em></h3>
+              <p>Review the result, choose to submit, then ask the indexer for finality. This recorded Esmeralda run settled 10,000 µT after 1,000 calls.</p>
+              <div class="command-card"><div class="command-head"><span>DRY-RUN → INTENTIONAL SUBMIT</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel settle --file /private/channel.json --dry-run
+# Submit only after review:
+ghostline channel settle --file /private/channel.json --submit
+# Verify the returned transaction id:
+ghostline indexer result --url &lt;indexer-url&gt; --transaction-id &lt;tx-id&gt;</code></pre></div>
+              <p class="chapter-aside">The recorded settlement finalized on Esmeralda. Its 17,640 µT service-side fee was public; the spent channel output was reported down.</p>
+            </article>
+
+            <article class="story-chapter refund-chapter" data-scene="refund" aria-labelledby="chapter-refund">
+              <p class="chapter-index"><span>↳</span><i></i> AN ALTERNATE ENDING</p>
+              <h3 id="chapter-refund">If it expires<br /><em>without settlement.</em></h3>
+              <p>When the channel remains unspent through expiry, the payer can take the refund branch. This path cannot follow a successful settlement.</p>
+              <div class="command-card"><div class="command-head"><span>EXPIRED OUTPUT ONLY · DRY-RUN FIRST</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel refund --file /private/channel.json --dry-run
+# Confirm expiry and output state before intentional submission:
+ghostline channel refund --file /private/channel.json --submit</code></pre></div>
+              <p class="chapter-aside">A spent output cannot be refunded. The channel-file helper uses a fixed 100,000 µT fee cap.</p>
+            </article>
+          </div>
+        </div>
+        <p class="story-footnote shell">Examples contain placeholders and are shown for explanation only. Keep keys, wallet profiles, channel masks, and service credentials on your own machine.</p>
       </section>
 
       <section class="evidence-section" id="evidence" aria-labelledby="evidence-title">
         <div class="shell">
-          <div class="section-heading evidence-heading">
-            <div><p class="eyebrow">A verified Esmeralda run</p><h2 id="evidence-title">Two records. One payment flow.</h2></div>
-            <p class="section-intro">The service records the calls. The chain confirms the channel and aggregate settlement. Each panel names its source.</p>
-          </div>
+          <div class="evidence-heading"><div><p class="eyebrow">THE RECEIPT HAS TWO SIDES</p><h2 id="evidence-title">Service log.<br /><span>Chain finality.</span></h2></div><p>The service records the calls. The chain confirms the channel and aggregate settlement. These are related records with different sources.</p></div>
           <div class="evidence-grid" id="evidence-grid" aria-live="polite">
             <article class="evidence-panel service-panel">
-              <div class="panel-top"><span class="source-tag"><span class="source-glyph" aria-hidden="true">↗</span> Service-side call record</span><span class="source-kind">OFF-CHAIN</span></div>
-              <p class="panel-description">Accepted by the local HTTP paywall during the verified rehearsal.</p>
+              <div class="panel-top"><span class="source-tag"><span aria-hidden="true">01 /</span> Service-side call record</span><span class="source-kind">OFF-CHAIN</span></div>
+              <p class="panel-description">Accepted by the reference HTTP paywall during the recorded run.</p>
               <div class="call-count"><strong id="call-count">—</strong><span>successful<br /><code>/fortune</code> calls</span></div>
               <div class="metric-row"><div><span>Price per call</span><strong id="unit-price">—</strong></div><div><span>Accepted total</span><strong id="accepted-total">—</strong></div></div>
-              <div class="mini-receipt"><span class="receipt-glyph" aria-hidden="true">↳</span><p><strong>One cumulative voucher</strong><br /><span>Each call updates the accepted total off-chain.</span></p><span class="receipt-status">RECORDED</span></div>
+              <div class="mini-receipt"><p><strong>One cumulative voucher</strong><br /><span>Each accepted call updates the off-chain total.</span></p><span class="receipt-status">RECORDED</span></div>
             </article>
-
-            <div class="evidence-bridge" aria-hidden="true"><span>same run</span><b>→</b></div>
-
+            <div class="evidence-bridge" aria-hidden="true"><span>same run</span><b>⇢</b></div>
             <article class="evidence-panel chain-panel">
-              <div class="panel-top"><span class="source-tag"><span class="source-glyph chain-glyph" aria-hidden="true">◈</span> Esmeralda chain record</span><span class="source-kind">INDEXER / CHAIN</span></div>
-              <p class="panel-description">The indexer confirmed the open and the final channel settlement.</p>
+              <div class="panel-top"><span class="source-tag"><span aria-hidden="true">02 /</span> Esmeralda chain record</span><span class="source-kind">INDEXER / CHAIN</span></div>
+              <p class="panel-description">The indexer confirmed the channel open and final settlement.</p>
               <div class="chain-events">
-                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened</strong><span class="finality">FINALIZED</span></div><div class="tx-line"><code id="open-tx">—</code><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy</button></div></div></div>
-                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Voucher settled</strong><span class="finality">FINALIZED</span></div><div class="tx-line"><code id="settle-tx">—</code><button class="copy-button" type="button" data-copy="settle-tx" aria-label="Copy settlement transaction ID">Copy</button></div></div></div>
+                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened</strong><span class="finality">FINALIZED</span></div><div class="tx-line"><code id="open-tx">—</code><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Voucher settled</strong><span class="finality">FINALIZED</span></div><div class="tx-line"><code id="settle-tx">—</code><button class="copy-button" type="button" data-copy="settle-tx" aria-label="Copy settlement transaction ID">Copy ID</button></div></div></div>
               </div>
               <div class="metric-row chain-metrics"><div><span>Settled on-chain</span><strong id="settled-total">—</strong></div><div><span>Settlement fee</span><strong id="settlement-fee">—</strong><small class="fee-payer">Paid by service-side fee account</small></div></div>
-              <p class="output-state"><span class="output-icon" aria-hidden="true">✓</span> Channel output after settlement: <strong id="output-status">—</strong></p>
+              <p class="output-state">OUTPUT AFTER SETTLEMENT <strong id="output-status">—</strong></p>
             </article>
           </div>
-          <p class="evidence-caveat"><span aria-hidden="true">ⓘ</span> The settlement proves the on-chain payment. It does not independently prove the off-chain call count; that count comes from the service’s ledger.</p>
+          <p class="evidence-caveat">The settlement proves the on-chain payment. It does not independently prove the off-chain call count; that count comes from the service ledger.</p>
           <p class="evidence-footnote" id="evidence-date"></p>
         </div>
       </section>
 
-      <section class="flow-section shell" id="flow" aria-labelledby="flow-title">
-        <div class="section-heading"><div><p class="eyebrow">The payment rail</p><h2 id="flow-title">A channel carries the small stuff.</h2></div><p class="section-intro">The payer locks a deposit once. Signed vouchers keep a running total until one side closes the channel.</p></div>
-        <ol class="flow-list">
-          <li><span class="step-mark" aria-hidden="true">01</span><div><h3>Open a channel</h3><p>The payer locks a deposit under the payer, service, and expiry conditions.</p></div><span class="flow-arrow" aria-hidden="true">→</span></li>
-          <li><span class="step-mark" aria-hidden="true">02</span><div><h3>Receive a quote</h3><p>The service returns a price and the terms for the requested call.</p></div><span class="flow-arrow" aria-hidden="true">→</span></li>
-          <li><span class="step-mark" aria-hidden="true">03</span><div><h3>Pay off-chain</h3><p>The payer signs a cumulative voucher. The service checks and records the new total.</p></div><span class="flow-arrow" aria-hidden="true">→</span></li>
-          <li><span class="step-mark" aria-hidden="true">04</span><div><h3>Settle once</h3><p>The service submits the latest accepted voucher; the contract pays the total and returns the remainder by the channel rules.</p></div><span class="flow-arrow" aria-hidden="true">✓</span></li>
-        </ol>
-        <p class="refund-note"><span aria-hidden="true">↳</span> If the channel reaches its expiry without settlement, the payer can use the refund path to reclaim the unredeemed funds.</p>
+      <section class="capabilities-section" id="capabilities" aria-labelledby="capabilities-title">
+        <div class="shell">
+          <div class="section-heading"><div><p class="eyebrow">THE REST OF THE TOOLBOX</p><h2 id="capabilities-title">Every Ghostline command.</h2></div><p class="section-intro">The tour follows one common path. The map below covers the wider CLI, HTTP payer, and MCP surface.</p></div>
+          <div class="capability-list">
+            <details class="capability-group"><summary><span>Channel lifecycle</span><small>prepare, open, inspect, and close channel files</small><b>+</b></summary><ul><li><code>channel-id</code><span>Compute a channel identifier from the open parameters.</span></li><li><code>channel init</code><span>Write a channel file without contacting the network.</span></li><li><code>channel open</code><span>Open through a wallet, then unblind and save the output mask.</span></li><li><code>channel session</code><span>Create or resume a matching payer session.</span></li><li><code>channel bind</code><span>Bind an already opened output to a channel file.</span></li><li><code>channel status</code><span>Report off-chain state and observe the known output.</span></li><li><code>channel settle / refund</code><span>Settle before expiry or refund at/after expiry, subject to channel state.</span></li><li><code>channel list / report / calls / trace</code><span>List records, export accounting, show call prices, or assemble a privacy receipt.</span></li><li><code>channel watch</code><span>Poll until a channel is due; it broadcasts only with <code>--submit</code>.</span></li></ul></details>
+            <details class="capability-group"><summary><span>Voucher and channel tools</span><small>keys, terms, signing, and verification</small><b>+</b></summary><ul><li><code>keygen</code><span>Generate a Ristretto secret and public key.</span></li><li><code>spec</code><span>Compute the payer root and channel id from a full channel specification.</span></li><li><code>sign</code><span>Sign the next cumulative voucher through a session and policy.</span></li><li><code>verify</code><span>Verify an encoded voucher against its channel parameters.</span></li><li><code>pay-to</code><span>Print the conditions JSON used for stealth channel outputs.</span></li><li><code>help</code><span>Show the top-level or selected subcommand help.</span></li></ul></details>
+            <details class="capability-group"><summary><span>Wallet and output recovery</span><small>local wallet access, discovery, and unblinding</small><b>+</b></summary><ul><li><code>wallet open</code><span>Open a channel output through the local wallet daemon.</span></li><li><code>wallet utxos</code><span>Read outputs from a wallet-stored transaction for inspection or binding.</span></li><li><code>wallet account-create / account-get</code><span>Create a named account or inspect an existing account and owner key reference.</span></li><li><code>wallet submit</code><span>Dry-run or submit an unsigned transaction through the wallet daemon.</span></li><li><code>unblind / unblind-tx</code><span>Recover an output amount and mask using the claim secret.</span></li><li><code>inspect-tx</code><span>Inspect public stealth output fields without a secret.</span></li></ul></details>
+            <details class="capability-group"><summary><span>Transaction construction</span><small>seal and prepare channel transactions</small><b>+</b></summary><ul><li><code>seal-open</code><span>Seal an open transaction from a key-path input to channel conditions.</span></li><li><code>seal-settle</code><span>Seal a settlement against the channel output and voucher.</span></li><li><code>seal-refund</code><span>Seal an expired-channel refund.</span></li><li><code>seal-unsigned</code><span>Seal resolved unsigned JSON for indexer-prepared inputs.</span></li></ul></details>
+            <details class="capability-group"><summary><span>Operator and indexer</span><small>watch, prepare, submit, and verify</small><b>+</b></summary><ul><li><code>status / report</code><span>Show off-chain channel totals and the observer panel; not chain confirmation.</span></li><li><code>watch</code><span>Check the settlement window and expiry using the indexer epoch.</span></li><li><code>settle-due / refund-due</code><span>Build, dry-run, or submit the ledger's latest voucher settlement or an expired refund.</span></li><li><code>indexer wait / epoch</code><span>Check readiness and read the current epoch.</span></li><li><code>indexer dry-run / submit</code><span>Ask the indexer to evaluate or submit a sealed transaction.</span></li><li><code>indexer result / resolve-inputs</code><span>Read transaction finality or resolve unsigned transaction inputs.</span></li></ul></details>
+            <details class="capability-group"><summary><span>Paid API and MCP</span><small>service setup and agent integration</small><b>+</b></summary><ul><li><code>ghostline-paid-api init / serve</code><span>Initialize and run the HTTP 402 reference service.</span></li><li><code>ghostline-paid-api call</code><span>Call a paid endpoint with a session and policy limits.</span></li><li><code>ghostline-mcp</code><span>Run the MCP stdio server; see the API reference for its tools and environment.</span></li></ul></details>
+          </div>
+          <p class="capability-note">Wallet commands use the operator's local wallet endpoint; indexer commands use the configured indexer. Dry-run does not broadcast. Submit commands can move funds. Review fee caps before live actions.</p>
+        </div>
       </section>
 
       <section class="privacy-section" id="privacy" aria-labelledby="privacy-title">
         <div class="shell">
-          <div class="section-heading"><div><p class="eyebrow">Privacy boundary</p><h2 id="privacy-title">Private from observers.<br /><span>Visible to the service.</span></h2></div><p class="section-intro">Ghostline hides the spending pattern from third parties. It does not hide activity from the service receiving payment.</p></div>
-          <div class="privacy-grid">
-            <article><span class="privacy-index">01 / PAYER</span><h3>Your full view</h3><p>You know your calls, channel details, and the vouchers you sign.</p></article>
-            <article><span class="privacy-index">02 / SERVICE</span><h3>Each request</h3><p>The service sees its requests, prices, and voucher stream as it serves them.</p></article>
-            <article><span class="privacy-index">03 / OBSERVER</span><h3>One close record</h3><p>Observers do not see each call through the channel. Settlement reveals the amount and branch; fees remain public.</p></article>
-          </div>
-          <p class="leak-note"><span aria-hidden="true">!</span> Funding patterns, timing, and who pays fees can still create correlations. Ghostline does not promise anonymity or unlinkable funding.</p>
+          <div class="section-heading"><div><p class="eyebrow">THE PRIVACY BOUNDARY</p><h2 id="privacy-title">Quiet to observers.<br /><span>Visible to the service.</span></h2></div><p class="section-intro">Ghostline hides the spending pattern from third parties. It does not hide activity from the service receiving payment.</p></div>
+          <div class="privacy-grid"><article><span class="privacy-index">01 / PAYER</span><h3>Your full view</h3><p>You know your calls, channel details, and the vouchers you sign.</p></article><article><span class="privacy-index">02 / SERVICE</span><h3>Each request</h3><p>The service sees its requests, prices, and voucher stream as it serves them.</p></article><article><span class="privacy-index">03 / OBSERVER</span><h3>One close record</h3><p>Observers do not see each call through the channel. Settlement reveals amount and branch; fees remain public.</p></article></div>
+          <p class="leak-note">Funding patterns, timing, and who pays fees can still create correlations. Ghostline does not promise anonymity or unlinkable funding.</p>
         </div>
       </section>
 
       <section class="start-section shell" id="start" aria-labelledby="start-title">
-        <div class="start-copy"><p class="eyebrow">Built for agents and operators</p><h2 id="start-title">See the flow.<br />Then run your own.</h2><p>Ghostline ships as CLI, SDK, HTTP paywall middleware, and an MCP server. Bring your own Esmeralda wallet setup and review the fee limits before broadcasting.</p></div>
-        <div class="start-links"><a href="../../docs/quickstart.md"><span><small>01 / CLI</small><strong>Esmeralda quickstart</strong></span><b aria-hidden="true">↗</b></a><a href="../../docs/api-reference.md"><span><small>02 / MCP + API</small><strong>Interfaces and tools</strong></span><b aria-hidden="true">↗</b></a><a href="https://github.com/AduAkorful/ghostline"><span><small>03 / SOURCE</small><strong>Browse the code</strong></span><b aria-hidden="true">↗</b></a></div>
+        <div class="start-copy"><p class="eyebrow">RUN IT ON YOUR MACHINE</p><h2 id="start-title">Take the tools<br />with you.</h2><p>Ghostline ships as CLI, SDK, HTTP paywall middleware, and MCP server. Use your own Esmeralda wallet setup and reviewed fee limits.</p></div>
+        <div class="start-resources">
+          <p class="install-platform"><span>LINUX · x86-64 · glibc</span><span>NO ROOT REQUIRED</span></p>
+          <div class="command-card install-command"><div class="command-head"><span>INSTALL THE CLI, API &amp; MCP SERVER</span><button class="copy-command" type="button">Copy</button></div><pre><code>curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh</code></pre></div>
+          <p class="install-note">Installs to <code>~/.local/bin</code> and verifies the release checksum. It does not set up or fund a wallet.</p>
+          <div class="start-links"><a href="docs/install.html"><span><small>01 / DETAILS</small><strong>Installation guide</strong></span><b aria-hidden="true">↗</b></a><a href="docs/quickstart.html"><span><small>02 / CLI</small><strong>Esmeralda quickstart</strong></span><b aria-hidden="true">↗</b></a><a href="docs/interfaces.html"><span><small>03 / MCP + API</small><strong>Interfaces and tools</strong></span><b aria-hidden="true">↗</b></a><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer"><span><small>04 / SOURCE</small><strong>Browse the code</strong></span><b aria-hidden="true">↗</b></a></div>
+        </div>
       </section>
-
-      <section class="limits-section" aria-labelledby="limits-title"><div class="shell limits-inner"><div><p class="eyebrow">Know the limits</p><h2 id="limits-title">Early development.<br />Testnet only.</h2></div><ul><li>Ghostline is unaudited. Do not use real funds.</li><li>Fees are public and may exceed the value of small calls.</li><li>Settlement reveals the amount and executed branch.</li><li>Call counts are service records, not chain-attested receipts.</li></ul></div></section>
+      <section class="limits-section" aria-labelledby="limits-title"><div class="shell limits-inner"><div><p class="eyebrow">KNOW THE LIMITS</p><h2 id="limits-title">Early development.<br />Testnet only.</h2></div><ul><li>Ghostline is unaudited. Do not use real funds.</li><li>Fees are public and may exceed small-call totals.</li><li>Settlement reveals the amount and branch.</li><li>Call counts are service records, not chain-attested receipts.</li></ul></div></section>
     </main>
-
-    <footer class="footer shell"><a class="wordmark" href="#top"><span class="wordmark-mark" aria-hidden="true">g</span>ghostline</a><p>Private pay-per-call on Tari Ootle.</p><a href="#top" class="back-top">Back to top ↑</a></footer>
+    <footer class="footer shell"><a class="wordmark" href="#top"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a><p>Private pay-per-call on Tari Ootle.</p><a href="#top" class="back-top">Back to top ↑</a></footer>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

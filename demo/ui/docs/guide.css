@@ -1,0 +1,71 @@
+.guide-shell { width:min(1120px,calc(100% - 64px)); margin:0 auto; }
+.guide-breadcrumb { margin:34px 0 30px; color:#999bb2; font:9px var(--mono); }
+.guide-breadcrumb a { color:var(--lime); text-decoration:none; }
+.guide-hero { max-width:790px; padding:22px 0 48px; }
+.guide-hero .eyebrow { color:var(--lime); }
+.guide-hero h1 { max-width:780px; margin:0 0 18px; color:var(--white); font:400 clamp(52px,7vw,88px)/.91 var(--display); letter-spacing:-.06em; }
+.guide-hero h1 em { color:var(--lilac); font-weight:400; }
+.guide-hero > p:last-child { max-width:660px; margin:0; color:#b9bbcc; font-size:15px; line-height:1.7; }
+.guide-layout { display:grid; grid-template-columns:200px minmax(0,1fr); gap:70px; align-items:start; padding:30px 0 110px; }
+.guide-nav { position:sticky; top:105px; display:grid; gap:3px; padding-top:8px; }
+.guide-nav .nav-label { margin:0 0 12px; color:#85879c; font:8px var(--mono); letter-spacing:.14em; }
+.guide-nav a { padding:9px 10px; border-left:1px solid rgba(197,186,255,.15); color:#b0b2c4; font-size:11px; text-decoration:none; }
+.guide-nav a:hover,.guide-nav a[aria-current="location"] { border-color:var(--lime); color:var(--lime); }
+.guide-content { min-width:0; }
+.guide-section { padding:0 0 40px; margin:0 0 38px; border-bottom:1px solid rgba(197,186,255,.16); scroll-margin-top:100px; }
+.guide-section:last-child { border-bottom:0; }
+.guide-section h2 { margin:0 0 15px; color:var(--white); font:400 clamp(30px,4vw,44px)/1 var(--display); letter-spacing:-.04em; }
+.guide-section h3 { margin:28px 0 10px; color:#eeedf7; font:500 17px var(--display); }
+.guide-section > p,.guide-section li { max-width:760px; color:#b1b3c5; font-size:12px; line-height:1.75; }
+.guide-section > p { margin:0 0 15px; }
+.guide-section ul,.guide-section ol { padding-left:20px; }
+.guide-section li + li { margin-top:7px; }
+.guide-label { margin:0 0 12px; color:var(--lime); font:8px var(--mono); letter-spacing:.12em; }
+.guide-callout { margin:19px 0; padding:15px 17px; border-left:2px solid var(--lilac); background:rgba(197,186,255,.06); color:#c5c5d5; font-size:11px; line-height:1.7; }
+.guide-callout strong { color:#f1effb; }
+.guide-callout.warning { border-color:#ffbc9e; background:rgba(255,188,158,.05); }
+.guide-callout a { color:var(--lime); text-underline-offset:3px; }
+.guide-flow { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:22px 0; padding:16px; border:1px solid rgba(167,255,241,.2); background:rgba(167,255,241,.025); color:var(--lime); font:8px var(--mono); letter-spacing:.08em; }
+.guide-flow b { color:#85879c; }
+.guide-command { margin:18px 0 22px; border:1px solid rgba(197,186,255,.23); background:#0b0d16; }
+.guide-command-head { min-height:41px; display:flex; align-items:center; justify-content:space-between; gap:15px; padding:0 13px; border-bottom:1px solid rgba(197,186,255,.14); color:#aeb0c3; font:8px var(--mono); letter-spacing:.08em; }
+.guide-copy { flex:none; padding:5px 9px; border:1px solid rgba(167,255,241,.35); background:transparent; color:var(--lime); cursor:pointer; font:8px var(--mono); }
+.guide-copy:hover { background:rgba(167,255,241,.08); }
+.guide-command pre { margin:0; padding:15px; overflow:auto; color:#f0eef9; white-space:pre-wrap; overflow-wrap:anywhere; font:10px/1.75 var(--mono); }
+.guide-command code { color:inherit; }
+.guide-command .comment { color:#8d90a5; }
+.guide-meta { display:flex; flex-wrap:wrap; gap:8px; margin:17px 0; }
+.guide-meta span { padding:7px 9px; border:1px solid rgba(197,186,255,.22); color:#c3c1d2; font:8px var(--mono); letter-spacing:.08em; }
+.guide-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:20px 0; }
+.guide-card { padding:17px; border:1px solid rgba(197,186,255,.16); background:rgba(197,186,255,.025); }
+.guide-card h3 { margin:0 0 8px; color:#f0eef9; font:500 16px var(--display); }
+.guide-card p { margin:0; color:#aeb0c2; font-size:11px; line-height:1.65; }
+.guide-card code,.guide-section p code,.guide-section li code { color:var(--lime); font: .92em var(--mono); }
+.guide-table-wrap { overflow-x:auto; margin:18px 0; }
+.guide-table { width:100%; border-collapse:collapse; text-align:left; }
+.guide-table th,.guide-table td { padding:11px 12px; border-bottom:1px solid rgba(197,186,255,.14); vertical-align:top; }
+.guide-table th { color:#c5baff; font:8px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+.guide-table td { color:#b1b3c5; font-size:10px; line-height:1.6; }
+.guide-table td code { color:var(--lime); font:9px var(--mono); }
+.guide-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:24px; }
+.guide-actions a { display:inline-flex; min-height:40px; align-items:center; padding:0 13px; border:1px solid rgba(167,255,241,.38); color:var(--lime); font-size:10px; font-weight:600; text-decoration:none; }
+.guide-actions a:hover { background:rgba(167,255,241,.08); }
+.guide-bottom { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:24px 0 60px; border-top:1px solid rgba(197,186,255,.16); color:#9294aa; font:8px var(--mono); }
+.guide-bottom a { color:var(--lime); text-decoration:none; }
+.copy-status { position:fixed; z-index:50; right:20px; bottom:20px; padding:11px 14px; background:#171a27; color:#f1effb; font:9px var(--mono); opacity:0; transform:translateY(10px); transition:opacity .2s,transform .2s; pointer-events:none; }
+.copy-status.visible { opacity:1; transform:none; }
+@media (max-width:800px) {
+  .guide-shell { width:calc(100% - 40px); }
+  .guide-layout { grid-template-columns:1fr; gap:22px; padding-top:10px; }
+  .guide-nav { position:static; display:flex; gap:7px; overflow:auto; padding:0 0 9px; border-bottom:1px solid rgba(197,186,255,.16); }
+  .guide-nav .nav-label { display:none; }
+  .guide-nav a { flex:none; border:1px solid rgba(197,186,255,.19); padding:8px 10px; }
+  .guide-hero { padding-bottom:32px; }
+  .guide-hero > p:last-child { font-size:13px; }
+}
+@media (max-width:520px) {
+  .guide-grid { grid-template-columns:1fr; }
+  .guide-command-head { font-size:7px; }
+  .guide-command pre { font-size:9px; }
+  .guide-bottom { align-items:flex-start; flex-direction:column; }
+}

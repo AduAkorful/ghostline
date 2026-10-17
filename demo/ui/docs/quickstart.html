@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#070910" />
+    <meta name="description" content="A user-controlled Ghostline CLI walkthrough for Tari Esmeralda." />
+    <title>Esmeralda Quickstart · Ghostline</title>
+    <link rel="icon" type="image/svg+xml" href="../ghostline-mark.svg" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="guide.css" />
+    <script src="guide.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <a class="wordmark" href="../index.html#top" aria-label="Ghostline home"><img class="wordmark-mark" src="../ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a>
+      <nav aria-label="Main navigation">
+        <a href="../index.html#story">How it works</a>
+        <a href="../index.html#evidence">Proof</a>
+        <a href="../index.html#capabilities">CLI map</a>
+        <a class="nav-cta" href="install.html">Install <span aria-hidden="true">↗</span></a>
+        <details class="mobile-nav">
+          <summary>Explore <span aria-hidden="true">+</span></summary>
+          <div class="mobile-nav-panel">
+            <a href="../index.html#story">How it works</a><a href="../index.html#evidence">Proof</a>
+            <a href="../index.html#capabilities">CLI map</a><a href="install.html">Installation guide</a>
+            <a href="interfaces.html">Interfaces and tools</a>
+          </div>
+        </details>
+      </nav>
+    </header>
+    <main id="main" class="guide-shell">
+      <p class="guide-breadcrumb"><a href="../index.html#start">Ghostline</a> / Esmeralda quickstart</p>
+      <header class="guide-hero">
+        <p class="eyebrow">YOUR WALLET · YOUR DEPLOYMENT</p>
+        <h1>Open once.<br /><em>Pay per call.</em></h1>
+        <p>Use Ghostline with your own Esmeralda wallet, provider terms, and fee settings. This guide outlines the CLI path from channel setup to one verified settlement.</p>
+        <div class="guide-meta"><span>ESMERALDA TESTNET</span><span>PLACEHOLDERS MUST BE REPLACED</span></div>
+      </header>
+      <div class="guide-layout">
+        <nav class="guide-nav" aria-label="On this page">
+          <p class="nav-label">CLI QUICKSTART</p>
+          <a href="#requirements">Before you start</a><a href="#prepare">Prepare</a><a href="#service">Start a service</a><a href="#open-pay">Open and pay</a><a href="#settle">Settle and verify</a><a href="#refund">Refund path</a>
+        </nav>
+        <article class="guide-content">
+          <div class="guide-callout warning"><strong>Unaudited, testnet software.</strong> Ghostline is early development and for Esmeralda only. Do not use real funds. Examples are templates; they contain no valid deployment identifiers or credentials.</div>
+          <section id="requirements" class="guide-section">
+            <p class="guide-label">00 / BEFORE YOU START</p>
+            <h2>Gather real deployment terms.</h2>
+            <p>You need a compatible wallet daemon, the deployed Ghostline template, and a service that accepts the channel terms. Nothing here creates a hosted service or shared wallet.</p>
+            <div class="guide-grid">
+              <div class="guide-card"><h3>Wallets and funds</h3><p>Use a loopback Ootle wallet daemon, a funded opener account, and a funded service fee account. The opener pays the deposit and opening fee; the service fee account pays settlement fees.</p></div>
+              <div class="guide-card"><h3>Provider parameters</h3><p>Get the real indexer URL, network tag, template hash, service public key, price, and accepted expiry range from your provider. Never copy placeholder values as live identifiers.</p></div>
+              <div class="guide-card"><h3>Private keys</h3><p>The payer key signs vouchers. The opener wallet's view-only key at index 0 unblinds the channel output. They are separate secrets; keep both out of shell history and shared MCP configuration.</p></div>
+              <div class="guide-card"><h3>Service signer</h3><p>The service signer and the fee-account signer have different roles. Use the correct wallet-local KeyId reference for each operation.</p></div>
+            </div>
+            <div class="guide-callout"><strong>Keep the wallet daemon on loopback.</strong> Ghostline uses its local wallet daemon's None authentication flow, which grants wallet administration access. Do not expose that endpoint publicly.</div>
+          </section>
+          <section id="prepare" class="guide-section">
+            <p class="guide-label">01 / PREPARE</p>
+            <h2>Create private channel state.</h2>
+            <p>Use an owner-only directory. Generate a payer signing key into a private file; use only its public value in channel parameters and provide its secret through the signing process's private environment.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>PRIVATE WORKSPACE AND PAYER KEY</span><button class="guide-copy" type="button" data-copy="private-workspace">Copy commands</button></div>
+              <pre><code id="private-workspace">umask 077&#10;mkdir -p /secure/path&#10;ghostline keygen &gt; /secure/path/payer-key.txt</code></pre>
+            </div>
+            <p>Choose a future expiry epoch and a unique 32-byte nonce. Compute the payer root from the exact channel terms, then initialize the channel record using the provider's real values:</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>COMPUTE CHANNEL TERMS · REPLACE PLACEHOLDERS</span><button class="guide-copy" type="button" data-copy="channel-spec">Copy command</button></div>
+              <pre><code id="channel-spec">ghostline spec \&#10;  --network-tag &lt;esmeralda-network-tag&gt; \&#10;  --deposit 100000 \&#10;  --payer-hex &lt;payer-public-key-hex&gt; \&#10;  --service-hex &lt;service-public-key-hex&gt; \&#10;  --expiry-epoch &lt;future-epoch&gt; \&#10;  --nonce-hex &lt;unique-32-byte-nonce-hex&gt; \&#10;  --template-hex &lt;deployed-template-hash-hex&gt;</code></pre>
+            </div>
+            <p><code>100000</code> means 0.1 tTARI in integer micro-units. Fees are additional. The full <code>channel init</code> command also needs your wallet accounts, indexer, ledger/session paths, and maximum accepted epoch. See the detailed source guide for every setup flag and troubleshooting note.</p>
+          </section>
+          <section id="service" class="guide-section">
+            <p class="guide-label">02 / SERVICE</p>
+            <h2>Start the other side.</h2>
+            <p>Run the reference API locally, or use a compatible provider. The service sets the price and accepted expiry range. Its ledger and the payer session must stay in separate private files.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>REFERENCE SERVICE · 10 µT PER CALL</span><button class="guide-copy" type="button" data-copy="service-run">Copy commands</button></div>
+              <pre><code id="service-run">ghostline-paid-api init --ledger /secure/service-ledger.json --session /secure/service-session.json &lt;channel-parameters&gt;&#10;ghostline-paid-api serve --bind 127.0.0.1:8787 --ledger /secure/service-ledger.json --price 10 &lt;service-terms&gt;</code></pre>
+            </div>
+            <p>The angle-bracket groups above are explanatory placeholders, not CLI flags. Use the complete, current flags in the detailed quickstart when configuring the reference service.</p>
+          </section>
+          <section id="open-pay" class="guide-section">
+            <p class="guide-label">03 / OPEN AND PAY</p>
+            <h2>Review first. Then pay off-chain.</h2>
+            <p>Supply the payer and claim secrets privately to the process. Dry-run the channel open, inspect its fee estimate and required funds, then open with a reviewed positive fee cap.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>OPEN ONLY AFTER REVIEW</span><button class="guide-copy" type="button" data-copy="channel-open">Copy commands</button></div>
+              <pre><code id="channel-open">ghostline channel open --file /secure/path/channel.json --dry-run&#10;ghostline channel open --file /secure/path/channel.json --max-fee &lt;reviewed-opening-fee-cap&gt;&#10;ghostline channel status --file /secure/path/channel.json</code></pre>
+            </div>
+            <p>Once open, pay for ten calls at 10 µT each. The policy budget limits voucher spending, not transaction fees.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>MAKE TEN PAID CALLS</span><button class="guide-copy" type="button" data-copy="paid-calls">Copy command</button></div>
+              <pre><code id="paid-calls">ghostline-paid-api call \&#10;  --url http://127.0.0.1:8787/fortune \&#10;  --session /secure/path/session.json \&#10;  --calls 10 \&#10;  --vendor-hex &lt;service-public-key-hex&gt; \&#10;  --budget 100 \&#10;  --max-per-call 10</code></pre>
+            </div>
+            <p>Each call signs the next cumulative voucher total. Calls do not submit individual transactions to the chain. The service records accepted calls; that record alone is not proof of settlement.</p>
+          </section>
+          <section id="settle" class="guide-section">
+            <p class="guide-label">04 / SETTLE AND VERIFY</p>
+            <h2>Submit one aggregate total.</h2>
+            <p>Stop paying on this channel. Dry-run settlement and review the fee before choosing to submit. The channel-file shortcut has a fixed maximum fee of 100,000 µT; use it only if that cap is acceptable for your setup.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>CHANNEL-FILE SETTLEMENT · FIXED FEE CAP</span><button class="guide-copy" type="button" data-copy="channel-settle">Copy commands</button></div>
+              <pre><code id="channel-settle">ghostline channel settle --file /secure/path/channel.json --dry-run&#10;# Submit only after reviewing the result and fee cap:&#10;ghostline channel settle --file /secure/path/channel.json --submit</code></pre>
+            </div>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>CHECK INDEXER FINALITY</span><button class="guide-copy" type="button" data-copy="indexer-result">Copy command</button></div>
+              <pre><code id="indexer-result">ghostline indexer result --url &lt;esmeralda-indexer-url&gt; --transaction-id &lt;settlement-transaction-id&gt;</code></pre>
+            </div>
+            <p>Confirm <code>Finalized Commit</code>. The indexer confirms the settlement and amount; the service ledger supplies the call count. Those are separate records.</p>
+          </section>
+          <section id="refund" class="guide-section">
+            <p class="guide-label">ALTERNATIVE / REFUND</p>
+            <h2>Refund after expiry.</h2>
+            <p>If the channel remains unspent through expiry, the payer can use the refund branch. This cannot follow a successful settlement. The channel-file refund helper also uses a fixed maximum fee of 100,000 µT and needs the payer fee account and payer signing key.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>EXPIRED, UNSPENT OUTPUT ONLY</span><button class="guide-copy" type="button" data-copy="channel-refund">Copy commands</button></div>
+              <pre><code id="channel-refund">ghostline channel refund --file /secure/path/channel.json --dry-run&#10;# Submit only after confirming expiry, output state, and fee cap:&#10;ghostline channel refund --file /secure/path/channel.json --submit</code></pre>
+            </div>
+            <div class="guide-actions"><a href="interfaces.html">See CLI, API, and MCP interfaces ↗</a><a href="../index.html#evidence">Inspect the historical run ↗</a></div>
+            <div class="guide-callout">Need every deployment-specific flag? <a href="https://github.com/AduAkorful/ghostline/blob/main/docs/quickstart.md" target="_blank" rel="noopener noreferrer">Open the full quickstart reference ↗</a></div>
+          </section>
+        </article>
+      </div>
+      <nav class="guide-bottom" aria-label="Guide navigation"><a href="install.html">← Install Ghostline</a><span>ESMERALDA QUICKSTART / NEXT: INTERFACES</span><a href="interfaces.html">Interfaces and tools →</a></nav>
+    </main>
+    <div class="copy-status" id="copy-status" role="status" aria-live="polite"></div>
+  </body>
+</html>

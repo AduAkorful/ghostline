@@ -6,7 +6,7 @@ archive='ghostline-x86_64-unknown-linux-gnu.tar.gz'
 
 if [ "$(uname -s)" != 'Linux' ] || [ "$(uname -m)" != 'x86_64' ]; then
   echo 'Prebuilt Ghostline downloads currently support Linux x86-64 only.' >&2
-  echo "For other platforms, build from source: https://github.com/$repository#running-the-tests" >&2
+  echo "See platform and source-build instructions: https://github.com/$repository/blob/main/docs/install.md" >&2
   exit 1
 fi
 

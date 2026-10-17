@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#070910" />
+    <meta name="description" content="Explore Ghostline's CLI, paid HTTP API, Rust and TypeScript SDKs, and MCP tools." />
+    <title>Interfaces and tools · Ghostline</title>
+    <link rel="icon" type="image/svg+xml" href="../ghostline-mark.svg" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="guide.css" />
+    <script src="guide.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <a class="wordmark" href="../index.html#top" aria-label="Ghostline home"><img class="wordmark-mark" src="../ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a>
+      <nav aria-label="Main navigation">
+        <a href="../index.html#story">How it works</a>
+        <a href="../index.html#evidence">Proof</a>
+        <a href="../index.html#capabilities">CLI map</a>
+        <a class="nav-cta" href="quickstart.html">Quickstart <span aria-hidden="true">↗</span></a>
+        <details class="mobile-nav">
+          <summary>Explore <span aria-hidden="true">+</span></summary>
+          <div class="mobile-nav-panel">
+            <a href="../index.html#story">How it works</a><a href="../index.html#evidence">Proof</a>
+            <a href="../index.html#capabilities">CLI map</a><a href="install.html">Installation guide</a>
+            <a href="quickstart.html">Esmeralda quickstart</a>
+          </div>
+        </details>
+      </nav>
+    </header>
+    <main id="main" class="guide-shell">
+      <p class="guide-breadcrumb"><a href="../index.html#start">Ghostline</a> / Interfaces and tools</p>
+      <header class="guide-hero">
+        <p class="eyebrow">ONE RAIL · FOUR WAYS TO USE IT</p>
+        <h1>Pick the interface.<br /><em>Keep the keys.</em></h1>
+        <p>Use Ghostline directly from a terminal, embed it in an agent, or run the reference HTTP 402 service. Signing stays with the payer; wallet and fee operations stay under the operator's control.</p>
+        <div class="guide-meta"><span>CLI</span><span>RUST · TYPESCRIPT</span><span>MCP · STDIO</span><span>ESMERALDA</span></div>
+      </header>
+      <div class="guide-layout">
+        <nav class="guide-nav" aria-label="On this page">
+          <p class="nav-label">INTERFACE MAP</p>
+          <a href="#http">Paid HTTP</a><a href="#cli">Command line</a><a href="#sdk">SDKs</a><a href="#mcp">MCP server</a><a href="#data">What each side sees</a>
+        </nav>
+        <article class="guide-content">
+          <section id="http" class="guide-section">
+            <p class="guide-label">01 / PAID HTTP</p>
+            <h2>Quote. Approve. Call.</h2>
+            <p>The payer requests a protected endpoint. The service returns an HTTP 402 quote with its channel terms and price. The payer checks the channel, recipient, expiry, and local policy, signs the next cumulative voucher, then retries with the payment headers.</p>
+            <div class="guide-flow" aria-label="Payment request flow"><span>REQUEST</span><b aria-hidden="true">→</b><span>402 QUOTE</span><b aria-hidden="true">→</b><span>POLICY + SIGN</span><b aria-hidden="true">→</b><span>PAID RESPONSE</span></div>
+            <div class="guide-grid">
+              <div class="guide-card"><h3>Reference endpoints</h3><p><code>/fortune</code> demonstrates fixed-price requests. <code>/meter</code> prices by units. <code>/metrics</code> is optional service telemetry, not an on-chain receipt.</p></div>
+              <div class="guide-card"><h3>One channel, cumulative vouchers</h3><p>The voucher total increases as calls are accepted. Calls do not each create a chain transaction; the channel is settled later as one cumulative amount.</p></div>
+            </div>
+            <div class="guide-callout warning"><strong>Validate before signing.</strong> The payer must check the quoted channel and recipient against its intended terms. Never sign an unexpected quote.</div>
+          </section>
+          <section id="cli" class="guide-section">
+            <p class="guide-label">02 / COMMAND LINE</p>
+            <h2>Operate the channel yourself.</h2>
+            <p>The CLI covers channel terms, payer keys, wallet output recovery, dry-run transaction construction, settlement, refund, and indexer checks. The landing page's command map lists the broader surface; the Esmeralda quickstart walks through one path.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>INSPECT BEFORE A LIVE ACTION</span><button class="guide-copy" type="button" data-copy="cli-example">Copy commands</button></div>
+              <pre><code id="cli-example">ghostline channel status --file /secure/path/channel.json&#10;ghostline channel settle --file /secure/path/channel.json --dry-run&#10;ghostline indexer result --url &lt;esmeralda-indexer-url&gt; --transaction-id &lt;settlement-transaction-id&gt;</code></pre>
+            </div>
+            <p>These commands inspect status, estimate the transaction, and check an already-submitted transaction. Replace placeholders with values from your deployment. A dry-run does not broadcast; adding a submit option can move funds. Review the fee cap first.</p>
+          </section>
+          <section id="sdk" class="guide-section">
+            <p class="guide-label">03 / SDKs</p>
+            <h2>Embed signing and verification.</h2>
+            <div class="guide-grid">
+              <div class="guide-card"><h3>Rust</h3><p>The workspace separates <code>ghostline-core</code>, <code>ghostline-sdk</code>, <code>ghostline-policy</code>, <code>ghostline-paywall</code>, and <code>ghostline-net</code>. Use the SDK and policy surfaces when building payer or service integrations.</p></div>
+              <div class="guide-card"><h3>TypeScript</h3><p><code>@ghostline/sdk</code> provides voucher encoding, signing, and verification with shared Rust test vectors. It requires Node.js 22 or later and does not perform wallet operations.</p></div>
+            </div>
+            <p>The source package lives in <code>packages/ghostline</code>. Check the repository's current release and package instructions before installing; this page does not assume a registry release is available.</p>
+          </section>
+          <section id="mcp" class="guide-section">
+            <p class="guide-label">04 / AGENT TOOLS</p>
+            <h2>Connect over MCP stdio.</h2>
+            <p><code>ghostline-mcp</code> exposes tools to an MCP host over standard input and output. An agent can ask the server to make a policy-gated paid call or inspect channel and transaction state.</p>
+            <div class="guide-grid">
+              <div class="guide-card"><h3>Calls and vouchers</h3><p><code>ghostline_call_paid</code> makes a paid request; <code>ghostline_sign_voucher</code> and <code>ghostline_verify_voucher</code> handle voucher operations.</p></div>
+              <div class="guide-card"><h3>Channel operations</h3><p><code>ghostline_channel_status</code>, <code>ghostline_channel_file</code>, <code>ghostline_channel_list</code>, and <code>ghostline_channel_calls</code> inspect operator state. Open and close tools require explicit broadcast configuration.</p></div>
+            </div>
+            <div class="guide-callout"><strong>Secrets stay out of tool arguments.</strong> Configure signing material and channel paths in the MCP server process environment. When the configured policy requires human approval, the server requests it through MCP elicitation. Approval depends on the host displaying that prompt to a person; the library-level policy API trusts its caller.</div>
+          </section>
+          <section id="data" class="guide-section">
+            <p class="guide-label">05 / DATA BOUNDARY</p>
+            <h2>Private from observers.<br />Not from the service.</h2>
+            <div class="guide-grid">
+              <div class="guide-card"><h3>Payer</h3><p>Knows its own requests, channel details, and signed voucher totals.</p></div>
+              <div class="guide-card"><h3>Service</h3><p>Sees the requests it serves, their prices, and the voucher stream it accepts.</p></div>
+              <div class="guide-card"><h3>Chain observers</h3><p>Do not see each call through the channel. Fees remain public; settlement reveals its amount and executed branch.</p></div>
+            </div>
+            <p>Funding patterns, timing, and fee payers can still create correlations. Ghostline does not promise anonymity. Call counts come from the service record; chain finality confirms settlement.</p>
+            <div class="guide-actions"><a href="quickstart.html">Follow the Esmeralda quickstart ↗</a><a href="https://github.com/AduAkorful/ghostline/blob/main/docs/api-reference.md" target="_blank" rel="noopener noreferrer">Full technical reference ↗</a></div>
+          </section>
+        </article>
+      </div>
+      <nav class="guide-bottom" aria-label="Guide navigation"><a href="quickstart.html">← Esmeralda quickstart</a><span>INTERFACES / RETURN TO GHOSTLINE</span><a href="../index.html#start">Back to Ghostline →</a></nav>
+    </main>
+    <div class="copy-status" id="copy-status" role="status" aria-live="polite"></div>
+  </body>
+</html>

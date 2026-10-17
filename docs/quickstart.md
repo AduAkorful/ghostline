@@ -1,23 +1,36 @@
 # Esmeralda quickstart
 
-This guide runs Ghostline's MCP paid-call path against a local paid API and an Esmeralda wallet daemon. The open → call → settle sequence has been exercised live on Esmeralda. Wallet and network identifiers below must come from your own deployment and wallet; this repository does not publish a shared demo template or account.
+Run a local paid API, open an Esmeralda channel, pay through the CLI or MCP, and settle once. Install the executables using the [installation guide](install.md); no repository clone is needed for the downloaded commands.
+
+Wallet and network identifiers must come from your deployment and wallet. This is an operator setup guide with placeholders, not a hosted demo or a preconfigured wallet.
 
 Ghostline is early development, unaudited, and testnet only. Do not use real funds.
 
 ## Prerequisites
 
-- The Ghostline executables. On Linux x86-64, install them with the command in [README](../README.md#install-the-command-line-tools). Otherwise, build them from source using the commands and native dependencies in [README](../README.md#install-the-command-line-tools).
-- A `tari_walletd` connected to Esmeralda at `http://127.0.0.1:5100` (or set the URL below), with a funded opener account and a fee account. Settlement fees are public. A separately funded fee wallet reduces direct linkage but does not guarantee privacy.
+- The installed `ghostline`, `ghostline-paid-api`, and, for the MCP path, `ghostline-mcp` executables.
+- A compatible Ootle wallet daemon connected to Esmeralda at `http://127.0.0.1:5100` (or your own loopback URL), with funded opener and service fee accounts. Ghostline uses the daemon's `None` authentication flow; do not expose this endpoint publicly. A separately funded fee wallet can reduce direct linkage but does not guarantee privacy.
 - The real Esmeralda indexer URL, network tag, deployed Ghostline template hash, and wallet account names/components for your setup.
-- An MCP client that supports elicitation if you enable the human approval gate. Configure it to launch the installed `ghostline-mcp` executable.
+- A service signing key available in the fee wallet, matching the channel's service public key. Obtain its KeyId JSON reference from the wallet operator and save that JSON value in an owner-only file. This is a wallet-local key reference, not the service secret and not the whole RPC response. The fee account owner key is a separate signer unless the deployment deliberately uses the same key for both roles.
+- An MCP client that supports elicitation if you choose MCP with a human approval gate.
 
-Supply `GHOSTLINE_PAYER_SECRET` from a private secret manager to sign vouchers. Supply `GHOSTLINE_CLAIM_SECRET` from the opener wallet's `view_only_key` at index 0 so Ghostline can unblind the opened output. They are separate keys. Keep both, wallet credentials, and the channel file private. The channel file becomes sensitive after the channel is opened because it contains the deposit mask. Never put secrets in tool arguments, shell history, or a shared MCP server configuration.
+Supply `GHOSTLINE_PAYER_SECRET` through the signing process's private environment to sign vouchers. Supply `GHOSTLINE_CLAIM_SECRET` from the opener wallet's `view_only_key` at index 0 so Ghostline can unblind the opened output. They are separate keys. The examples assume the opener's default receiving address uses that key; confirm your wallet's key index if you change the destination. Keep wallet credentials and channel state private. The channel file becomes sensitive after opening because it contains the deposit mask. Never put secrets in tool arguments, shell history, or shared MCP client configuration.
 
-After funding a new wallet account, confirm its native tTARI output appears as unspent before opening a channel. `ghostline wallet account-create` associates the tTARI resource and requests a scan, but walletd completes it asynchronously. Two Esmeralda rehearsals recovered incoming outputs about 6½ and 10½ minutes after transfer finality; those observations do not establish a guaranteed sync interval. The second wallet's open dry-run succeeded after recovery. If a funded output remains missing, keep the wallet profile and verify the transaction and wallet/indexer state before proceeding. Do not assume waiting alone guarantees recovery; an insufficient-funds dry-run cannot distinguish a genuine shortfall from an undiscovered output.
+After funding, confirm native tTARI appears as unspent in the opener wallet. `ghostline wallet account-create` associates the resource and requests an asynchronous scan. Missing funding needs wallet/indexer investigation; neither installation nor waiting alone guarantees recovery. See [troubleshooting](#troubleshooting).
+
+Use an owner-only working directory and keep service and payer state in separate files. Replace `/secure/path` throughout the examples with your actual private directory. To create a new Ghostline payer key, save its output directly to a private file:
+
+```sh
+umask 077
+mkdir -p /secure/path
+ghostline keygen > /secure/path/payer-key.txt
+```
+
+The file contains `secret=` and `public=` lines. Use only its public value in channel parameters and provide its secret through your private environment. Generate a unique 32-byte nonce for each channel; `openssl rand -hex 32` can produce one if OpenSSL is installed. These are separate from the wallet seed and provider's service key.
 
 ## 1. Prepare a channel file
 
-Choose a unique 32-byte nonce and a future expiry epoch with a safety margin. Get the payer and service public keys from your own key setup. Use integer micro-units for `--deposit`; for example, `100000` is 0.1 tTARI when the resource uses 1,000,000 µTARI per tTARI. Set the deployed template hash and network parameters from your deployment records.
+Choose a future expiry epoch with a safety margin. Read the current epoch with `ghostline indexer epoch --url <esmeralda-indexer-url>`. The `--max-epoch` transaction bound must also remain in the future for the intended submission; it is distinct from channel expiry. Get the service public key and template hash from the provider/deployment record. Use integer micro-units: `100000` is 0.1 tTARI at 1,000,000 µTARI per tTARI. Opening and settlement fees are paid in addition to the deposit.
 
 The paid API also needs the payer condition-tree root. Compute it from the exact open parameters with `ghostline spec` and save the printed `payer_root`:
 
@@ -56,7 +69,9 @@ ghostline channel init \
   --session /secure/path/session.json
 ```
 
-The CLI writes a record only; it does not open the channel. Confirm the wallet, indexer, template, fee account, and fee funding before proceeding. The MCP open tool defaults to a dry run. Review its fee quote, then set both `GHOSTLINE_OPEN_SUBMIT=1` and `GHOSTLINE_OPEN_MAX_FEE` in the MCP server environment to broadcast. After open, protect `channel.json` as secret-bearing material.
+The CLI writes a record only; it does not open the channel. Confirm the wallet, indexer, template, service signer, fee account, and fee funding before proceeding. Use an opener profile/account whose default receiving address matches the supplied claim key. After opening, protect `channel.json` as secret-bearing material.
+
+For expiry refunds, also include `--payer-fee-account <payer-fee-account-component>`, `--payer-fee-account-name <payer-fee-account-name>`, and `--payer-wallet-url <payer-loopback-wallet-url>` when initializing. The payer wallet must hold a signer matching the channel's payer public key, distinct from the claim/view key.
 
 ## 2. Start the paid API
 
@@ -83,11 +98,48 @@ ghostline-paid-api serve \
 
 The service public key must be the key committed to the channel's settle branch. Choose the expiry bounds from the service's operating policy; both are inclusive epochs. The HTTP 402 response includes this key and range alongside the price and channel id, so a payer can check the intended recipient before opening.
 
-Keep the service ledger and payer session at separate paths. The channel record and paid API use the same ledger path; the channel record and MCP process use the same session path. `paid-api init` creates both snapshots; opening the channel through MCP then uses the matching session without resetting its cumulative total. Do not run `init` again over existing files.
+Keep the service ledger and payer session at separate paths. The channel record and paid API use the same ledger path; the channel record and signing process use the same session path. `paid-api init` creates both snapshots; opening the channel uses the matching session without resetting its cumulative total. Do not run `init` again over existing files.
 
-## 3. Connect the MCP server and pay
+## 3. Open and pay
 
-Configure the MCP client to start `ghostline-mcp` with this environment. Set the policy vendor to the service public key. Keep broadcast flags unset until you are ready to transact.
+Choose the CLI path or the MCP path for this channel. Both use the same channel record and payer session; do not open it twice or use separate signing processes concurrently against one session.
+
+### CLI path
+
+With both secrets supplied privately to the process, estimate the opening fee first:
+
+```sh
+ghostline channel open --file /secure/path/channel.json --dry-run
+```
+
+Review `estimated_fee` and `required_fee`, confirm the deposit plus cap is available, then open with an explicit positive cap in integer µT:
+
+```sh
+ghostline channel open --file /secure/path/channel.json --max-fee <reviewed-opening-fee-cap>
+ghostline channel status --file /secure/path/channel.json
+```
+
+A live open stores the output's deposit mask and creates/resumes the matching session. The fee cap can be charged on the opening path even if the dry-run requirement was lower; avoid a needlessly large cap. If submission times out, reconcile the transaction before retrying (see [troubleshooting](#troubleshooting)).
+
+Pay for ten calls at 10 µT each:
+
+```sh
+ghostline-paid-api call \
+  --url http://127.0.0.1:8787/fortune \
+  --session /secure/path/session.json \
+  --calls 10 \
+  --vendor-hex <service-public-key-hex> \
+  --budget 100 \
+  --max-per-call 10
+
+ghostline channel status --file /secure/path/channel.json
+```
+
+The service's `accepted` total should now be 100 µT. Calls do not submit individual on-chain transactions. The policy budget limits voucher spending; it does not include wallet transaction fees.
+
+### MCP path
+
+Configure the MCP client to start `ghostline-mcp` with this environment. Supply the payer and claim secrets privately to that server process as described above; the MCP client's environment is not necessarily inherited automatically. Set the policy vendor to the service public key. Keep broadcast flags unset until you are ready to transact.
 
 ```text
 GHOSTLINE_CHANNEL_FILE=/secure/path/channel.json
@@ -113,9 +165,63 @@ Use `GHOSTLINE_POLICY_REQUIRE_HUMAN=1` to approve every payment, `GHOSTLINE_POLI
 
 ## 4. Settle and inspect
 
-With `GHOSTLINE_CLOSE_SUBMIT=1`, call `ghostline_close_channel` with `{}` to broadcast close. Set `GHOSTLINE_SETTLE_FORCE=1` only if settling now is intentional and the channel has not reached expiry. Otherwise the close tool follows the configured settlement window and expiry rules. Confirm finality using the indexer/wallet result and inspect the channel with `ghostline_channel_status`.
+Stop paying on the channel before settlement. This channel variant is spent once; use a new channel for later calls.
 
-The recorded live MCP run accepted ten 10 µT calls and finalized one settlement of 100 µT on Esmeralda. Fees were paid separately and were visible. A later fresh-wallet rehearsal used a new isolated wallet profile funded by a 150,000 µT transfer from the operator's main wallet: a 100,000 µT channel open, one local 10 µT `/fortune` call, and a 10 µT settlement all completed. The open finalized with a 15,217 µT fee (18 µT above the dry-run requirement); the settle finalized with a 17,637 µT fee and no overcharge. This is a valid multi-wallet test: the wallet keys are separate and the complete flow works. The transfer is visible on Esmeralda, so an outside observer can link the new wallet's funding to the main wallet. That visibility only matters when testing whether funding provenance is hidden. A spent channel output cannot be settled or refunded again.
+### CLI settlement
+
+Before expiry, use `settle-due` to choose a fee cap for this transaction. `--force` means settle now instead of waiting for the usual settlement window; it cannot override expiry. Set `GHOSTLINE_DEPOSIT_MASK` in the wallet operator's private environment from the channel file's stored mask. For a local shell with `jq`, for example:
+
+```sh
+export GHOSTLINE_DEPOSIT_MASK="$(jq -er '.deposit_mask_hex' /secure/path/channel.json)"
+```
+
+The mask stays out of command arguments and shell history. Keep the shell private and clear the variable when settlement is complete.
+
+```sh
+ghostline settle-due \
+  --ledger /secure/path/ledger.json \
+  --network-tag <esmeralda-network-tag> \
+  --deposit 100000 \
+  --payer-hex <payer-public-key-hex> \
+  --service-hex <service-public-key-hex> \
+  --expiry-epoch <channel-expiry-epoch> \
+  --nonce-hex <channel-nonce-hex> \
+  --template-hex <deployed-template-hash-hex> \
+  --indexer-url <esmeralda-indexer-url> \
+  --utxo-json /secure/path/channel.utxo.json \
+  --max-epoch <maximum-accepted-epoch> \
+  --ootle-network esmeralda \
+  --fee-account <service-fee-account-component> \
+  --max-fee <reviewed-settlement-fee-cap> \
+  --force --submit --dry-run \
+  --wallet-url http://127.0.0.1:5100 \
+  --seal-key-id-file /secure/path/service-key-id.json \
+  --fee-account-name <service-fee-wallet-account-name>
+```
+
+Review `required_fees` and confirm the channel is still unspent. The service fee account needs enough funds for the selected cap. Use the same command to submit after removing `--dry-run`; keep `--submit` and the reviewed cap. The channel-file shortcut `ghostline channel settle` has a fixed maximum fee of 100000 µT, so use it only if that cap is acceptable for your deployment.
+
+```sh
+ghostline indexer result \
+  --url <esmeralda-indexer-url> \
+  --transaction-id <settlement-transaction-id>
+```
+
+Confirm `Finalized Commit` from the result. Then `ghostline channel status --file /secure/path/channel.json` should show its output as `down`. Local `accepted` totals are service accounting, not settlement proof or wallet balances.
+
+### MCP settlement
+
+Set `GHOSTLINE_SEAL_KEY_ID_FILE=/secure/path/service-key-id.json` in the MCP server's environment. To settle before the normal window, set `GHOSTLINE_SETTLE_FORCE=1` while the channel is still before expiry. First set `GHOSTLINE_CLOSE_DRY_RUN=1`, leave `GHOSTLINE_CLOSE_SUBMIT` unset, and call `ghostline_close_channel` with `{}`. Review acceptance and the fee requirement through the fee wallet's `transactions.get` RPC using the returned dry-run id; dry runs are not submitted to the indexer. Close uses the same fixed **100000 µT** maximum fee; there is no configurable close-fee environment variable.
+
+To broadcast, unset `GHOSTLINE_CLOSE_DRY_RUN`, set `GHOSTLINE_CLOSE_SUBMIT=1`, reload the server environment, and call `ghostline_close_channel` again. The tool otherwise follows the settlement window and expiry rules. Confirm finality with the indexer/wallet result and inspect through `ghostline_channel_status`.
+
+The recorded live MCP run accepted ten 10 µT calls and finalized one settlement of 100 µT on Esmeralda. Fees were paid separately and were visible. Separate-wallet rehearsals also completed open → paid call → settle. Operator-funded transfers are valid test funding, but their public history can link wallets. A spent channel cannot be settled or refunded again.
+
+### Refund after expiry
+
+For an unspent channel at or after expiry, use `ghostline channel refund --file /secure/path/channel.json --submit --dry-run --seal-key-id-file /secure/path/payer-key-id.json` before submitting without `--dry-run`. This needs the payer fee fields described in step 1, a funded payer fee account, and the payer signing key in that wallet. The channel-file refund helper also uses a fixed 100000 µT fee cap. For MCP, switch `GHOSTLINE_SEAL_KEY_ID_FILE` to the payer signer reference before closing an expired channel; the service signer cannot substitute for it.
+
+## Larger batches
 
 The 1,000-call run proves the batching flow, not that a 10 µT price is economical. Its 10,000 µT of payments settled with a 17,640 µT service-side fee; that fee alone equals 1,764 calls at 10 µT. A separate open required 15,199 µT. Fees change, and the payer and service may pay different transactions, so rerun dry-run estimates and set a price and budget for the deployment.
 
@@ -131,9 +237,23 @@ ghostline-paid-api call \
   --max-per-call 10
 ```
 
-The 1 tTARI example deposit covers 1,000 calls at 10 µT each. The live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one Esmeralda settlement finalized. The MCP stdio path is separately live-proven for ten calls and a single settlement. Neither result implies the wallet or keys in your own setup have been tested.
+The 0.1 tTARI example deposit covers 1,000 calls at 10 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
 
-For offline and CLI examples, see [README](../README.md). For privacy limits, read [privacy notes](privacy.md) and the [threat model](threat-model.md).
+For more commands, see the [API reference](api-reference.md). For privacy limits, read [privacy notes](privacy.md) and the [threat model](threat-model.md).
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| `ghostline: command not found` | Add your install directory to PATH; see [installation](install.md#download-the-executables). |
+| Incoming funding is finalized but absent in the wallet | Confirm the receiving wallet/account and resource association, preserve the profile and transaction id, and inspect wallet/indexer state. Do not delete wallet data or resend money merely because it is missing from the local view. |
+| Open dry run reports insufficient funds | Confirm spendable inputs cover deposit plus fee cap. This message alone cannot distinguish a shortfall from undiscovered funding. |
+| Open or settlement times out | Check the transaction's final result and output presence before retrying. A timeout does not prove the transaction failed. |
+| Open committed but the channel file lacks its mask | Recover the channel UTXO with `ghostline wallet utxos --transaction-id <open-transaction-id> --utxo-json-out /secure/path/channel.utxo.json --url <opener-wallet-url>`, then use `ghostline channel bind --file /secure/path/channel.json --utxo-json /secure/path/channel.utxo.json` with the correct claim secret. Do not open again. |
+| Close reports `wait` | Check the current epoch and settlement margin; force settlement only intentionally and before expiry. |
+| Close reports `output_spent` | Confirm the previous settlement/refund result; this channel cannot be spent again. |
+| Signing or close cannot find a key | Confirm the KeyId file references the intended signer in the wallet endpoint used for this operation. Key references are wallet-local. |
+| MCP cannot obtain human approval | Use a client supporting elicitation and confirm it displays the approval prompt to a person. |
 
 ## CI smoke test
 

@@ -15,13 +15,13 @@ The service sees each request and voucher. Chain observers see channel transacti
 
 ## Install
 
-Linux x86-64 users can install the CLI, MCP server, and reference API from a [GitHub release](https://github.com/AduAkorful/ghostline/releases) once one is available:
+Install the CLI, MCP server, and reference API on glibc-based Linux x86-64 without cloning or compiling:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
 ```
 
-The installer verifies the archive checksum and places the commands in `~/.local/bin`. Prebuilt binaries currently target glibc-based Linux x86-64. See the [quickstart](docs/quickstart.md) for setup and Esmeralda instructions.
+The installer downloads a [published release](https://github.com/AduAkorful/ghostline/releases), verifies its checksum, and installs to `~/.local/bin`. Start with the [installation guide](docs/install.md), then the [Esmeralda quickstart](docs/quickstart.md). A funded Ootle wallet and service configuration are required for live payments.
 
 ## Project components
 
@@ -38,13 +38,15 @@ The installer verifies the archive checksum and places the commands in `~/.local
 
 ## Documentation
 
-- [Quickstart](docs/quickstart.md): build, configure, and run Ghostline on Esmeralda
+- [Installation](docs/install.md): downloads, PATH, source builds, and prerequisites
+- [Quickstart](docs/quickstart.md): open, pay, and settle through CLI or MCP
+- [Terminal demo](docs/demo-runbook.md): reproduce the local flow and inspect recorded Esmeralda evidence
+- [Motion demo](demo/ui/README.md): step through the CLI and browse its command map
 - [Architecture](docs/architecture.md): components and payment flow
 - [Privacy](docs/privacy.md): what payers, services, and observers can see
 - [Threat model](docs/threat-model.md): security assumptions and residual risks
 - [API reference](docs/api-reference.md): CLI, HTTP, SDK, and MCP surfaces
 - [FAQ](docs/faq.md): fees, recovery, privacy, and readiness
-- [Evidence demo](demo/ui/README.md): static summary of a historical Esmeralda run
 
 ## Development
 

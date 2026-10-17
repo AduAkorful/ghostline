@@ -61,7 +61,7 @@ The current reference server exposes the payment routes; applications can use th
 | `ghostline-paywall` | `quote`, `PaymentRequired`, `PaymentTerms`, voucher header helpers, `ChannelStore`, `ChannelDirectory`, `AgentPayer`, and settlement/refund status decisions |
 | `ghostline-net` | Indexer client and wallet-daemon JSON-RPC types; writes are made through the configured wallet daemon |
 
-The CLI is the operator interface for channel files, wallet opens/submits, offline signing/verification, settlement/refund, reports, and status checks. Run `cargo run -p ghostline-cli -- --help` and the relevant subcommand's `--help` for the exact installed flags. Live opens require an explicit reviewed fee cap; dry-run first and account for fees being public.
+The CLI is the operator interface for channel files, wallet opens/submits, offline signing/verification, settlement/refund, reports, and status checks. Run `ghostline --help` and the relevant subcommand's `--help` for the exact installed flags. For source development, use `cargo run -p ghostline-cli -- --help`. Live opens require an explicit reviewed fee cap; dry-run first and account for fees being public.
 
 ## TypeScript package
 
@@ -74,7 +74,7 @@ The package requires Node.js 22 or newer. Rust/TypeScript shared vectors live in
 
 ## MCP stdio server
 
-Run `cargo run -p ghostline-mcp --quiet` and configure an MCP client to launch it over stdio. Payer and claim secrets are read from the server process environment; there is no tool argument for a private key or seed.
+Configure an MCP client to launch the installed `ghostline-mcp` over stdio. For source development, use `cargo run -p ghostline-mcp --quiet`. Payer and claim secrets are read from the server process environment; there is no tool argument for a private key or seed.
 
 | Tool | Arguments / environment | Purpose |
 |---|---|---|
@@ -91,5 +91,7 @@ Run `cargo run -p ghostline-mcp --quiet` and configure an MCP client to launch i
 | `ghostline_open_channel` | `GHOSTLINE_CHANNEL_FILE`; submit only with `GHOSTLINE_OPEN_SUBMIT=1` and explicit `GHOSTLINE_OPEN_MAX_FEE` | Dry-run or open the configured file's channel. |
 | `ghostline_channel_session` | `GHOSTLINE_CHANNEL_FILE` | Create or resume a matching payer session. |
 | `ghostline_close_channel` | `GHOSTLINE_CHANNEL_FILE`; submit only with `GHOSTLINE_CLOSE_SUBMIT=1` | Settle inside the expiry margin or refund at/after expiry. |
+
+Wallet-backed close needs `GHOSTLINE_SEAL_KEY_ID_FILE` referencing the operation's signer in the selected wallet: the service key for settlement or payer key for refund. `GHOSTLINE_CLOSE_DRY_RUN=1` submits only to the wallet's dry-run path and is mutually exclusive with `GHOSTLINE_CLOSE_SUBMIT=1`. MCP close and the channel-file settle/refund CLI helpers use a fixed 100000 µT maximum fee. Lower-level `settle-due` and `refund-due` expose `--max-fee` for operators who need a different cap.
 
 Human approval is requested through MCP elicitation when the configured policy requires it. If the MCP client cannot provide consent, the payment does not proceed. For all process environment variables and the tested open/call/close sequence, see [Quickstart](quickstart.md).

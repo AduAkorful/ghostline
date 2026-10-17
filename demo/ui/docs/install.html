@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#070910" />
+    <meta name="description" content="Install the Ghostline CLI, reference API, and MCP server on Linux." />
+    <title>Install Ghostline</title>
+    <link rel="icon" type="image/svg+xml" href="../ghostline-mark.svg" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="guide.css" />
+    <script src="guide.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <a class="wordmark" href="../index.html#top" aria-label="Ghostline home"><img class="wordmark-mark" src="../ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a>
+      <nav aria-label="Main navigation">
+        <a href="../index.html#story">How it works</a>
+        <a href="../index.html#evidence">Proof</a>
+        <a href="../index.html#capabilities">CLI map</a>
+        <a class="nav-cta" href="quickstart.html">Quickstart <span aria-hidden="true">↗</span></a>
+        <details class="mobile-nav">
+          <summary>Explore <span aria-hidden="true">+</span></summary>
+          <div class="mobile-nav-panel">
+            <a href="../index.html#story">How it works</a><a href="../index.html#evidence">Proof</a>
+            <a href="../index.html#capabilities">CLI map</a><a href="quickstart.html">Esmeralda quickstart</a>
+            <a href="interfaces.html">Interfaces and tools</a>
+          </div>
+        </details>
+      </nav>
+    </header>
+    <main id="main" class="guide-shell">
+      <p class="guide-breadcrumb"><a href="../index.html#start">Ghostline</a> / Install</p>
+      <header class="guide-hero">
+        <p class="eyebrow">GET THE TOOLS</p>
+        <h1>Install Ghostline.<br /><em>Keep control.</em></h1>
+        <p>Download the CLI, reference paid API, and MCP server to your own machine. Installation does not create or fund a wallet.</p>
+        <div class="guide-meta"><span>LINUX · x86-64 · glibc</span><span>NO ROOT REQUIRED</span><span>TESTNET ONLY</span></div>
+      </header>
+      <div class="guide-layout">
+        <nav class="guide-nav" aria-label="On this page">
+          <p class="nav-label">INSTALL GUIDE</p>
+          <a href="#download">Download</a><a href="#path">PATH setup</a><a href="#before-paying">Before paying</a><a href="#source">Build from source</a>
+        </nav>
+        <article class="guide-content">
+          <section id="download" class="guide-section">
+            <p class="guide-label">01 / DOWNLOAD</p>
+            <h2>One command to install.</h2>
+            <p>The installer gets the latest Ghostline release, checks its SHA-256 checksum, and installs the three executables into <code>~/.local/bin</code>.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>INSTALL LATEST RELEASE</span><button class="guide-copy" type="button" data-copy="install-latest">Copy command</button></div>
+              <pre><code id="install-latest">curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh</code></pre>
+            </div>
+            <div class="guide-grid">
+              <div class="guide-card"><h3>What gets installed</h3><p><code>ghostline</code> for channel operations, <code>ghostline-paid-api</code> for the reference service, and <code>ghostline-mcp</code> for MCP clients.</p></div>
+              <div class="guide-card"><h3>What the checksum means</h3><p>It checks the downloaded archive against the release checksum file. It is not an independent publisher signature.</p></div>
+            </div>
+            <p>Required system tools: <code>curl</code>, <code>tar</code>, <code>sha256sum</code>, and <code>awk</code>. To install the tested release explicitly:</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>PIN GHOSTLINE v0.1.0</span><button class="guide-copy" type="button" data-copy="install-pinned">Copy command</button></div>
+              <pre><code id="install-pinned">curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.1.0 sh</code></pre>
+            </div>
+          </section>
+          <section id="path" class="guide-section">
+            <p class="guide-label">02 / FIRST RUN</p>
+            <h2>Check your PATH.</h2>
+            <p>If your shell cannot find the installed commands, add the install directory to your PATH and check the CLI responds:</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>VERIFY THE INSTALL</span><button class="guide-copy" type="button" data-copy="path-check">Copy commands</button></div>
+              <pre><code id="path-check">export PATH="$HOME/.local/bin:$PATH"&#10;ghostline --help&#10;ghostline-paid-api --help</code></pre>
+            </div>
+            <p>Add the PATH line to your shell startup file to keep it after reopening the terminal. Rerun the installer to update the executables. Keep wallet profiles and channel state in their own private directories.</p>
+          </section>
+          <section id="before-paying" class="guide-section">
+            <p class="guide-label">03 / BEFORE A LIVE RUN</p>
+            <h2>Bring your own setup.</h2>
+            <div class="guide-callout warning"><strong>Early development. Unaudited. Esmeralda testnet only.</strong> Do not use real funds.</div>
+            <p>Ghostline does not provide a hosted paid service, shared wallet, or default deployed template. To follow the quickstart, obtain deployment parameters from the provider and prepare:</p>
+            <ul>
+              <li>A compatible Ootle wallet daemon connected to Esmeralda, kept on loopback.</li>
+              <li>A funded opener account for the channel deposit and opening fee, plus a funded service fee account.</li>
+              <li>The real indexer URL, network tag, deployed template hash, and service public key.</li>
+              <li>Your own private key storage, payer signing key, and wallet claim/view key.</li>
+            </ul>
+            <p>Installation does not establish wallet compatibility or guarantee funding discovery. Review the fee estimate before opening, use integer µT values, and keep credentials and channel files private.</p>
+            <div class="guide-actions"><a href="quickstart.html">Read the Esmeralda quickstart ↗</a><a href="interfaces.html">Explore interfaces and tools ↗</a></div>
+          </section>
+          <section id="source" class="guide-section">
+            <p class="guide-label">04 / BUILD FROM SOURCE</p>
+            <h2>For contributors.</h2>
+            <p>The verified development platform is Linux. Source builds require Rust from the repository's pinned toolchain, Git, a C/C++ toolchain, Clang with libclang, CMake, and <code>protoc</code>.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>BUILD RELEASE EXECUTABLES</span><button class="guide-copy" type="button" data-copy="source-build">Copy commands</button></div>
+              <pre><code id="source-build">git clone https://github.com/AduAkorful/ghostline.git&#10;cd ghostline&#10;git checkout v0.1.0&#10;cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api</code></pre>
+            </div>
+            <p>Build channel WASM and publish a template separately. Never substitute an invented template or account identifier.</p>
+          </section>
+        </article>
+      </div>
+      <nav class="guide-bottom" aria-label="Guide navigation"><a href="../index.html#start">← Back to Ghostline</a><span>INSTALL / NEXT: QUICKSTART</span><a href="quickstart.html">Esmeralda quickstart →</a></nav>
+    </main>
+    <div class="copy-status" id="copy-status" role="status" aria-live="polite"></div>
+  </body>
+</html>

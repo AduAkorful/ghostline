@@ -1,5 +1,9 @@
 # Ghostline FAQ
 
+## Do I need to clone the repository?
+
+No, if you use the glibc-based Linux x86-64 release. The [installer](install.md) downloads the CLI, MCP server, and reference API. Live payments still require a compatible funded Ootle wallet and the provider's channel configuration; the installer does not supply those.
+
 ## What does Ghostline hide?
 
 The service sees each request, its price, and the payer's voucher. Those details stay in service-side records rather than appearing as one chain transaction per request. A third-party chain observer does not learn the number, prices, or timing of the calls from Ghostline settlement alone. Fees are public; settlement reveals the deposit, cumulative amount, channel identity, and executed branch. Funding and timing can still link transactions. See [Privacy](privacy.md).
@@ -50,4 +54,4 @@ No. It is early development, has not had an independent audit, and is intended f
 
 ## Does the side-by-side demo exist?
 
-The product spec calls for a visual comparison of agent activity and chain trace. The owner has explicitly deferred UI work. CLI status, reports, and a privacy receipt exist, but they are operator summaries and not cryptographic proof of the off-chain call log.
+A [read-only prototype](../demo/ui/README.md) presents the historical 1,000-call Esmeralda run alongside its settlement evidence. It contains no wallet connection or transaction controls. Call counts come from service records; the page and CLI privacy receipts are operator summaries, not cryptographic proof of the off-chain call log.
