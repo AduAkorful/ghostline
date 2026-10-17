@@ -34,20 +34,20 @@ This MCP walkthrough needs a correctly configured wallet, deployment, and unspen
 
 ## 3. Verify the recorded Esmeralda settlement
 
-The repository includes sanitized evidence for a historical run in [`demo/ui/evidence.json`](../demo/ui/evidence.json). That run recorded 1,000 HTTP `/fortune` calls at 10 µT each in the service ledger, then one 10,000 µT settlement. The indexer reported both open and settlement transactions as `Finalized`; the settlement fee was 17,640 µT, paid by a service-side fee account. The 1,000 calls were not individual chain transactions.
+The repository includes sanitized evidence for the latest hidden-settlement run in [`demo/ui/evidence.json`](../demo/ui/evidence.json). The service ledger recorded one HTTP `/fortune` call at 10 µT; the new template opened a 1,000 µT channel and settled that voucher in one transaction. The indexer reported both transactions as `Finalized`. The serialized settlement showed the deposit in the covenant claim, but no plaintext service amount or payer remainder; the settlement fee was 17,672 µT, paid by a service-side fee account. This one-call run is evidence for the amount-hiding property, not for large-batch throughput.
 
 With a current Esmeralda indexer URL, verify the historical settlement result from the CLI:
 
 ```bash
 ghostline indexer result \
   --url "$ESMERALDA_INDEXER_URL" \
-  --transaction-id d2857abcf189b228c173552f284b8926f5da922c4a0cfd57d283c0847bc82400
+  --transaction-id 4b82b933685aa5312386d2287e37820879dcc9454efc0273d2029903685a0b40
 ```
 
 The recorded result is `Finalized`. This command performs a read only. The evidence file is a historical record, not a live network read; current indexer availability and retention can affect whether an old transaction remains queryable.
 
 ## Suggested narration
 
-“The first run is reproducible locally: the service returns a 402 quote, Ghostline validates it, then three paid calls accumulate to 30 micro-Tari. No transaction is sent in that local run. The separate Esmeralda record shows the same pay-per-call accounting pattern settled once on-chain: 1,000 calls, 10,000 micro-Tari total, and one finalized settlement. MCP exposes the paid call to an agent host, with policy and optional human approval enforced by the Ghostline process.”
+“The local demo shows HTTP 402 quote validation and cumulative voucher accounting without sending a transaction. The separate live Esmeralda run shows one 10 micro-Tari service call settled once using a commitment-based template: observers could see the 1,000 micro-Tari deposit, but not the exact service amount or payer remainder. MCP exposes the paid call to an agent host, with policy and optional human approval enforced by the Ghostline process.”
 
-When describing privacy, say that call count, prices, and timing remain in service-side records in this demo; public fees remain visible, and settlement reveals the deposited amount, cumulative settlement, channel identity, and executed branch. See the [privacy notes](privacy.md) for the full limits.
+When describing privacy, say that call count and prices remain in service-side records, and that the live Esmeralda transaction hid the exact service amount and payer remainder. The covenant claim revealed the channel deposit; fees, timing, branch, opaque channel id, authorization data, output commitments, and output count remain visible. See the [privacy notes](privacy.md) for the full limits.

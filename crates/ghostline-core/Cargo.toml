@@ -13,6 +13,7 @@ rand = "0.10.1"
 tari_bor = { version = "0.16.3", default-features = true }
 tari_crypto = "0.24.0"
 tari_ootle_common_types = "0.45.0"
+tari_ootle_wallet_crypto = { version = "0.46", features = ["serde"] }
 tari_template_lib = "0.34.0"
 
 [dev-dependencies]

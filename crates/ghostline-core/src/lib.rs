@@ -3,7 +3,7 @@
 //! Voucher and channel-identity primitives.
 //!
 //! The encodings here must match the channel template byte for byte: the template recomputes the channel id from its
-//! bound arguments and verifies the voucher signature over `channel_id || amount_le`.
+//! bound arguments and verifies the voucher signature over `channel_id || service_key || output_commitment`.
 
 mod error;
 mod params;
@@ -23,13 +23,13 @@ pub use error::VoucherError;
 pub use params::ChannelParams;
 pub use private_file::write_private_file;
 pub use session::{PaymentSession, ServiceLedger};
-pub use voucher::{SignedVoucher, sign_voucher, voucher_message, witness_data};
+pub use voucher::{SignedVoucher, sign_voucher, voucher_message};
 
 pub const VOUCHER_DOMAIN: &[u8] = b"ghostline.channel.voucher.v1";
 pub const CHANNEL_ID_DOMAIN: &[u8] = b"ghostline.channel.id.v1";
 pub const NONCE_LEN: usize = 32;
 pub const CHANNEL_ID_LEN: usize = 32;
-pub const MESSAGE_LEN: usize = CHANNEL_ID_LEN + 8;
+pub const MESSAGE_LEN: usize = CHANNEL_ID_LEN + 32 + 32;
 
 fn sign_with_domain(
     secret: &RistrettoSecretKey,

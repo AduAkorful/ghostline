@@ -1,28 +1,31 @@
 {
-  "label": "Verified Esmeralda HTTP paywall run",
+  "label": "Verified Esmeralda hidden-settlement run",
   "network": "Esmeralda",
-  "runDate": null,
+  "runDate": "2026-10-17",
   "serviceRecord": {
     "source": "local HTTP paywall ledger",
     "endpoint": "/fortune",
-    "successfulCalls": 1000,
+    "successfulCalls": 1,
     "unitPriceMicroTari": 10,
-    "acceptedTotalMicroTari": 10000
+    "acceptedTotalMicroTari": 10
   },
   "chainRecord": {
-    "source": "Esmeralda indexer",
-    "openTransactionId": "f883fb36acf98f684e0bc71335624b6f0154fd760d9e89bd107b5838884a5a69",
+    "source": "Esmeralda indexer and service wallet",
+    "openTransactionId": "01d7ea7545e5b4258797aad6536952ad7d51555fe3d05b68821b2ea2928a565c",
     "openFinality": "Finalized",
-    "settlementTransactionId": "d2857abcf189b228c173552f284b8926f5da922c4a0cfd57d283c0847bc82400",
+    "settlementTransactionId": "4b82b933685aa5312386d2287e37820879dcc9454efc0273d2029903685a0b40",
     "settlementFinality": "Finalized",
-    "settledTotalMicroTari": 10000,
-    "settlementFeeMicroTari": 17640,
+    "settledTotalMicroTari": null,
+    "settlementAmountVisibility": "Hidden in public transaction fields",
+    "depositMicroTari": 1000,
+    "settlementFeeMicroTari": 17672,
     "feePayerRole": "service-side fee account",
     "channelOutputAfterSettlement": "down"
   },
   "notes": [
-    "The 1,000 calls were processed through the local HTTP paywall and were not individual on-chain transactions.",
-    "The service call count is service-recorded; transaction details and finality are indexer/chain-confirmed.",
-    "This static historical evidence is not a live network read."
+    "One 10 µT HTTP 402 call was accepted off-chain and settled in one transaction; the call and service amount are not public chain fields.",
+    "The live transaction revealed the 1,000 µT deposit in its covenant claim, but kept the 10 µT service amount and 990 µT remainder hidden from observers.",
+    "Transaction finality and the fee are indexer/wallet-confirmed; the service call and amount come from the local service ledger.",
+    "This static evidence record is not a live network read."
   ]
 }

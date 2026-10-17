@@ -442,6 +442,12 @@ mod tests {
         }
     }
 
+    fn service_key() -> RistrettoPublicKeyBytes {
+        use ootle_byte_type::ToByteType;
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+        create_key_pair_from_seed(13).1.to_byte_type()
+    }
+
     fn signed_charge() -> (ChannelParams, ServiceLedger, String) {
         use ghostline_core::SignedVoucher;
         use ootle_byte_type::ToByteType;
@@ -450,7 +456,7 @@ mod tests {
         let (secret, public) = create_key_pair_from_seed(11);
         let mut params = params();
         params.payer = public.to_byte_type();
-        let voucher = SignedVoucher::sign(&secret, &params, 10).unwrap();
+        let voucher = SignedVoucher::sign(&secret, &params, 10, service_key()).unwrap();
         let mut ledger = ServiceLedger::new(params.clone());
         ledger.accept(&voucher).unwrap();
         (params, ledger, crate::encode_voucher_header(&voucher))
@@ -641,19 +647,19 @@ mod tests {
             .channel_for_quote(Some(&to_hex(&second.channel_id())))
             .unwrap();
         assert_eq!(quoted, second.channel_id());
-        let voucher = SignedVoucher::sign(&secret, &second, 10).unwrap();
+        let voucher = SignedVoucher::sign(&secret, &second, 10, service_key()).unwrap();
         let hex = crate::encode_voucher_header(&voucher);
         assert_eq!(directory.charge(10, Some(&hex)).unwrap(), 10);
         assert_eq!(directory.accepted(&first.channel_id()).unwrap(), 0);
         assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
         let mut unknown = first.clone();
         unknown.nonce = [5u8; NONCE_LEN];
-        let foreign = SignedVoucher::sign(&secret, &unknown, 10).unwrap();
+        let foreign = SignedVoucher::sign(&secret, &unknown, 10, service_key()).unwrap();
         let err = directory
             .charge(10, Some(&crate::encode_voucher_header(&foreign)))
             .unwrap_err();
         assert!(matches!(err, PaywallError::UnknownChannel));
-        let voucher = SignedVoucher::sign(&secret, &first, 10).unwrap();
+        let voucher = SignedVoucher::sign(&secret, &first, 10, service_key()).unwrap();
         assert_eq!(
             directory
                 .charge(10, Some(&crate::encode_voucher_header(&voucher)))

@@ -301,8 +301,9 @@ pub struct TraceView {
 pub struct DisclosureSummary {
     /// These values come from the local service ledger; they are not independently proven by chain data.
     pub off_chain_source: &'static str,
-    /// Fees and the listed transaction ids are public. Settlement exposes the deposit, voucher amount,
-    /// channel id, and the selected spend branch.
+    /// Fees and listed transaction ids are public. Live Esmeralda settlement hides the exact service amount and
+    /// remainder, but its covenant claim reveals the channel deposit; branch, channel id, authorization data, and
+    /// output count also remain visible.
     pub public_chain_data: &'static str,
     /// This report is an operator-assembled summary, not a cryptographic proof or chain-wide scan.
     pub limitations: &'static str,
@@ -345,7 +346,7 @@ pub fn trace_view(
         on_chain,
         disclosure: DisclosureSummary {
             off_chain_source: "Call count and price range are read from the local Ghostline service ledger, not the chain indexer.",
-            public_chain_data: "Transaction ids and fees are public. Settlement reveals the deposit, voucher amount, channel id, and spend branch.",
+            public_chain_data: "Transaction ids and fees are public. Live Esmeralda settlement hides the exact service amount and remainder; its covenant claim reveals the channel deposit. The branch, opaque channel id, authorization data, output commitments, and output count remain visible.",
             limitations: "Operator-assembled evidence only: it does not cryptographically prove off-chain calls or scan for every related chain transaction.",
         },
     }

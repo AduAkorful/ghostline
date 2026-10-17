@@ -57,11 +57,9 @@ impl Channel {
                 spec.channel_template,
                 settle_function(),
                 vec![
-                    encode_arg(&spec.network_tag)?,
+                    encode_arg(&Hash32::from_array(params.channel_id()))?,
                     encode_arg(&spec.payer)?,
-                    encode_arg(&spec.deposit)?,
                     encode_arg(&payer_root)?,
-                    encode_arg(&spec.nonce.to_vec())?,
                 ],
             )),
             SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),

@@ -16,6 +16,8 @@ const vectors = JSON.parse(
   payer_root_hex: string;
   nonce_hex: string;
   amount: number;
+  service_output_key_hex: string;
+  output_commitment_hex: string;
   channel_id_hex: string;
   voucher_message_hex: string;
 };
@@ -32,7 +34,11 @@ test("channel id matches the Rust vector", () => {
 });
 
 test("voucher message matches the Rust vector", () => {
-  const message = voucherMessage(fromHex(vectors.channel_id_hex), BigInt(vectors.amount));
+  const message = voucherMessage(
+    fromHex(vectors.channel_id_hex),
+    fromHex(vectors.service_output_key_hex),
+    fromHex(vectors.output_commitment_hex),
+  );
   assert.equal(toHex(message), vectors.voucher_message_hex);
 });
 

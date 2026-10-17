@@ -257,7 +257,7 @@ async fn run() -> Result<(), String> {
             println!("ok_calls={ok}");
             println!("cumulative={cumulative}");
             println!("unspent_on_channel={remaining}");
-            println!("chain_would_see=1_settlement amount={cumulative}");
+            println!("chain_would_see=1_settlement exact_service_amount=hidden");
         }
     }
     Ok(())

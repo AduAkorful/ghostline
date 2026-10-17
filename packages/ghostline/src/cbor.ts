@@ -58,6 +58,9 @@ export function encodeByteArrayAsUints(bytes: Uint8Array): Uint8Array {
 export function encodeVoucherCbor(
   channelId: Uint8Array,
   amount: bigint,
+  mask: Uint8Array,
+  serviceOutputKey: Uint8Array,
+  outputCommitment: Uint8Array,
   publicNonce: Uint8Array,
   scalar: Uint8Array,
 ): Uint8Array {
@@ -70,5 +73,12 @@ export function encodeVoucherCbor(
   const schnorr = encodeArray([encodeBytes(publicNonce), encodeBytes(scalar)]);
   const payload = encodeArray([encodeUint(0), encodeArray([schnorr])]);
   const signature = encodeArray([payload]);
-  return encodeArray([encodeByteArrayAsUints(channelId), encodeUint(Number(amount)), signature]);
+  return encodeArray([
+    encodeByteArrayAsUints(channelId),
+    encodeUint(Number(amount)),
+    encodeByteArrayAsUints(mask),
+    encodeBytes(serviceOutputKey),
+    encodeBytes(outputCommitment),
+    signature,
+  ]);
 }

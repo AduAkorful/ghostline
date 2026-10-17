@@ -223,7 +223,7 @@ For an unspent channel at or after expiry, use `ghostline channel refund --file 
 
 ## Larger batches
 
-The 1,000-call run proves the batching flow, not that a 10 µT price is economical. Its 10,000 µT of payments settled with a 17,640 µT service-side fee; that fee alone equals 1,764 calls at 10 µT. A separate open required 15,199 µT. Fees change, and the payer and service may pay different transactions, so rerun dry-run estimates and set a price and budget for the deployment.
+The earlier 1,000-call run proves the batching flow, not amount confidentiality or that a 10 µT price is economical. Its 10,000 µT of payments settled with a 17,640 µT service-side fee; that fee alone equals 1,764 calls at 10 µT. A separate open required 15,199 µT. Fees change, and the payer and service may pay different transactions, so rerun dry-run estimates and set a price and budget for the deployment.
 
 To exercise 1,000 HTTP paywall calls on one channel, run the paid API client with the payer secret already supplied through its private process environment:
 
@@ -237,7 +237,7 @@ ghostline-paid-api call \
   --max-per-call 10
 ```
 
-The 0.1 tTARI example deposit covers 1,000 calls at 10 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
+The 0.1 tTARI example deposit covers 1,000 calls at 10 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement using the earlier template; it proves batching, not amount confidentiality. The new commitment-based template separately passed a live one-call hidden-settlement test. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
 
 For more commands, see the [API reference](api-reference.md). For privacy limits, read [privacy notes](privacy.md) and the [threat model](threat-model.md).
 

@@ -15,6 +15,7 @@ pub enum SdkError {
     Voucher(VoucherError),
     Wallet(WalletCryptoError),
     InvalidKey,
+    InvalidServiceOutputKey,
     Encode,
     Encrypt(String),
     Decrypt(String),
@@ -40,6 +41,9 @@ impl fmt::Display for SdkError {
             Self::Voucher(err) => write!(f, "{err}"),
             Self::Wallet(err) => write!(f, "{err}"),
             Self::InvalidKey => write!(f, "invalid ristretto key bytes"),
+            Self::InvalidServiceOutputKey => {
+                write!(f, "settlement output key does not match the signed voucher")
+            }
             Self::Encode => write!(f, "failed to encode bound template arguments"),
             Self::Encrypt(details) => write!(f, "failed to encrypt output data: {details}"),
             Self::Decrypt(details) => write!(f, "failed to decrypt output data: {details}"),

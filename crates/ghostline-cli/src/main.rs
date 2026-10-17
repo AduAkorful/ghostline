@@ -789,11 +789,15 @@ async fn run(cli: Cli) -> Result<(), String> {
                 secrets::PAYER_SECRET_ENV,
                 "payer secret",
             )?;
+            let vendor_hex = vendor_hex
+                .or_else(|| std::env::var(secrets::VENDOR_ENV).ok())
+                .ok_or("set --vendor-hex or GHOSTLINE_POLICY_VENDOR_HEX")?;
+            let vendor = seal::parse_pk("vendor", vendor_hex.trim())?;
             let unsafe_ok = unsafe_no_policy || ghostline_policy::env_flag(secrets::UNSAFE_ENV);
             if unsafe_ok {
                 let amount = amount.ok_or("unsafe sign requires --amount")?;
-                let voucher =
-                    SignedVoucher::sign(&secret, &params, amount).map_err(|e| e.to_string())?;
+                let voucher = SignedVoucher::sign(&secret, &params, amount, vendor)
+                    .map_err(|e| e.to_string())?;
                 println!("{}", to_hex(&voucher.to_bytes()));
             } else {
                 if amount.is_some() {
@@ -807,10 +811,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let path = session
                     .or_else(|| std::env::var_os(secrets::SESSION_ENV).map(PathBuf::from))
                     .ok_or("set --session or GHOSTLINE_SESSION")?;
-                let vendor_hex = vendor_hex
-                    .or_else(|| std::env::var(secrets::VENDOR_ENV).ok())
-                    .ok_or("set --vendor-hex or GHOSTLINE_POLICY_VENDOR_HEX")?;
-                let vendor = seal::parse_pk("vendor", vendor_hex.trim())?;
                 let policy = match (budget, max_per_call) {
                     (Some(b), Some(m)) => ghostline_policy::Policy::new(b, m).allow_vendor(vendor),
                     (None, None) => ghostline_policy::Policy::from_env()?.ok_or(
@@ -2065,7 +2065,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 .clone()
                 .ok_or("channel file has no ledger path")?;
             print_channel_status(ChannelStatusArgs {
-                session: None,
+                session: record.session.clone(),
                 ledger: Some(ledger),
                 store: None,
                 expiry_epoch: Some(record.expiry_epoch),
@@ -3149,8 +3149,10 @@ mod tests {
         let message = "wallet daemon RPC failed: connection refused";
         assert_eq!(wallet_open_error(message.into()), message);
     }
+    use ootle_byte_type::ToByteType;
     use tari_crypto::keys::PublicKey as _;
     use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+    use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
     use tari_utilities::ByteArray;
 
@@ -3276,7 +3278,9 @@ mod tests {
         assert_eq!(loaded.deposit_mask_hex.as_deref(), Some(mask.as_str()));
         let mut store = ghostline_paywall::ChannelStore::open(&session_path).unwrap();
         let mut session = store.session().unwrap();
-        session.sign_next(&secret, 10).unwrap();
+        session
+            .sign_next(&secret, 10, create_key_pair_from_seed(13).1.to_byte_type())
+            .unwrap();
         store.save_session(&session).unwrap();
         let (_, again, cumulative) = ensure_payer_session(&path).unwrap();
         assert!(!again);
@@ -3293,7 +3297,13 @@ mod tests {
     #[test]
     fn sign_then_verify() {
         let (secret, params) = sample();
-        let voucher = SignedVoucher::sign(&secret, &params, 30).unwrap();
+        let voucher = SignedVoucher::sign(
+            &secret,
+            &params,
+            30,
+            create_key_pair_from_seed(13).1.to_byte_type(),
+        )
+        .unwrap();
         voucher.verify(&params).unwrap();
         assert_eq!(voucher.channel_id.len(), CHANNEL_ID_LEN);
     }
@@ -3338,7 +3348,9 @@ mod seal_tests {
         )
         .unwrap();
         decode_tx(&open_hex).unwrap();
-        let voucher = SignedVoucher::sign(&payer_secret, channel.params(), 30).unwrap();
+        let voucher =
+            SignedVoucher::sign(&payer_secret, channel.params(), 30, channel.spec().service)
+                .unwrap();
         let settle_hex = seal::seal_settle(
             seal::SettleArgs {
                 channel: &channel,
@@ -3453,7 +3465,9 @@ mod seal_tests {
             channel_template: Hash32::from_array([7u8; 32]),
         })
         .unwrap();
-        let voucher = SignedVoucher::sign(&payer_secret, channel.params(), 30).unwrap();
+        let voucher =
+            SignedVoucher::sign(&payer_secret, channel.params(), 30, channel.spec().service)
+                .unwrap();
         let unsigned = seal::unsigned_settle(
             seal::SettleArgs {
                 channel: &channel,

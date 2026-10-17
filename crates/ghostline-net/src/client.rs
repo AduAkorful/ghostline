@@ -395,8 +395,13 @@ mod tests {
             channel_template: Hash32::from_array([7u8; 32]),
         })
         .unwrap();
-        let voucher =
-            ghostline_core::SignedVoucher::sign(&payer_secret, channel.params(), 30).unwrap();
+        let voucher = ghostline_core::SignedVoucher::sign(
+            &payer_secret,
+            channel.params(),
+            30,
+            channel.spec().service,
+        )
+        .unwrap();
         let funded = MaskAndValue {
             value: 100,
             mask: tari_crypto::ristretto::RistrettoSecretKey::random(&mut rand::rng()),

@@ -42,9 +42,9 @@ The service ledger and payer session are separate files/process state. The servi
 
 ## Channel identity and voucher
 
-`ChannelParams` binds the network tag, payer public key, deposit in integer micro-units, payer spend-condition root, and a 32-byte nonce into a 32-byte channel id using the versioned channel-id domain and Blake2b-256. The recipient key and expiry are enforced by the spend-condition tree; the voucher binds to the resulting channel id and a cumulative amount.
+`ChannelParams` binds the network tag, payer public key, deposit in integer micro-units, payer spend-condition root, and a 32-byte nonce into a 32-byte channel id using the versioned channel-id domain and Blake2b-256. The recipient key and expiry are enforced by the spend-condition tree. The channel id is a hash commitment to those parameters, rather than a serialization of them.
 
-The signed voucher message is the 32-byte channel id followed by the cumulative amount as little-endian `u64`. Schnorr signing uses the versioned voucher domain. Voucher CBOR carries channel id, amount, and signature. The on-chain contract validates the signature and deposit ceiling. It pays the delta over the amount already redeemed; this Ghostline channel variant settles and closes in one spend. A full-deposit voucher omits a zero-valued payer output.
+The payer creates a fresh-mask Pedersen commitment to the cumulative amount and signs the 32-byte channel id, service output authorization key, and 32-byte commitment (96 bytes total) under the versioned voucher domain. The off-chain voucher also carries the amount and mask so the service can verify the opening and later scan its output. The on-chain witness carries only the commitment, service key, and signature. The template requires the matching service output and an optional payer-condition change output, with no revealed values or additional inputs. Ootle's transfer proofs enforce range and conservation. The Ghostline channel variant settles and closes in one spend; a full-deposit voucher omits a zero-valued payer output.
 
 Amounts are integer micro-units throughout. Metered pricing uses checked multiplication. Rust and TypeScript maintain shared vectors for the supported channel-id and voucher format.
 
@@ -58,7 +58,7 @@ Amounts are integer micro-units throughout. Metered pricing uses checked multipl
 
 ## What the chain reveals
 
-An unopened stealth output hides its amount and owner. A settlement reveals the channel identity, deposit, cumulative voucher amount, and executed branch; transaction fees are public. Funding history, timing, fee payer, and later wallet behavior may correlate activity. See [Privacy and observer view](privacy.md) and [Threat model](threat-model.md) for the detailed limits.
+An unopened stealth output hides its amount and owner. Live Esmeralda validation shows the settle witness and output minimum-value promises do not reveal the exact service amount or payer remainder. The covenant claim does reveal the channel deposit in the tested settlement. The branch, opaque channel id, payer and service authorization data, output commitments/count, fees, and timing are also visible. Funding history, fee payer, and later wallet behavior may correlate activity. See [Privacy and observer view](privacy.md) and [Threat model](threat-model.md) for the limits.
 
 ## Network coverage
 

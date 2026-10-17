@@ -71,12 +71,20 @@ export function channelId(params: ChannelParams): Uint8Array {
   return blake2b(joined, { dkLen: 32 });
 }
 
-export function voucherMessage(channelIdBytes: Uint8Array, amount: bigint): Uint8Array {
+export function voucherMessage(
+  channelIdBytes: Uint8Array,
+  serviceOutputKey: Uint8Array,
+  outputCommitment: Uint8Array,
+): Uint8Array {
   if (channelIdBytes.length !== CHANNEL_ID_LEN) {
     throw new Error("channel id must be 32 bytes");
   }
-  const out = new Uint8Array(CHANNEL_ID_LEN + 8);
+  if (serviceOutputKey.length !== 32 || outputCommitment.length !== 32) {
+    throw new Error("service output key and commitment must be 32 bytes");
+  }
+  const out = new Uint8Array(CHANNEL_ID_LEN + 64);
   out.set(channelIdBytes, 0);
-  out.set(u64Le(amount), CHANNEL_ID_LEN);
+  out.set(serviceOutputKey, CHANNEL_ID_LEN);
+  out.set(outputCommitment, CHANNEL_ID_LEN + 32);
   return out;
 }

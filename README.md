@@ -11,7 +11,7 @@ Private pay-per-call channels for AI agents on [Tari Ootle](https://ootle.tari.c
 3. **Settle:** The service submits the latest voucher. The contract pays the amount owed and returns the remainder.
 4. **Refund:** After expiry, the payer can reclaim the remaining funds.
 
-The service sees each request and voucher. Chain observers see channel transactions, settlement details, and fees. Funding patterns and timing may still create links between activity.
+The service sees each request and voucher. On Esmeralda, the live hidden-settlement test kept the exact service amount and payer remainder out of public transaction fields, while the covenant claim revealed the channel deposit. Fees, timing, branch, authorization data, and output commitments remain visible. Funding patterns and timing may still link activity.
 
 ## Install
 

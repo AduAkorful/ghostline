@@ -166,8 +166,9 @@ pub fn sign_voucher_hex(args: &SignArgs) -> Result<String, String> {
 fn sign_voucher_hex_with_attestation(args: &SignArgs, attested: bool) -> Result<String, String> {
     let params = parse_params(&args.channel)?;
     let secret = payer_secret_from_env()?;
+    let vendor = vendor_from_env()?;
     let mut store = session_store(params)?;
-    sign_store(&mut store, &secret, args.price, attested)
+    sign_store(&mut store, &secret, args.price, vendor, attested)
 }
 
 /// Sign `quote.price` against the payer session. The quote's channel id must match the store.
@@ -187,33 +188,33 @@ fn voucher_at(
     if id != quote.channel_id {
         return Err("payment-required channel_id does not match the payer session".into());
     }
+    let vendor = vendor_from_env()?;
     if !env_flag("GHOSTLINE_POLICY_UNSAFE") {
-        let vendor = vendor_from_env()?;
         quote
             .validate_for(&store.channel_id().map_err(|e| e.to_string())?, &vendor)
             .map_err(|e| e.to_string())?;
     }
     let secret = payer_secret_from_env()?;
-    sign_store(&mut store, &secret, quote.price, attested)
+    sign_store(&mut store, &secret, quote.price, vendor, attested)
 }
 
 fn sign_store(
     store: &mut ChannelStore,
     secret: &RistrettoSecretKey,
     price: u64,
+    vendor: RistrettoPublicKeyBytes,
     attested: bool,
 ) -> Result<String, String> {
     if env_flag("GHOSTLINE_POLICY_UNSAFE") {
         let mut session = store.session().map_err(|e| e.to_string())?;
         let voucher = session
-            .sign_next(secret, price)
+            .sign_next(secret, price, vendor)
             .map_err(|e: VoucherError| e.to_string())?;
         store.save_session(&session).map_err(|e| e.to_string())?;
         return Ok(encode_voucher_header(&voucher));
     }
     let policy = Policy::from_env()?
         .ok_or("set GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL")?;
-    let vendor = vendor_from_env()?;
     let engine = PolicyEngine::new(policy)
         .with_audit_file_from_env()
         .map_err(|e| e.to_string())?
@@ -843,6 +844,7 @@ mod tests {
         use std::net::TcpListener;
 
         let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service) = create_key_pair_from_seed(13);
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
@@ -891,6 +893,10 @@ mod tests {
             std::env::set_var("GHOSTLINE_SESSION", &path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
             std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+            std::env::set_var(
+                "GHOSTLINE_POLICY_VENDOR_HEX",
+                to_hex(service.to_byte_type().as_bytes()),
+            );
             std::env::remove_var("GHOSTLINE_POLICY_REQUIRE_HUMAN");
         }
         let result = call_paid(&CallPaidArgs {
@@ -903,6 +909,7 @@ mod tests {
             std::env::remove_var("GHOSTLINE_SESSION");
             std::env::remove_var("GHOSTLINE_PAYER_SECRET");
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+            std::env::remove_var("GHOSTLINE_POLICY_VENDOR_HEX");
             std::env::remove_var("GHOSTLINE_POLICY_REQUIRE_HUMAN");
         }
         assert_eq!(result.status, 200);
@@ -948,7 +955,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(views.len(), 1);
-        assert_eq!(views[0].promise, 100);
+        assert_eq!(views[0].promise, 1);
         let _env = ENV.lock().unwrap();
         unsafe {
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
@@ -1148,6 +1155,7 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service) = create_key_pair_from_seed(13);
         let params = ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
@@ -1205,6 +1213,10 @@ mod tests {
             std::env::set_var("GHOSTLINE_CHANNEL_FILE", &file_path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
             std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+            std::env::set_var(
+                "GHOSTLINE_POLICY_VENDOR_HEX",
+                to_hex(service.to_byte_type().as_bytes()),
+            );
         }
         let paid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
@@ -1216,6 +1228,7 @@ mod tests {
             std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
             std::env::remove_var("GHOSTLINE_PAYER_SECRET");
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+            std::env::remove_var("GHOSTLINE_POLICY_VENDOR_HEX");
         }
         assert_eq!(paid.status, 200);
         assert!(!paid.needs_channel);
@@ -1319,6 +1332,7 @@ mod tests {
             std::env::set_var("GHOSTLINE_CHANNEL_FILE", &file_path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
             std::env::set_var("GHOSTLINE_POLICY_UNSAFE", "1");
+            std::env::set_var("GHOSTLINE_POLICY_VENDOR_HEX", &service_hex);
         }
         let paid = call_paid(&CallPaidArgs {
             url: format!("http://{addr}/fortune"),
@@ -1330,6 +1344,7 @@ mod tests {
             std::env::remove_var("GHOSTLINE_CHANNEL_FILE");
             std::env::remove_var("GHOSTLINE_PAYER_SECRET");
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
+            std::env::remove_var("GHOSTLINE_POLICY_VENDOR_HEX");
         }
         assert_eq!(paid.status, 200);
         assert!(!paid.needs_channel);
@@ -1386,7 +1401,9 @@ mod tests {
         let secret = RistrettoSecretKey::from_canonical_bytes(secret.as_bytes()).unwrap();
         let mut store = ChannelStore::open(&first.session).unwrap();
         let mut session = store.session().unwrap();
-        session.sign_next(&secret, 10).unwrap();
+        session
+            .sign_next(&secret, 10, create_key_pair_from_seed(13).1.to_byte_type())
+            .unwrap();
         store.save_session(&session).unwrap();
         let second = open_channel::ensure_session().unwrap();
         assert!(!second.created);
@@ -1514,7 +1531,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let ledger_path = dir.join("ledger.json");
         let mut session = PaymentSession::new(params.clone());
-        let voucher = session.sign_next(&secret, 10).unwrap();
+        let voucher = session
+            .sign_next(&secret, 10, create_key_pair_from_seed(13).1.to_byte_type())
+            .unwrap();
         let mut ledger = ServiceLedger::new(params.clone());
         assert_eq!(ledger.accept(&voucher).unwrap(), 10);
         let mut store = ChannelStore::create(&ledger_path, params).unwrap();

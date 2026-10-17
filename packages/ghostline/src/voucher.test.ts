@@ -19,6 +19,9 @@ const vectors = JSON.parse(
   payer_root_hex: string;
   channel_nonce_hex: string;
   amount: number;
+  service_output_key_hex: string;
+  mask_hex: string;
+  output_commitment_hex: string;
   channel_id_hex: string;
   voucher_hex: string;
 };
@@ -40,14 +43,22 @@ test("signVoucher matches the Rust voucher bytes", () => {
     fromHex(vectors.payer_secret_hex),
     params,
     BigInt(vectors.amount),
+    fromHex(vectors.service_output_key_hex),
+    fromHex(vectors.mask_hex),
     fromHex(vectors.sign_nonce_secret_hex),
   );
   assert.equal(toHex(voucher.channelId), vectors.channel_id_hex);
+  assert.equal(toHex(voucher.outputCommitment), vectors.output_commitment_hex);
   assert.equal(toHex(voucherToBytes(voucher)), vectors.voucher_hex);
   verifyVoucher(voucher, params);
 });
 
 test("a random-nonce voucher still verifies", () => {
-  const voucher = signVoucher(fromHex(vectors.payer_secret_hex), params, 10n);
+  const voucher = signVoucher(
+    fromHex(vectors.payer_secret_hex),
+    params,
+    10n,
+    fromHex(vectors.service_output_key_hex),
+  );
   verifyVoucher(voucher, params);
 });

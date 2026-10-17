@@ -56,8 +56,10 @@ mod tests {
         PaymentSession,
         ServiceLedger,
         tari_crypto::ristretto::RistrettoSecretKey,
+        tari_template_lib::types::crypto::RistrettoPublicKeyBytes,
     ) {
         let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
         let params = ghostline_core::ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
@@ -69,12 +71,13 @@ mod tests {
             PaymentSession::new(params.clone()),
             ServiceLedger::new(params),
             secret,
+            service_public.to_byte_type(),
         )
     }
 
     #[test]
     fn missing_voucher_is_payment_required() {
-        let (_payer, mut ledger, _secret) = setup();
+        let (_payer, mut ledger, _secret, _service) = setup();
         assert_eq!(
             charge(&mut ledger, 10, None),
             Err(PaywallError::MissingVoucher)
@@ -83,8 +86,8 @@ mod tests {
 
     #[test]
     fn exact_price_is_accepted() {
-        let (mut payer, mut ledger, secret) = setup();
-        let voucher = payer.sign_next(&secret, 10).unwrap();
+        let (mut payer, mut ledger, secret, service_key) = setup();
+        let voucher = payer.sign_next(&secret, 10, service_key).unwrap();
         let hex = encode_voucher_header(&voucher);
         assert_eq!(charge(&mut ledger, 10, Some(&hex)).unwrap(), 10);
         assert_eq!(charge(&mut ledger, 10, Some(&hex)).unwrap(), 0);
@@ -92,8 +95,8 @@ mod tests {
 
     #[test]
     fn overpaying_the_call_is_rejected() {
-        let (mut payer, mut ledger, secret) = setup();
-        let voucher = payer.sign_next(&secret, 20).unwrap();
+        let (mut payer, mut ledger, secret, service_key) = setup();
+        let voucher = payer.sign_next(&secret, 20, service_key).unwrap();
         let hex = encode_voucher_header(&voucher);
         assert_eq!(
             charge(&mut ledger, 10, Some(&hex)),

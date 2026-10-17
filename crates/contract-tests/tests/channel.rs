@@ -10,17 +10,14 @@
 
 mod support;
 
-use ghostline_core::{NONCE_LEN, SignedVoucher, sign_voucher};
+use ghostline_core::{NONCE_LEN, SignedVoucher};
 use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, settle};
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT, fund, transfer};
+use support::{CHANNEL, DEPOSIT, fund};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction};
-use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, Signature};
-use tari_template_test_tooling::{
-    TemplateTest,
-    support::spec::{InputAuthSpec, InputSpec, OutputAuthSpec},
-};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
 
 const NETWORK_TAG: u8 = 1;
 const NONCE: [u8; NONCE_LEN] = [42u8; NONCE_LEN];
@@ -48,7 +45,6 @@ struct Scenario {
     forged: bool,
     voucher_nonce: [u8; NONCE_LEN],
     voucher_network: u8,
-    payer_gets: Option<u64>,
 }
 
 impl Scenario {
@@ -62,7 +58,6 @@ impl Scenario {
             forged: false,
             voucher_nonce: NONCE,
             voucher_network: NETWORK_TAG,
-            payer_gets: None,
         }
     }
 
@@ -116,42 +111,17 @@ fn run(s: Scenario) -> Result<(), String> {
             let mut params = channel.params().clone();
             params.network_tag = s.voucher_network;
             params.nonce = s.voucher_nonce;
-            let signature: Signature<_> = sign_voucher(signing_key, &params, s.signed_amount);
-            let voucher = SignedVoucher {
-                channel_id: params.channel_id(),
-                amount: s.claimed_amount,
-                signature,
-            };
-            if let Some(payer_gets) = s.payer_gets {
-                let input = InputSpec::with_auth(
-                    funded,
-                    InputAuthSpec::script_path(
-                        channel.leaves_vec(),
-                        channel.settle_leaf().clone(),
-                        voucher.witness_data(),
-                    ),
-                );
-                transfer(
-                    vec![input],
-                    vec![
-                        (
-                            payer_gets,
-                            OutputAuthSpec::Conditions(vec![channel.payer_target().clone()]),
-                        ),
-                        (DEPOSIT - payer_gets, OutputAuthSpec::KeyPath(service)),
-                    ],
-                )
-                .statement
-            } else {
-                settle(
-                    &channel,
-                    funded,
-                    &voucher,
-                    service,
-                    OutputScan::localnet(resource),
-                )
-                .map_err(|e| e.to_string())?
-            }
+            let mut voucher = SignedVoucher::sign(signing_key, &params, s.signed_amount, service)
+                .map_err(|e| e.to_string())?;
+            voucher.amount = s.claimed_amount;
+            settle(
+                &channel,
+                funded,
+                &voucher,
+                service,
+                OutputScan::localnet(resource),
+            )
+            .map_err(|e| e.to_string())?
         }
         Action::Refund => refund(&channel, funded, payer, OutputScan::localnet(resource))
             .map_err(|e| e.to_string())?,
@@ -212,13 +182,13 @@ fn settle_forged_signature_is_rejected() {
 }
 
 #[test]
-fn settle_claim_above_signed_amount_is_rejected() {
+fn settle_changed_opening_is_rejected() {
     assert_rejected(
         run(Scenario {
             claimed_amount: 60,
             ..Scenario::settle()
         }),
-        "invalid voucher signature",
+        "do not open its commitment",
     );
 }
 
@@ -231,17 +201,6 @@ fn settle_amount_above_deposit_is_rejected() {
             ..Scenario::settle()
         }),
         "voucher exceeds deposit",
-    );
-}
-
-#[test]
-fn settle_remainder_not_returned_to_payer_is_rejected() {
-    assert_rejected(
-        run(Scenario {
-            payer_gets: Some(0),
-            ..Scenario::settle()
-        }),
-        "required output not present",
     );
 }
 
@@ -357,7 +316,7 @@ fn sdk_open_from_key_path_then_settle() {
         .seal(&payer_secret);
     test.execute_expect_success(open_tx, vec![]);
 
-    let voucher = SignedVoucher::sign(&payer_secret, channel.params(), SIGNED).unwrap();
+    let voucher = SignedVoucher::sign(&payer_secret, channel.params(), SIGNED, service).unwrap();
     let settle_stmt = settle(
         &channel,
         opened.deposit,

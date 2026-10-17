@@ -6,6 +6,8 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoucherError {
     InvalidSignature,
+    InvalidCommitment,
+    InvalidServiceOutputKey,
     ExceedsDeposit { amount: u64, deposit: u64 },
     NotIncreased { amount: u64, accepted: u64 },
     ChannelMismatch,
@@ -18,6 +20,12 @@ impl fmt::Display for VoucherError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidSignature => write!(f, "invalid voucher signature"),
+            Self::InvalidCommitment => {
+                write!(f, "voucher amount and mask do not open its commitment")
+            }
+            Self::InvalidServiceOutputKey => {
+                write!(f, "voucher service output key is not a valid Ristretto key")
+            }
             Self::ExceedsDeposit { amount, deposit } => {
                 write!(f, "voucher exceeds deposit ({amount} > {deposit})")
             }

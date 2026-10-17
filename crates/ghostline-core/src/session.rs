@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{ChannelParams, SignedVoucher, VoucherError};
 
@@ -43,12 +44,13 @@ impl PaymentSession {
         &mut self,
         secret: &RistrettoSecretKey,
         increment: u64,
+        service_output_key: RistrettoPublicKeyBytes,
     ) -> Result<SignedVoucher, VoucherError> {
         let amount = self
             .cumulative
             .checked_add(increment)
             .ok_or(VoucherError::Overflow)?;
-        let voucher = SignedVoucher::sign(secret, &self.params, amount)?;
+        let voucher = SignedVoucher::sign(secret, &self.params, amount, service_output_key)?;
         self.cumulative = amount;
         Ok(voucher)
     }
@@ -120,8 +122,14 @@ mod tests {
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_template_lib::types::Hash32;
 
-    fn setup() -> (RistrettoSecretKey, PaymentSession, ServiceLedger) {
+    fn setup() -> (
+        RistrettoSecretKey,
+        PaymentSession,
+        ServiceLedger,
+        RistrettoPublicKeyBytes,
+    ) {
         let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
         let params = ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
@@ -133,15 +141,16 @@ mod tests {
             secret,
             PaymentSession::new(params.clone()),
             ServiceLedger::new(params),
+            service_public.to_byte_type(),
         )
     }
 
     #[test]
     fn two_payments_settle_the_delta() {
-        let (secret, mut payer, mut service) = setup();
-        let first = payer.sign_next(&secret, 10).unwrap();
+        let (secret, mut payer, mut service, service_key) = setup();
+        let first = payer.sign_next(&secret, 10, service_key).unwrap();
         assert_eq!(service.accept(&first).unwrap(), 10);
-        let second = payer.sign_next(&secret, 25).unwrap();
+        let second = payer.sign_next(&secret, 25, service_key).unwrap();
         assert_eq!(service.accept(&second).unwrap(), 25);
         assert_eq!(service.accepted(), 35);
         assert_eq!(service.remaining(), 65);
@@ -149,9 +158,9 @@ mod tests {
 
     #[test]
     fn replay_of_older_total_is_rejected() {
-        let (secret, mut payer, mut service) = setup();
-        let first = payer.sign_next(&secret, 10).unwrap();
-        let second = payer.sign_next(&secret, 5).unwrap();
+        let (secret, mut payer, mut service, service_key) = setup();
+        let first = payer.sign_next(&secret, 10, service_key).unwrap();
+        let second = payer.sign_next(&secret, 5, service_key).unwrap();
         service.accept(&second).unwrap();
         assert_eq!(
             service.accept(&first),
@@ -165,9 +174,9 @@ mod tests {
 
     #[test]
     fn cannot_exceed_deposit() {
-        let (secret, mut payer, _service) = setup();
+        let (secret, mut payer, _service, service_key) = setup();
         assert!(matches!(
-            payer.sign_next(&secret, 101),
+            payer.sign_next(&secret, 101, service_key),
             Err(VoucherError::ExceedsDeposit { .. })
         ));
         assert_eq!(payer.cumulative(), 0);
@@ -175,8 +184,8 @@ mod tests {
 
     #[test]
     fn latest_voucher_replay_is_idempotent() {
-        let (secret, mut payer, mut service) = setup();
-        let first = payer.sign_next(&secret, 10).unwrap();
+        let (secret, mut payer, mut service, service_key) = setup();
+        let first = payer.sign_next(&secret, 10, service_key).unwrap();
         assert_eq!(service.accept(&first).unwrap(), 10);
         assert_eq!(service.accept(&first).unwrap(), 0);
         assert_eq!(service.accepted(), 10);
@@ -185,6 +194,7 @@ mod tests {
     #[test]
     fn thousand_calls_are_one_cumulative_total() {
         let (secret, public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
         let params = ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
@@ -196,7 +206,9 @@ mod tests {
         let mut service = ServiceLedger::new(params);
         let mut last = None;
         for _ in 0..1000 {
-            let voucher = payer.sign_next(&secret, 10).unwrap();
+            let voucher = payer
+                .sign_next(&secret, 10, service_public.to_byte_type())
+                .unwrap();
             assert_eq!(service.accept(&voucher).unwrap(), 10);
             last = Some(voucher);
         }

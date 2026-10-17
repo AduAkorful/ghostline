@@ -15,7 +15,6 @@ pub use channel::{Channel, ChannelSpec, SETTLE_FUNCTION};
 pub use error::SdkError;
 pub use ghostline_core::{
     ChannelParams, PaymentSession, ServiceLedger, SignedVoucher, VoucherError, sign_voucher,
-    witness_data,
 };
 pub use recover::{
     RecoveredOutput, StealthOutputView, inspect_transaction, unblind_output, unblind_transaction,

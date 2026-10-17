@@ -187,12 +187,35 @@ impl ObserverView {
             ],
             at_settle: vec![
                 "the settle branch",
-                "the voucher amount",
-                "the remainder (which reveals the deposit)",
+                "the channel deposit amount (revealed in the covenant claim on Esmeralda)",
+                "the output commitments and output count",
                 "the channel id bound into the template",
-                "the service key on that leaf",
+                "the payer and service authorization data",
+                "fees and timing",
+                "not the exact service settlement amount or payer remainder",
             ],
         }
+    }
+}
+
+#[cfg(test)]
+mod observer_tests {
+    use super::ObserverView;
+
+    #[test]
+    fn panel_reports_live_settlement_disclosures() {
+        let panel = ObserverView::default_panel();
+        assert!(
+            panel.at_settle.contains(
+                &"the channel deposit amount (revealed in the covenant claim on Esmeralda)"
+            )
+        );
+        assert!(
+            panel
+                .at_settle
+                .contains(&"not the exact service settlement amount or payer remainder")
+        );
+        assert!(!panel.at_settle.contains(&"the voucher amount"));
     }
 }
 

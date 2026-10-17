@@ -53,7 +53,7 @@ impl AgentPayer {
             self.session.cumulative(),
             Instant::now(),
         )?;
-        Ok(self.session.sign_next(secret, quote.price)?)
+        Ok(self.session.sign_next(secret, quote.price, self.vendor)?)
     }
 
     /// Operator has already confirmed this quote. Use when the engine was built with `require_human`.
@@ -69,7 +69,7 @@ impl AgentPayer {
             self.session.cumulative(),
             Instant::now(),
         )?;
-        Ok(self.session.sign_next(secret, quote.price)?)
+        Ok(self.session.sign_next(secret, quote.price, self.vendor)?)
     }
 
     fn validate_quote(&self, quote: &PaymentRequired) -> Result<(), AgentError> {

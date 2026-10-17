@@ -4,7 +4,7 @@ use ghostline_core::{ChannelParams, NONCE_LEN, PaymentSession, ServiceLedger};
 use ootle_byte_type::ToByteType;
 use proptest::prelude::*;
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-use tari_template_lib::types::Hash32;
+use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 fn params(deposit: u64) -> ChannelParams {
     let (_, public) = create_key_pair_from_seed(11);
@@ -25,11 +25,13 @@ proptest! {
     ) {
         let (secret, _) = create_key_pair_from_seed(11);
         let p = params(deposit);
+        let (_, service_public) = create_key_pair_from_seed(13);
+        let service_key: RistrettoPublicKeyBytes = service_public.to_byte_type();
         let mut payer = PaymentSession::new(p.clone());
         let mut service = ServiceLedger::new(p);
         let mut last_ok = 0u64;
         for inc in increments {
-            match payer.sign_next(&secret, inc) {
+            match payer.sign_next(&secret, inc, service_key) {
                 Ok(voucher) => {
                     let delta = service.accept(&voucher).unwrap();
                     prop_assert!(service.accepted() <= deposit);
@@ -54,10 +56,12 @@ proptest! {
     ) {
         prop_assume!(first + second <= 100);
         let (secret, _) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
+        let service_key: RistrettoPublicKeyBytes = service_public.to_byte_type();
         let mut payer = PaymentSession::new(params(100));
         let mut service = ServiceLedger::new(params(100));
-        let older = payer.sign_next(&secret, first).unwrap();
-        let newer = payer.sign_next(&secret, second).unwrap();
+        let older = payer.sign_next(&secret, first, service_key).unwrap();
+        let newer = payer.sign_next(&secret, second, service_key).unwrap();
         service.accept(&newer).unwrap();
         prop_assert!(service.accept(&older).is_err());
         prop_assert_eq!(service.accepted(), first + second);

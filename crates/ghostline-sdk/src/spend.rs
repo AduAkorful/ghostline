@@ -63,7 +63,7 @@ impl std::fmt::Debug for OpenStatement {
 /// Spends key-path stealth inputs into the channel's two-leaf condition tree (`PayTo::Conditions`).
 ///
 /// Input value above the deposit is returned as a key-path change output to `payer_change_key`.
-/// Every output's minimum-value promise equals its value.
+/// Output minimum-value promises are fixed at one micro-unit so the opening amount is not published.
 pub fn fund_open(
     channel: &Channel,
     inputs: impl IntoIterator<Item = MaskAndValue>,
@@ -116,8 +116,8 @@ pub fn fund_open(
 
 /// Spends the channel UTXO with a voucher: service receives `amount`, remainder returns under `payer_root`.
 ///
-/// Every output's minimum-value promise equals its value. Zero-value outputs are omitted (a full-deposit voucher
-/// produces only the service output).
+/// Amount and mask stay in the off-chain voucher. Public outputs use a one-unit minimum-value promise. Zero-value
+/// change is omitted for a full-deposit voucher.
 pub fn settle(
     channel: &Channel,
     deposit: MaskAndValue,
@@ -126,6 +126,9 @@ pub fn settle(
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     voucher.verify(channel.params())?;
+    if voucher.service_output_key != service_output_key {
+        return Err(SdkError::InvalidServiceOutputKey);
+    }
     if deposit.value != channel.params().deposit {
         return Err(SdkError::DepositMismatch {
             expected: channel.params().deposit,
@@ -157,8 +160,9 @@ pub fn settle(
         )?);
     }
     if voucher.amount > 0 {
-        outputs.push(output(
+        outputs.push(output_with_mask(
             voucher.amount,
+            voucher.mask.clone(),
             SpendAuthorization::Key(service_output_key),
             &service_output_key,
             scan,
@@ -215,6 +219,16 @@ fn output(
     scan: OutputScan,
 ) -> Result<StealthOutputWitness, SdkError> {
     let mask = RistrettoSecretKey::random(&mut rand::rng());
+    output_with_mask(amount, mask, auth, recipient, scan)
+}
+
+fn output_with_mask(
+    amount: u64,
+    mask: RistrettoSecretKey,
+    auth: SpendAuthorization,
+    recipient: &RistrettoPublicKeyBytes,
+    scan: OutputScan,
+) -> Result<StealthOutputWitness, SdkError> {
     let (nonce_secret, nonce_public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let recipient_pk = RistrettoPublicKey::from_canonical_bytes(recipient.as_bytes())
         .map_err(|_| SdkError::InvalidKey)?;
@@ -233,7 +247,7 @@ fn output(
             amount,
             mask,
             sender_public_nonce: nonce_public,
-            minimum_value_promise: amount,
+            minimum_value_promise: 1,
             encrypted_data,
             resource_view_key: None,
         },
@@ -282,9 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn settle_outputs_promise_their_own_value() {
+    fn settle_outputs_use_non_disclosing_promises() {
         let (secret, channel, service) = channel_and_keys();
-        let voucher = SignedVoucher::sign(&secret, channel.params(), 30).unwrap();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 30, service).unwrap();
         let statement = settle(&channel, funded(100), &voucher, service, scan()).unwrap();
         let promises: Vec<u64> = statement
             .outputs_statement
@@ -292,20 +306,20 @@ mod tests {
             .iter()
             .map(|o| o.output.minimum_value_promise)
             .collect();
-        assert_eq!(promises, vec![70, 30]);
+        assert_eq!(promises, vec![1, 1]);
     }
 
     #[test]
     fn full_deposit_voucher_omits_remainder() {
         let (secret, channel, service) = channel_and_keys();
-        let voucher = SignedVoucher::sign(&secret, channel.params(), 100).unwrap();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 100, service).unwrap();
         let statement = settle(&channel, funded(100), &voucher, service, scan()).unwrap();
         assert_eq!(statement.outputs_statement.outputs.len(), 1);
         assert_eq!(
             statement.outputs_statement.outputs[0]
                 .output
                 .minimum_value_promise,
-            100
+            1
         );
     }
 
@@ -318,14 +332,14 @@ mod tests {
             statement.outputs_statement.outputs[0]
                 .output
                 .minimum_value_promise,
-            100
+            1
         );
     }
 
     #[test]
     fn settle_rejects_wrong_utxo_value() {
         let (secret, channel, service) = channel_and_keys();
-        let voucher = SignedVoucher::sign(&secret, channel.params(), 30).unwrap();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 30, service).unwrap();
         let err = settle(&channel, funded(99), &voucher, service, scan()).unwrap_err();
         assert!(matches!(
             err,
@@ -340,7 +354,7 @@ mod tests {
     fn settle_rejects_invalid_voucher_before_building_transaction() {
         let (_secret, channel, service) = channel_and_keys();
         let (wrong_secret, _) = create_key_pair_from_seed(12);
-        let voucher = SignedVoucher::sign(&wrong_secret, channel.params(), 30).unwrap();
+        let voucher = SignedVoucher::sign(&wrong_secret, channel.params(), 30, service).unwrap();
         assert!(matches!(
             settle(&channel, funded(100), &voucher, service, scan()),
             Err(SdkError::Voucher(
@@ -358,7 +372,7 @@ mod tests {
             opened.statement.outputs_statement.outputs[0]
                 .output
                 .minimum_value_promise,
-            100
+            1
         );
         let expected = stealth::pay_to_output_authorization(
             &PayTo::Conditions(channel.leaves_vec()),
@@ -370,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn open_change_promises_its_value() {
+    fn open_outputs_use_non_disclosing_promises() {
         let (_secret, channel, _service) = channel_and_keys();
         let opened = fund_open(&channel, [funded(130)], channel.spec().payer, scan()).unwrap();
         let promises: Vec<u64> = opened
@@ -380,7 +394,7 @@ mod tests {
             .iter()
             .map(|o| o.output.minimum_value_promise)
             .collect();
-        assert_eq!(promises, vec![100, 30]);
+        assert_eq!(promises, vec![1, 1]);
     }
 
     #[test]
