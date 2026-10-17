@@ -151,8 +151,8 @@ body.motion-paused * { animation-play-state:paused!important; }
 .svg-vouchers circle { fill:var(--lime); }
 .svg-count,.svg-expiry { fill:#a6aec4; }
 .svg-motion-layer { pointer-events:none; }
-.svg-motion-halo { fill:var(--lime); opacity:0; filter:blur(2.2px); }
-.svg-motion-particle { fill:#e9fff9; opacity:0; filter:drop-shadow(0 0 5px rgba(167,255,241,.95)); }
+.svg-motion-halo { fill:var(--lime); filter:blur(2.2px); }
+.svg-motion-particle { fill:#e9fff9; filter:drop-shadow(0 0 5px rgba(167,255,241,.95)); }
 .svg-motion-particle.settlement-particle,.svg-motion-particle.refund-particle { fill:#fff; filter:drop-shadow(0 0 7px rgba(197,186,255,.95)); }
 .svg-motion-halo.settlement-particle,.svg-motion-halo.refund-particle { fill:var(--lilac); filter:blur(3px); }
 .story-chapter { border-color:rgba(208,189,255,.16); }

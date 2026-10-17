@@ -73,8 +73,8 @@ function makeMotionRoute(scene, pathId, particleCount, options) {
   const particles = [];
   for (let index = 0; index < particleCount; index += 1) {
     const variant = options.className;
-    const halo = svgElement("circle", { class: `svg-motion-halo ${variant}`, cx: 0, cy: 0, r: 8 });
-    const dot = svgElement("circle", { class: `svg-motion-particle ${variant}`, cx: 0, cy: 0, r: 3.8 });
+    const halo = svgElement("circle", { class: `svg-motion-halo ${variant}`, cx: 0, cy: 0, r: 8, opacity: 0 });
+    const dot = svgElement("circle", { class: `svg-motion-particle ${variant}`, cx: 0, cy: 0, r: 3.8, opacity: 0 });
     layer.append(halo, dot);
     particles.push({ halo, dot });
   }
@@ -82,6 +82,7 @@ function makeMotionRoute(scene, pathId, particleCount, options) {
 }
 
 const motionRoutes = [
+  makeMotionRoute("service", "payment-path", 1, { className: "service-particle", duration: 1500, cadence: 2800, delay: 250, repeat: true }),
   makeMotionRoute("pay", "payment-path", 3, { className: "payment-particle", duration: 1050, cadence: 1900, stagger: 620, delay: 0, repeat: true }),
   makeMotionRoute("settle", "settlement-path", 1, { className: "settlement-particle", duration: 1350, cadence: 4200, delay: 350, repeat: true }),
   makeMotionRoute("refund", "refund-path", 1, { className: "refund-particle", duration: 1350, cadence: 4200, delay: 350, repeat: true }),
