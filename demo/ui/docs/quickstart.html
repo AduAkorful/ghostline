@@ -109,7 +109,7 @@
               <div class="guide-command-head"><span>CHECK INDEXER FINALITY</span><button class="guide-copy" type="button" data-copy="indexer-result">Copy command</button></div>
               <pre><code id="indexer-result">ghostline indexer result --url &lt;esmeralda-indexer-url&gt; --transaction-id &lt;settlement-transaction-id&gt;</code></pre>
             </div>
-            <p>Confirm <code>Finalized Commit</code>. The indexer confirms the settlement and amount; the service ledger supplies the call count. Those are separate records.</p>
+            <p>Confirm <code>Finalized Commit</code>. The indexer confirms the transaction's finality; the service ledger supplies the call count and accepted amount. Those are separate records, and the amount is hidden in the tested transaction fields.</p>
           </section>
           <section id="refund" class="guide-section">
             <p class="guide-label">ALTERNATIVE / REFUND</p>
@@ -117,7 +117,7 @@
             <p>If the channel remains unspent through expiry, the payer can use the refund branch. This cannot follow a successful settlement. The channel-file refund helper also uses a fixed maximum fee of 100,000 µT and needs the payer fee account and payer signing key.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>EXPIRED, UNSPENT OUTPUT ONLY</span><button class="guide-copy" type="button" data-copy="channel-refund">Copy commands</button></div>
-              <pre><code id="channel-refund">ghostline channel refund --file /secure/path/channel.json --dry-run&#10;# Submit only after confirming expiry, output state, and fee cap:&#10;ghostline channel refund --file /secure/path/channel.json --submit</code></pre>
+              <pre><code id="channel-refund">ghostline channel refund --file /secure/path/channel.json --submit --dry-run --max-fee 10000 --seal-key-id-file /secure/path/payer-key-id.json&#10;# Submit only after confirming expiry, output state, and reviewed fee cap:&#10;ghostline channel refund --file /secure/path/channel.json --submit --max-fee 10000 --seal-key-id-file /secure/path/payer-key-id.json</code></pre>
             </div>
             <div class="guide-actions"><a href="interfaces.html">See CLI, API, and MCP interfaces ↗</a><a href="../index.html#evidence">Inspect the historical run ↗</a></div>
             <div class="guide-callout">Need every deployment-specific flag? <a href="https://github.com/AduAkorful/ghostline/blob/main/docs/quickstart.md" target="_blank" rel="noopener noreferrer">Open the full quickstart reference ↗</a></div>

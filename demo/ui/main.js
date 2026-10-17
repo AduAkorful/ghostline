@@ -245,9 +245,13 @@ async function loadEvidence() {
   document.querySelector("#accepted-total").textContent = `${number.format(service.acceptedTotalMicroTari)} µT`;
   document.querySelector("#open-tx").textContent = chain.openTransactionId;
   document.querySelector("#settle-tx").textContent = chain.settlementTransactionId;
+  document.querySelector("#open-tx-link").href = chain.openTransactionUrl;
+  document.querySelector("#settle-tx-link").href = chain.settlementTransactionUrl;
+  document.querySelector("#refund-open-tx-link").href = evidence.refundRecord.channelOpenTransactionUrl;
+  document.querySelector("#refund-tx-link").href = evidence.refundRecord.refundTransactionUrl;
   document.querySelector("#settled-total").textContent = chain.settledTotalMicroTari == null ? "Hidden" : `${number.format(chain.settledTotalMicroTari)} µT`;
-  document.querySelector("#deposit-total").textContent = `${number.format(chain.depositMicroTari)} µT`;
-  document.querySelector("#settlement-fee").textContent = `${number.format(chain.settlementFeeMicroTari)} µT`;
+  document.querySelector("#deposit-total").textContent = "Hidden";
+  document.querySelector("#settlement-fee").textContent = chain.settlementFeeMicroTari == null ? "Public · see explorer" : `${number.format(chain.settlementFeeMicroTari)} µT`;
   document.querySelector("#output-status").textContent = chain.channelOutputAfterSettlement;
   document.querySelector("#evidence-date").textContent = evidence.runDate ? `Run date: ${evidence.runDate}. Static evidence; not a live network read.` : "Run date not recorded in the published evidence.";
   document.querySelectorAll(".finality").forEach((element, index) => {

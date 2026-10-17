@@ -197,6 +197,13 @@ h1 span { color:var(--lilac); }
   .topbar { border-color:rgba(208,189,255,.17); }
   .story-visual { box-shadow:0 14px 48px rgba(0,0,0,.22); }
 }
+
+.tx-link { display:block; min-width:0; color:inherit; text-decoration:none; }
+.tx-link:hover code { color:var(--lime); text-decoration:underline; text-underline-offset:3px; }
+.refund-proof { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; margin:0 0 14px; padding:10px 0; border-top:1px solid #414c53; color:#a5adaf; font:8px var(--mono); }
+.refund-proof a { color:var(--lime); text-decoration:none; }
+.refund-proof a:hover { text-decoration:underline; text-underline-offset:3px; }
+.refund-links { display:flex; gap:14px; }
 @keyframes ghost-converge {
   0%,4% { opacity:.08; transform:translate(0,0) scale(.35); }
   14% { opacity:.72; transform:translate(0,0) scale(1); }

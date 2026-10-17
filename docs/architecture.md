@@ -58,7 +58,7 @@ Amounts are integer micro-units throughout. Metered pricing uses checked multipl
 
 ## What the chain reveals
 
-An unopened stealth output hides its amount and owner. Live Esmeralda validation shows the settle witness and output minimum-value promises do not reveal the exact service amount or payer remainder. An earlier transaction's generic covenant claim did reveal the channel deposit. The SDK now omits this claim while retaining the global balance proof and script witness; local engine tests pass, but fresh Esmeralda settlement and refund checks are pending. Until those pass, treat deployed behavior as still revealing the deposit. The branch, opaque channel id, payer and service authorization data, output commitments/count, fees, and timing are also visible. Funding history, fee payer, and later wallet behavior may correlate activity. See [Privacy and observer view](privacy.md) and [Threat model](threat-model.md) for the limits.
+An unopened stealth output hides its amount and owner. Fresh Esmeralda settlement and expiry-refund transactions using the claim-free SDK finalized with no covenant claims or plaintext amounts; the deposit, service amount, and payer remainder were masked in the tested transaction fields. The branch, opaque channel id, payer and service authorization data, output commitments/count, fees, and timing remain visible. Funding history, fee payer, and later wallet behavior may correlate activity. See [Privacy and observer view](privacy.md) and [Threat model](threat-model.md) for the limits.
 
 ## Network coverage
 

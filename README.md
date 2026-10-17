@@ -11,7 +11,7 @@ Private pay-per-call channels for AI agents on [Tari Ootle](https://ootle.tari.c
 3. **Settle:** The service submits the latest voucher. The contract pays the amount owed and returns the remainder.
 4. **Refund:** After expiry, the payer can reclaim the remaining funds.
 
-The service sees each request and voucher. An earlier Esmeralda settlement kept the exact service amount and payer remainder out of public transaction fields, but its covenant claim revealed the channel deposit. The SDK now omits that unused claim while retaining the global balance proof and channel script witness; local engine tests pass, and the fresh Esmeralda retest is pending. Until that live check passes, treat the deployed behavior as still revealing the deposit. Fees, timing, branch, authorization data, and output commitments remain visible. Funding patterns and timing may still link activity.
+The service sees each request and voucher. Fresh Esmeralda settlement and payer-refund transactions finalized with no covenant claims or plaintext amounts; the deposit, service amount, and payer remainder were masked in their public transaction fields. See the [transaction evidence and explorer links](demo/ui/evidence.json). Fees, timing, branch, channel id, authorization data, output commitments, and output count remain visible. Funding patterns and timing may still link activity.
 
 ## Install
 

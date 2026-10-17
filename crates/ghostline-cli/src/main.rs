@@ -521,6 +521,9 @@ enum ChannelCommand {
         submit: bool,
         #[arg(long)]
         dry_run: bool,
+        /// Maximum revealed fee in micro-TARI (default: 100000).
+        #[arg(long, default_value_t = 100_000)]
+        max_fee: u64,
         #[arg(long)]
         seal_key_id_file: Option<PathBuf>,
         #[arg(long, default_value_t = 90)]
@@ -2208,6 +2211,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             file: path,
             submit,
             dry_run,
+            max_fee,
             seal_key_id_file,
             timeout_secs,
         } => {
@@ -2223,7 +2227,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 resource_hex: None,
                 ootle_network: record.ootle_network.clone(),
                 fee_account: record.payer_fee_account.clone(),
-                max_fee: 100_000,
+                max_fee,
                 out: None,
                 submit,
                 wallet_url: record
@@ -2337,6 +2341,7 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         );
         return Ok(());
     }
+    ensure_transaction_epoch_valid(current_epoch, args.max_epoch)?;
     let voucher_hex = store
         .latest_voucher_hex()
         .ok_or("due settle is missing a stored voucher")?
@@ -2629,6 +2634,7 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
         );
         return Ok(());
     }
+    ensure_transaction_epoch_valid(current_epoch, args.max_epoch)?;
     let spec = open_spec(&args.open)?;
     let deposit_mask = if args.deposit_mask_from_channel_file {
         args.deposit_mask_hex
@@ -2830,6 +2836,15 @@ async fn fetch_epoch(indexer_url: &str) -> Result<u64, String> {
         .map_err(|e| e.to_string())?
         .current_epoch
         .as_u64())
+}
+
+fn ensure_transaction_epoch_valid(current_epoch: u64, max_epoch: u64) -> Result<(), String> {
+    if current_epoch > max_epoch {
+        return Err(format!(
+            "transaction max epoch {max_epoch} is before current epoch {current_epoch}; set --max-epoch to at least the current epoch before building or submitting"
+        ));
+    }
+    Ok(())
 }
 
 struct ChannelStatusArgs<'a> {
@@ -3132,6 +3147,14 @@ mod tests {
         assert_eq!(open_max_fee(true, Some(15_217)).unwrap(), 15_217);
         assert!(open_max_fee(false, None).unwrap_err().contains("--max-fee"));
         assert!(open_max_fee(false, Some(0)).is_err());
+    }
+
+    #[test]
+    fn due_close_rejects_a_transaction_max_epoch_in_the_past() {
+        assert!(ensure_transaction_epoch_valid(12403, 12402)
+            .unwrap_err()
+            .contains("set --max-epoch to at least the current epoch"));
+        assert!(ensure_transaction_epoch_valid(12403, 12403).is_ok());
     }
 
     #[test]

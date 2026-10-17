@@ -219,7 +219,7 @@ The recorded live MCP run accepted ten 10 µT calls and finalized one settlement
 
 ### Refund after expiry
 
-For an unspent channel at or after expiry, use `ghostline channel refund --file /secure/path/channel.json --submit --dry-run --seal-key-id-file /secure/path/payer-key-id.json` before submitting without `--dry-run`. This needs the payer fee fields described in step 1, a funded payer fee account, and the payer signing key in that wallet. The channel-file refund helper also uses a fixed 100000 µT fee cap. For MCP, switch `GHOSTLINE_SEAL_KEY_ID_FILE` to the payer signer reference before closing an expired channel; the service signer cannot substitute for it.
+For an unspent channel at or after expiry, use `ghostline channel refund --file /secure/path/channel.json --submit --dry-run --max-fee 10000 --seal-key-id-file /secure/path/payer-key-id.json` before submitting without `--dry-run`. Choose a cap that exceeds the reviewed dry-run requirement; the default is 100000 µT. This needs the payer fee fields described in step 1, a funded payer fee account, and the payer signing key in that wallet. For MCP, switch `GHOSTLINE_SEAL_KEY_ID_FILE` to the payer signer reference before closing an expired channel; the service signer cannot substitute for it.
 
 ## Larger batches
 

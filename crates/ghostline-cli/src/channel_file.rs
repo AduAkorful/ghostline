@@ -301,9 +301,9 @@ pub struct TraceView {
 pub struct DisclosureSummary {
     /// These values come from the local service ledger; they are not independently proven by chain data.
     pub off_chain_source: &'static str,
-    /// Fees and listed transaction ids are public. Live Esmeralda settlement hides the exact service amount and
-    /// remainder, but its covenant claim reveals the channel deposit; branch, channel id, authorization data, and
-    /// output count also remain visible.
+    /// Fees and listed transaction ids are public. The claim-free Esmeralda settlement has hidden the deposit,
+    /// exact service amount, and payer remainder in a finalized live transaction. Branch, channel id,
+    /// authorization data, output commitments, and output count remain visible.
     pub public_chain_data: &'static str,
     /// This report is an operator-assembled summary, not a cryptographic proof or chain-wide scan.
     pub limitations: &'static str,
@@ -346,7 +346,7 @@ pub fn trace_view(
         on_chain,
         disclosure: DisclosureSummary {
             off_chain_source: "Call count and price range are read from the local Ghostline service ledger, not the chain indexer.",
-            public_chain_data: "Transaction ids and fees are public. Live Esmeralda settlement hides the exact service amount and remainder; its covenant claim reveals the channel deposit. The branch, opaque channel id, authorization data, output commitments, and output count remain visible.",
+            public_chain_data: "Transaction ids and fees are public. A claim-free settlement finalized on Esmeralda without revealing the deposit, exact service amount, or payer remainder. The branch, opaque channel id, authorization data, output commitments, and output count remain visible.",
             limitations: "Operator-assembled evidence only: it does not cryptographically prove off-chain calls or scan for every related chain transaction.",
         },
     }
@@ -448,6 +448,9 @@ mod tests {
         assert!(text.contains("settle: bb Finalized"));
         assert!(text.contains("does not cryptographically prove off-chain calls"));
         assert!(text.contains("only the transactions supplied to this command"));
+        assert!(view.disclosure.public_chain_data.contains("without revealing the deposit"));
+        assert!(view.disclosure.public_chain_data.contains("exact service amount"));
+        assert!(!view.disclosure.public_chain_data.contains("claim reveals the channel deposit"));
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("deposit_mask_hex"));
         assert!(!json.contains("voucher_hex"));

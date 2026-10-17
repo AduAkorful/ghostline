@@ -171,7 +171,7 @@ pub enum SettleWindow {
     RefundOpen,
 }
 
-/// What a public observer can see. Fees are always public; call pattern is not, if you settle once.
+/// What a public observer can see. This panel describes the live-tested claim-free settlement path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ObserverView {
     pub now: Vec<&'static str>,
@@ -187,12 +187,12 @@ impl ObserverView {
             ],
             at_settle: vec![
                 "the settle branch",
-                "the channel deposit amount (revealed in the covenant claim on Esmeralda)",
+                "not the channel deposit amount (claim-free Esmeralda settlement)",
                 "the output commitments and output count",
                 "the channel id bound into the template",
                 "the payer and service authorization data",
                 "fees and timing",
-                "not the exact service settlement amount or payer remainder",
+                "not the exact service amount or payer remainder",
             ],
         }
     }
@@ -205,16 +205,13 @@ mod observer_tests {
     #[test]
     fn panel_reports_live_settlement_disclosures() {
         let panel = ObserverView::default_panel();
-        assert!(
-            panel.at_settle.contains(
-                &"the channel deposit amount (revealed in the covenant claim on Esmeralda)"
-            )
-        );
+        assert!(panel.at_settle.contains(&"not the channel deposit amount (claim-free Esmeralda settlement)"));
         assert!(
             panel
                 .at_settle
-                .contains(&"not the exact service settlement amount or payer remainder")
+                .contains(&"not the exact service amount or payer remainder")
         );
+        assert!(!panel.at_settle.iter().any(|item| item.contains("revealed in the covenant claim")));
         assert!(!panel.at_settle.contains(&"the voucher amount"));
     }
 }

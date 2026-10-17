@@ -1,5 +1,5 @@
 {
-  "label": "Verified Esmeralda hidden-settlement run",
+  "label": "Verified Esmeralda deposit-masking runs",
   "network": "Esmeralda",
   "runDate": "2026-10-17",
   "serviceRecord": {
@@ -10,22 +10,40 @@
     "acceptedTotalMicroTari": 10
   },
   "chainRecord": {
-    "source": "Esmeralda indexer and service wallet",
-    "openTransactionId": "01d7ea7545e5b4258797aad6536952ad7d51555fe3d05b68821b2ea2928a565c",
+    "source": "Esmeralda indexer and wallet",
+    "openTransactionId": "694f03c48bd0d6ee6c1419183e7a4a2c0da2cf06ea4b4a013afc308e70ae02ab",
+    "openTransactionUrl": "https://explorer.tari.mw/tx/694f03c48bd0d6ee6c1419183e7a4a2c0da2cf06ea4b4a013afc308e70ae02ab",
     "openFinality": "Finalized",
-    "settlementTransactionId": "4b82b933685aa5312386d2287e37820879dcc9454efc0273d2029903685a0b40",
+    "settlementTransactionId": "9c8887f32141bbec3e5d7fa4a8b147c8e1a1bab9599e46e1d8704781ae85b668",
+    "settlementTransactionUrl": "https://explorer.tari.mw/tx/9c8887f32141bbec3e5d7fa4a8b147c8e1a1bab9599e46e1d8704781ae85b668",
     "settlementFinality": "Finalized",
     "settledTotalMicroTari": null,
-    "settlementAmountVisibility": "Hidden in public transaction fields",
-    "depositMicroTari": 1000,
-    "settlementFeeMicroTari": 17672,
+    "settlementAmountVisibility": "Not revealed in public transaction fields",
+    "depositVisibility": "Not revealed in the tested claim-free open, settlement, or refund transaction fields",
+    "settlementFeeMicroTari": null,
     "feePayerRole": "service-side fee account",
     "channelOutputAfterSettlement": "down"
   },
+  "refundRecord": {
+    "testDescription": "Separate fresh channel; refunded by the payer after expiry",
+    "channelOpenTransactionId": "9fafd105e83788ff169b5aa557b5a8230e71834fb4c238daf7ee0a449c23b7fc",
+    "channelOpenTransactionUrl": "https://explorer.tari.mw/tx/9fafd105e83788ff169b5aa557b5a8230e71834fb4c238daf7ee0a449c23b7fc",
+    "channelOpenFinality": "Finalized",
+    "refundTransactionId": "73a0277ef980a890aed17a44e69e8d0f0bc373d3320376c421077d19e57a3b47",
+    "refundTransactionUrl": "https://explorer.tari.mw/tx/73a0277ef980a890aed17a44e69e8d0f0bc373d3320376c421077d19e57a3b47",
+    "refundFinality": "Finalized",
+    "covenantClaimCount": 0,
+    "inputRevealedAmount": 0,
+    "revealedOutput": false,
+    "outputCount": 1,
+    "channelOutputAfterRefund": "down"
+  },
   "notes": [
-    "One 10 µT HTTP 402 call was accepted off-chain and settled in one transaction; the call and service amount are not public chain fields.",
-    "The live transaction revealed the 1,000 µT deposit in its covenant claim, but kept the 10 µT service amount and 990 µT remainder hidden from observers.",
-    "Transaction finality and the fee are indexer/wallet-confirmed; the service call and amount come from the local service ledger.",
-    "This static evidence record is not a live network read."
+    "One HTTP /fortune request was accepted off-chain for 10 µT and settled in one finalized transaction.",
+    "The serialized settlement had no covenant claims and revealed no plaintext input or output amounts; the channel deposit, service amount, and payer remainder were masked from transaction fields.",
+    "The separate expired-channel payer refund also finalized with zero covenant claims, zero revealed input amount, and no revealed output amount.",
+    "The chain confirms transaction finality and fee. The call and accepted amount come from the local service ledger, not a chain proof.",
+    "The deposit amount and fee are omitted here; fees, timing, branch, opaque channel id, authorization data, output commitments, and output count remain public.",
+    "This is a static evidence record; follow the linked Esmeralda explorer transactions to inspect live chain data."
   ]
 }
