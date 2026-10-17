@@ -58,8 +58,8 @@
             </div>
             <p>Required system tools: <code>curl</code>, <code>tar</code>, <code>sha256sum</code>, and <code>awk</code>. To install the tested release explicitly:</p>
             <div class="guide-command">
-              <div class="guide-command-head"><span>PIN GHOSTLINE v0.1.0</span><button class="guide-copy" type="button" data-copy="install-pinned">Copy command</button></div>
-              <pre><code id="install-pinned">curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.1.0 sh</code></pre>
+              <div class="guide-command-head"><span>PIN GHOSTLINE v0.2.0</span><button class="guide-copy" type="button" data-copy="install-pinned">Copy command</button></div>
+              <pre><code id="install-pinned">curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.2.0 sh</code></pre>
             </div>
           </section>
           <section id="path" class="guide-section">
@@ -92,7 +92,7 @@
             <p>The verified development platform is Linux. Source builds require Rust from the repository's pinned toolchain, Git, a C/C++ toolchain, Clang with libclang, CMake, and <code>protoc</code>.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>BUILD RELEASE EXECUTABLES</span><button class="guide-copy" type="button" data-copy="source-build">Copy commands</button></div>
-              <pre><code id="source-build">git clone https://github.com/AduAkorful/ghostline.git&#10;cd ghostline&#10;git checkout v0.1.0&#10;cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api</code></pre>
+              <pre><code id="source-build">git clone https://github.com/AduAkorful/ghostline.git&#10;cd ghostline&#10;git checkout v0.2.0&#10;cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api</code></pre>
             </div>
             <p>Build channel WASM and publish a template separately. Never substitute an invented template or account identifier.</p>
           </section>

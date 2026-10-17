@@ -1,6 +1,6 @@
 # Install Ghostline
 
-Ghostline `v0.1.0` is available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.1.0). The download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
+Ghostline `v0.2.0` is available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.2.0). The download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
 
 ## Download the executables
 
@@ -23,7 +23,7 @@ Add that PATH line to your shell's startup file to keep it after reopening the t
 To select the tested Ghostline release explicitly:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.2.0 sh
 ```
 
 Set `GHOSTLINE_INSTALL_DIR` on the `sh` process to choose a different directory. To update, rerun the installer. It replaces the three executables; keep your wallet profiles and channel state in their own directories. The checksum checks the archive against the release's checksum file; it is not an independent publisher signature.
@@ -57,7 +57,7 @@ Install Rust through `rustup`, Git, a C/C++ toolchain, Clang with libclang, CMak
 ```sh
 git clone https://github.com/AduAkorful/ghostline.git
 cd ghostline
-git checkout v0.1.0
+git checkout v0.2.0
 cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api
 mkdir -p "$HOME/.local/bin"
 install -m 0755 target/release/ghostline target/release/ghostline-mcp target/release/ghostline-paid-api "$HOME/.local/bin/"
