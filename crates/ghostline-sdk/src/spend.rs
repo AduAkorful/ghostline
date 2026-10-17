@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: MIT
 
 use ghostline_core::{SignedVoucher, VoucherError};
+use ootle_byte_type::ToByteType;
 use ootle_network::Network;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_wallet_crypto::{
-    MaskAndValue, OutputWitness, StealthCryptoApi, StealthInputWitness, StealthOutputWitness,
+    balance_proof::generate_stealth_balance_proof_signature,
     pay_to::PayTo,
     stealth::{self, create_transfer_statement},
+    MaskAndValue, OutputWitness, StealthCryptoApi, StealthInputWitness, StealthOutputWitness,
+    WalletCryptoError,
 };
 use tari_template_lib::types::{
-    Amount, ResourceAddress,
     crypto::RistrettoPublicKeyBytes,
-    stealth::{SpendAuthorization, StealthTransferStatement},
+    stealth::{
+        SpendAuthorization, SpendWitness, StealthInput, StealthInputsStatement,
+        StealthTransferStatement,
+    },
+    Amount, ResourceAddress,
 };
 use tari_utilities::ByteArray;
 
@@ -143,12 +149,11 @@ pub fn settle(
         },
     )?;
 
-    let (witness, root) = stealth::script_path_witness_with_data(
+    let (witness, _) = stealth::script_path_witness_with_data(
         &channel.leaves_vec(),
         channel.settle_leaf(),
         voucher.witness_data(),
     )?;
-    let input = StealthInputWitness::with_script_path(deposit, witness, root);
 
     let mut outputs = Vec::new();
     if remainder > 0 {
@@ -169,12 +174,7 @@ pub fn settle(
         )?);
     }
 
-    Ok(create_transfer_statement(
-        std::iter::once(input),
-        Amount::zero(),
-        outputs.iter(),
-        None,
-    )?)
+    channel_close_statement(deposit, witness, &outputs)
 }
 
 /// Spends the channel UTXO on the refund leaf after expiry, paying the full deposit to `payer_output_key`.
@@ -191,12 +191,11 @@ pub fn refund(
         });
     }
 
-    let (witness, root) = stealth::script_path_witness_with_data(
+    let (witness, _) = stealth::script_path_witness_with_data(
         &channel.leaves_vec(),
         channel.refund_leaf(),
         Default::default(),
     )?;
-    let input = StealthInputWitness::with_script_path(deposit, witness, root);
     let outputs = [output(
         channel.params().deposit,
         SpendAuthorization::Key(payer_output_key),
@@ -204,12 +203,47 @@ pub fn refund(
         scan,
     )?];
 
-    Ok(create_transfer_statement(
-        std::iter::once(input),
-        Amount::zero(),
-        outputs.iter(),
-        None,
-    )?)
+    channel_close_statement(deposit, witness, &outputs)
+}
+
+/// Ghostline's close leaves do not query a covenant partition's cleartext outflow. Settlement checks the signed
+/// output commitment and restricts the entire transfer shape; refund requires the payer and the expiry timelock.
+/// The global balance proof still enforces conservation. The generic wallet builder would additionally publish an
+/// unused covenant claim revealing the deposit, so assemble this statement with the upstream output and global
+/// proof builders and an empty claim list. The script witness is retained and verified against the actual UTXO.
+fn channel_close_statement(
+    deposit: MaskAndValue,
+    witness: SpendWitness,
+    outputs: &[StealthOutputWitness],
+) -> Result<StealthTransferStatement, SdkError> {
+    let outputs_statement =
+        stealth::create_outputs_statement(outputs.iter(), None).map_err(WalletCryptoError::from)?;
+    let inputs_statement = StealthInputsStatement {
+        inputs: vec![StealthInput {
+            commitment: deposit.to_commitment().to_byte_type(),
+            witness,
+        }],
+        revealed_amount: Amount::zero(),
+    };
+    let output_mask = outputs
+        .iter()
+        .fold(RistrettoSecretKey::default(), |sum, output| {
+            sum + &output.witness.mask
+        });
+    let covenant_claims = Vec::new();
+    let balance_proof = generate_stealth_balance_proof_signature(
+        &deposit.mask,
+        &output_mask,
+        &inputs_statement,
+        &outputs_statement,
+        &covenant_claims,
+    );
+    Ok(StealthTransferStatement {
+        inputs_statement,
+        outputs_statement,
+        balance_proof: Some(balance_proof),
+        covenant_claims,
+    })
 }
 
 fn output(
@@ -260,11 +294,11 @@ fn output_with_mask(
 mod tests {
     use super::*;
     use crate::{Channel, ChannelSpec};
-    use ghostline_core::{NONCE_LEN, SignedVoucher};
+    use ghostline_core::{SignedVoucher, NONCE_LEN};
     use ootle_byte_type::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-    use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+    use tari_template_lib::types::Hash32;
 
     fn scan() -> OutputScan {
         OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS)

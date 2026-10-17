@@ -10,16 +10,11 @@ publish = false
 [dependencies]
 
 [dev-dependencies]
-blake2 = "=0.10.6"
-digest = "=0.10.7"
-frost-core = "=0.6.0"
-frost-ristretto255 = "=0.6.0"
 ghostline-core = { path = "../ghostline-core" }
 ghostline-sdk = { path = "../ghostline-sdk" }
 ootle_byte_type = { version = "0.16", features = ["crypto"] }
 ootle-network = "=0.2.0"
 rand = "0.10.1"
-rand08 = { package = "rand", version = "=0.8.5" }
 tari_bor = { version = "0.16.3", default-features = true }
 tari_crypto = "0.24.0"
 tari_engine_types = "0.45.0"

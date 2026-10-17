@@ -5,17 +5,16 @@
 
 mod support;
 
-use ghostline_core::{NONCE_LEN, SignedVoucher};
-use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, OutputScan, refund, settle};
+use ghostline_core::{SignedVoucher, NONCE_LEN};
+use ghostline_sdk::{refund, settle, Channel, ChannelSpec, MaskAndValue, OutputScan};
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT, fund};
+use support::{fund, CHANNEL, DEPOSIT};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction};
-use tari_template_lib::types::{
-    Amount,
-    crypto::{NoSignatureDomain, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Signature},
+use tari_template_lib::types::crypto::{
+    NoSignatureDomain, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Signature,
 };
-use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
+use tari_template_test_tooling::{support::spec::OutputAuthSpec, TemplateTest};
 
 const NETWORK_TAG: u8 = 1;
 const NONCE: [u8; NONCE_LEN] = [42; NONCE_LEN];
@@ -63,12 +62,7 @@ fn signed_commitment_settlement_accepts_hidden_outputs() {
         OutputScan::localnet(resource),
     )
     .unwrap();
-    assert_eq!(statement.covenant_claims.len(), 1);
-    assert_eq!(
-        statement.covenant_claims[0].revealed_amount,
-        Amount::from_u64(DEPOSIT),
-        "the current script-path claim publicly reveals the full deposit"
-    );
+    assert!(statement.covenant_claims.is_empty());
     let refund_statement = refund(
         &channel,
         MaskAndValue {
@@ -79,12 +73,7 @@ fn signed_commitment_settlement_accepts_hidden_outputs() {
         OutputScan::localnet(resource),
     )
     .unwrap();
-    assert_eq!(refund_statement.covenant_claims.len(), 1);
-    assert_eq!(
-        refund_statement.covenant_claims[0].revealed_amount,
-        Amount::from_u64(DEPOSIT),
-        "the current script-path refund claim also publicly reveals the full deposit"
-    );
+    assert!(refund_statement.covenant_claims.is_empty());
     let tx = Transaction::builder_localnet(Epoch(1))
         .stealth_transfer(resource, statement)
         .finish()
