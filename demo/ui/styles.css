@@ -39,8 +39,6 @@ h1 span { color:var(--lilac); }
 .art-stamp { color:#a9b0b1; }
 .art-stamp span { color:var(--lime); }
 .art-stamp > span:first-child { margin-right:auto; }
-.motion-toggle { flex:none; min-height:30px; margin-left:12px; padding:0 8px; border:1px solid rgba(167,255,241,.3); background:rgba(7,9,16,.72); color:#c6c8d8; cursor:pointer; font:8px var(--mono); letter-spacing:.03em; }
-.motion-toggle:hover { border-color:var(--lime); color:var(--lime); }
 .hero-numbers { display:grid; grid-template-columns:1fr auto 1fr; align-items:end; margin:36px 0 -8px; position:relative; z-index:2; }
 .many-number { font:600 clamp(76px,10vw,137px)/.8 var(--display); letter-spacing:-.105em; }
 .many-label { grid-column:1; margin:12px 0 0 7px; color:#a7adb1; font:9px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
@@ -116,8 +114,7 @@ h1 span { color:var(--lilac); }
 @media (max-width:1100px) { .topbar { padding-inline:28px; }.topbar nav { gap:17px; }.hero { padding-inline:34px; gap:28px; }.hero-art { min-height:485px; padding-inline:22px; }.story-grid { grid-template-columns:minmax(300px,.9fr) minmax(370px,1.1fr); gap:6%; }.story-visual { padding-inline:15px; }.story-chapter { min-height:70svh; } }
 @media (max-width:760px) { .shell { width:calc(100% - 40px); }.topbar { height:64px; padding-inline:20px; }.topbar nav { gap:15px; }.topbar nav a:not(.nav-cta) { display:none; }.topbar nav .nav-cta { padding:9px 11px; }.hero { min-height:auto; grid-template-columns:1fr; gap:30px; padding:55px 20px 20px; }.hero-copy { padding:0; }.hero::before { width:70vw; height:70vw; top:-35vw; left:auto; right:-14vw; }.hero-art { min-height:445px; padding:21px 19px 17px; }.hero-numbers { margin-top:30px; }.many-number { font-size:clamp(82px,20vw,126px); }.one-number { font-size:clamp(74px,18vw,112px); }.hero-trace { height:175px; }.hero-index { margin-top:15px; }.story-section { padding-top:85px; }.story-heading { display:block; margin-bottom:32px; }.story-heading h2 { font-size:clamp(45px,12vw,70px); }.story-heading > p:last-child { margin-top:18px; font-size:12px; }.story-grid { grid-template-columns:1fr; gap:0; }.story-visual { position:relative; top:auto; padding:14px 15px 12px; }.story-svg { max-height:300px; }.story-chapter { min-height:auto; padding:64px 0 57px; }.story-chapter h3 { font-size:clamp(43px,11vw,62px); }.story-chapter > p:not(.chapter-index) { font-size:13px; }.story-footnote { font-size:8px; }.evidence-section { padding:85px 0; }.evidence-heading,.section-heading { display:block; margin-bottom:31px; }.evidence-heading > p,.section-intro { margin-top:18px; font-size:12px; }.evidence-heading h2,.section-heading h2 { font-size:clamp(49px,12vw,70px); }.evidence-grid { grid-template-columns:1fr; gap:10px; }.evidence-bridge { flex-direction:row; min-height:28px; }.evidence-bridge span { writing-mode:initial; }.evidence-bridge b { transform:rotate(90deg); }.evidence-panel { padding:20px 17px; }.panel-description { min-height:0; }.call-count strong { font-size:85px; }.capabilities-section,.privacy-section { padding:85px 0; }.section-heading .eyebrow { margin-bottom:18px; }.capability-group summary { grid-template-columns:1fr 1fr 25px; gap:9px; min-height:68px; }.capability-group summary > span { font-size:13px; }.capability-group summary small { font-size:8px; line-height:1.4; }.capability-group ul { grid-template-columns:1fr; }.capability-group li { grid-template-columns:minmax(130px,.7fr) 1fr; gap:12px; }.privacy-section .section-heading { margin-bottom:30px; }.privacy-grid { grid-template-columns:1fr; }.privacy-grid article,.privacy-grid article + article { min-height:0; padding:19px 0; border-left:0; }.privacy-grid article + article { border-top:1px solid #b0aba2; }.privacy-grid h3 { margin:12px 0 6px; }.privacy-grid p { max-width:none; }.start-section { grid-template-columns:1fr; gap:32px; padding-top:83px; padding-bottom:85px; }.start-copy h2 { font-size:60px; }.limits-inner { grid-template-columns:1fr; gap:21px; }.limits-inner ul { gap:12px 15px; }.footer { min-height:79px; flex-wrap:wrap; gap:10px; padding-block:15px; }.footer p { order:3; width:100%; }. }
 @media (max-width:410px) { .hero-art { min-height:410px; }.art-caption { margin-top:20px; }.many-number { font-size:78px; }.one-number { font-size:73px; }.hero-trace { height:150px; }.art-stamp { font-size:7px; }.art-legend { gap:16px; }.story-chapter { padding-block:51px; }.command-card pre { font-size:9px; }.capability-group summary { grid-template-columns:1fr 1fr 22px; }.capability-group summary small { font-size:7px; }.capability-group li { grid-template-columns:1fr; gap:5px; }.limits-inner ul { grid-template-columns:1fr; } }
-@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; }.trace-runner,.motion-toggle { display:none; } }
-body.motion-paused * { animation-play-state:paused!important; }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; }.trace-runner { display:none; } }
 
 /* Ghostline spectral art direction. Motion remains illustrative and state-driven. */
 ::selection { color:#090b13; background:#9af6ee; }
@@ -400,7 +397,6 @@ h1 span { display:inline-block; margin-top:.12em; color:#c5baff; font-style:ital
   .start-links small,.back-top { font-size:12px; }
   .art-stamp { flex-wrap:wrap; gap:5px 12px; letter-spacing:.08em; }
   .art-stamp > span:first-child { flex:1 1 180px; }
-  .motion-toggle { min-width:44px; min-height:44px; margin-left:auto; padding:0 10px; font-size:12px; }
   .many-number { font-size:clamp(58px,18vw,88px); }
   .one-number { font-size:clamp(58px,17vw,82px); }
   .hero-numbers { width:100%; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); }
@@ -436,7 +432,7 @@ h1 span { display:inline-block; margin-top:.12em; color:#c5baff; font-style:ital
   .story-grid { grid-template-columns:minmax(0,1fr); gap:36px; }
   .story-visual { position:relative; top:auto; }
   .topbar nav > a { min-height:44px; display:inline-flex; align-items:center; }
-  .motion-toggle,.copy-command,.copy-button { min-height:44px; min-width:44px; align-items:center; justify-content:center; font-size:12px; }
+  .copy-command,.copy-button { min-height:44px; min-width:44px; align-items:center; justify-content:center; font-size:12px; }
   .copy-command,.copy-button { display:inline-flex; padding:6px; }
   .command-head { min-height:52px; flex-wrap:wrap; }
   .command-card pre { font-size:12px; }

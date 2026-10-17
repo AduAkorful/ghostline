@@ -68,6 +68,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fixed_price_is_the_resource_price() {
+        let quote = quote(PriceKind::Fixed { price: 10 }).unwrap();
+        assert_eq!(quote.price, 10);
+        assert_eq!(quote.basis, "fixed");
+        assert_eq!(quote.unit_price, None);
+        assert_eq!(quote.units, None);
+    }
+
+    #[test]
     fn metered_price_is_the_product() {
         let quote = quote(PriceKind::Metered {
             unit_price: 10,

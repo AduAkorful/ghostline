@@ -63,8 +63,6 @@ makeVoucherMarks();
 const storyApp = document.querySelector("#story-app");
 const storyChapters = [...document.querySelectorAll(".story-chapter")];
 const storyMotionReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const motionToggle = document.querySelector("#motion-toggle");
-let storyMotionPaused = false;
 let sceneStartedAt = performance.now();
 
 function makeMotionRoute(scene, pathId, particleCount, options) {
@@ -136,25 +134,14 @@ function updateStoryMotion(now) {
       }
     }
   }
-  if (!storyMotionReduced && !storyMotionPaused && document.visibilityState === "visible") requestAnimationFrame(updateStoryMotion);
+  if (!storyMotionReduced && document.visibilityState === "visible") requestAnimationFrame(updateStoryMotion);
 }
 
 if (!storyMotionReduced) requestAnimationFrame(updateStoryMotion);
-motionToggle.addEventListener("click", () => {
-  storyMotionPaused = !storyMotionPaused;
-  document.body.classList.toggle("motion-paused", storyMotionPaused);
-  motionToggle.setAttribute("aria-pressed", String(storyMotionPaused));
-  motionToggle.setAttribute("aria-label", storyMotionPaused ? "Resume animation" : "Pause animation");
-  motionToggle.textContent = storyMotionPaused ? "Resume motion" : "Pause motion";
-  if (!storyMotionPaused && !storyMotionReduced && document.visibilityState === "visible") {
-    sceneStartedAt = performance.now();
-    requestAnimationFrame(updateStoryMotion);
-  }
-});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     sceneStartedAt = performance.now();
-    if (!storyMotionReduced && !storyMotionPaused) requestAnimationFrame(updateStoryMotion);
+    if (!storyMotionReduced) requestAnimationFrame(updateStoryMotion);
   }
 });
 const sceneLabels = {
