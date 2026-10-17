@@ -6,7 +6,7 @@ No, if you use the glibc-based Linux x86-64 release. The [installer](install.md)
 
 ## What does Ghostline hide?
 
-The service sees each request, its price, and the payer's voucher. Those details stay in service-side records rather than appearing as one chain transaction per request. A live Esmeralda test settled a 10 µT service voucher without exposing that amount or the payer remainder in public transaction fields. The channel deposit was visible in a covenant claim; fees, timing, branch, opaque channel id, authorization data, output commitments, and output count also remain visible. Funding and timing can still link transactions. See [Privacy](privacy.md).
+The service sees each request, its price, and the payer's voucher. Those details stay in service-side records rather than appearing as one chain transaction per request. A live Esmeralda test settled a 10 µT service voucher without exposing that amount or the payer remainder in public transaction fields, but its covenant claim exposed the channel deposit. The SDK now omits that unused claim, and local engine tests pass; fresh Esmeralda settlement and refund checks are pending. Until then, treat the deployed version as still revealing the deposit. Fees, timing, branch, opaque channel id, authorization data, output commitments, and output count also remain visible. Funding and timing can still link transactions. See [Privacy](privacy.md).
 
 ## Is the service blind to my spending?
 
