@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 mod support;
+#[path = "support/batch.rs"]
+mod batch_support;
 
 use ghostline_core::{NONCE_LEN, SignedVoucher};
 use ghostline_sdk::{
@@ -8,7 +10,8 @@ use ghostline_sdk::{
     unblind_output,
 };
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT, fund_many};
+use batch_support::fund_many;
+use support::{CHANNEL, DEPOSIT};
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
@@ -21,6 +24,16 @@ use tari_template_lib::types::{
 };
 use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
 use tari_utilities::ByteArray;
+
+type BatchWitnessEntry = (
+    Hash32,
+    PedersenCommitmentBytes,
+    RistrettoPublicKeyBytes,
+    Hash32,
+    PedersenCommitmentBytes,
+    Signature<NoSignatureDomain>,
+    Signature<NoSignatureDomain>,
+);
 
 struct BatchFixture {
     test: TemplateTest,
@@ -158,29 +171,11 @@ fn two_channels_settle_to_one_pooled_confidential_output_and_rejects_tampering()
         .witness
         .as_script_path()
         .unwrap();
-    let entries: Vec<(
-        Hash32,
-        PedersenCommitmentBytes,
-        RistrettoPublicKeyBytes,
-        Hash32,
-        PedersenCommitmentBytes,
-        Signature<NoSignatureDomain>,
-        Signature<NoSignatureDomain>,
-    )>;
-    let (_, payout_key, decoded_entries): (
+    let (_, payout_key, entries): (
         u32,
         RistrettoPublicKeyBytes,
-        Vec<(
-            Hash32,
-            PedersenCommitmentBytes,
-            RistrettoPublicKeyBytes,
-            Hash32,
-            PedersenCommitmentBytes,
-            Signature<NoSignatureDomain>,
-            Signature<NoSignatureDomain>,
-        )>,
+        Vec<BatchWitnessEntry>,
     ) = tari_bor::decode(data.as_ref()).unwrap();
-    entries = decoded_entries;
     let tampered_data = tari_bor::encode(&(1u32, payout_key, entries)).unwrap();
     wrong_index.inputs_statement.inputs[0].witness = SpendWitness::script_path_with_data(
         leaf.clone(),
