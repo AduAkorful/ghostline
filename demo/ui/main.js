@@ -253,6 +253,7 @@ async function loadEvidence() {
   document.querySelector("#template-address").textContent = `${templateAddress.slice(0, 12)}…${templateAddress.slice(-8)}`;
   document.querySelector("#template-tx-link").href = evidence.templateRecord.publishTransactionUrl;
   document.querySelector("#comparison-settlement-link").href = chain.settlementTransactionUrl;
+  document.querySelector("#batch-tx-link").href = evidence.batchRecord.settlementTransactionUrl;
   document.querySelector("#settled-total").textContent = chain.settledTotalMicroTari == null ? "Hidden" : `${number.format(chain.settledTotalMicroTari)} µT`;
   document.querySelector("#deposit-total").textContent = "Hidden";
   document.querySelector("#settlement-fee").textContent = chain.settlementFeeMicroTari == null ? "Public · see explorer" : `${number.format(chain.settlementFeeMicroTari)} µT`;

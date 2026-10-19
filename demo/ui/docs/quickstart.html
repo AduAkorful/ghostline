@@ -41,7 +41,7 @@
       <div class="guide-layout">
         <nav class="guide-nav" aria-label="On this page">
           <p class="nav-label">CLI QUICKSTART</p>
-          <a href="#requirements">Before you start</a><a href="#prepare">Prepare</a><a href="#service">Start a service</a><a href="#open-pay">Open and pay</a><a href="#settle">Settle and verify</a><a href="#refund">Refund path</a>
+          <a href="#requirements">Before you start</a><a href="#prepare">Prepare</a><a href="#service">Start a service</a><a href="#open-pay">Open and pay</a><a href="#settle">Settle and verify</a><a href="#refund">Refund path</a><a href="#batch">Batch prototype</a>
         </nav>
         <article class="guide-content">
           <div class="guide-callout warning"><strong>Unaudited, testnet software.</strong> Ghostline is early development and for Esmeralda only. Do not use real funds. Examples are templates; they contain no valid deployment identifiers or credentials.</div>
@@ -52,20 +52,20 @@
             <div class="guide-grid">
               <div class="guide-card"><h3>Wallets and funds</h3><p>Use a loopback Ootle wallet daemon, a funded opener account, and a funded service fee account. The opener pays the deposit and opening fee; the service fee account pays settlement fees.</p></div>
               <div class="guide-card"><h3>Provider parameters</h3><p>Get the real indexer URL, network tag, template hash, service public key, price, and accepted expiry range from your provider. Never copy placeholder values as live identifiers.</p></div>
-              <div class="guide-card"><h3>Private keys</h3><p>The payer key signs vouchers. The opener wallet's view-only key at index 0 unblinds the channel output. They are separate secrets; keep both out of shell history and shared MCP configuration.</p></div>
-              <div class="guide-card"><h3>Service signer</h3><p>The service signer and the fee-account signer have different roles. Use the correct wallet-local KeyId reference for each operation.</p></div>
+              <div class="guide-card"><h3>Fresh channel keys</h3><p>Use a new payer signing key and a new service authorization key for each channel. The opener wallet's view-only key separately unblinds the channel output. Keep all secret material local.</p></div>
+              <div class="guide-card"><h3>Service signer</h3><p>The service authorization key and fee-account signer have different roles. An optional second one-time payout key separates authorization from later payout spends.</p></div>
             </div>
             <div class="guide-callout"><strong>Keep the wallet daemon on loopback.</strong> Ghostline uses its local wallet daemon's None authentication flow, which grants wallet administration access. Do not expose that endpoint publicly.</div>
           </section>
           <section id="prepare" class="guide-section">
             <p class="guide-label">01 / PREPARE</p>
             <h2>Create private channel state.</h2>
-            <p>Use an owner-only directory. Generate a payer signing key into a private file; use only its public value in channel parameters and provide its secret through the signing process's private environment.</p>
+            <p>Use an owner-only directory. Generate a fresh payer signing key into a private file; use only its public value in channel parameters and pass the file to <code>ghostline sign --secret-file</code>.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>PRIVATE WORKSPACE AND PAYER KEY</span><button class="guide-copy" type="button" data-copy="private-workspace">Copy commands</button></div>
-              <pre><code id="private-workspace">umask 077&#10;mkdir -p /secure/path&#10;ghostline keygen &gt; /secure/path/payer-key.txt</code></pre>
+              <pre><code id="private-workspace">umask 077&#10;mkdir -p /secure/path&#10;ghostline keygen --role payer --out /secure/path/payer-channel.json</code></pre>
             </div>
-            <p>Choose a future expiry epoch and a unique 32-byte nonce. Compute the payer root from the exact channel terms, then initialize the channel record using the provider's real values:</p>
+            <p>The key file is owner-only and contains the signing secret and public key. Use its <code>public_hex</code> in channel parameters and pass the file to <code>ghostline sign --secret-file</code>. Generate a different payer key for every channel. Choose a future expiry epoch and a unique 32-byte nonce. Compute the payer root from the exact channel terms, then initialize the channel record using the provider's real values:</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>COMPUTE CHANNEL TERMS · REPLACE PLACEHOLDERS</span><button class="guide-copy" type="button" data-copy="channel-spec">Copy command</button></div>
               <pre><code id="channel-spec">ghostline spec \&#10;  --network-tag &lt;esmeralda-network-tag&gt; \&#10;  --deposit 100000 \&#10;  --payer-hex &lt;payer-public-key-hex&gt; \&#10;  --service-hex &lt;service-public-key-hex&gt; \&#10;  --expiry-epoch &lt;future-epoch&gt; \&#10;  --nonce-hex &lt;unique-32-byte-nonce-hex&gt; \&#10;  --template-hex &lt;deployed-template-hash-hex&gt;</code></pre>
@@ -75,17 +75,21 @@
           <section id="service" class="guide-section">
             <p class="guide-label">02 / SERVICE</p>
             <h2>Start the other side.</h2>
-            <p>Run the reference API locally, or use a compatible provider. The service sets the price and accepted expiry range. Its ledger and the payer session must stay in separate private files.</p>
+            <p>Run the reference API locally, or use a compatible provider. The service sets the price and accepted expiry range. Use a fresh authorization key for each channel; its ledger and the payer session must stay in separate private files.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>REFERENCE SERVICE · 10 µT PER CALL</span><button class="guide-copy" type="button" data-copy="service-run">Copy commands</button></div>
-              <pre><code id="service-run">ghostline-paid-api init --ledger /secure/service-ledger.json --session /secure/service-session.json &lt;channel-parameters&gt;&#10;ghostline-paid-api serve --bind 127.0.0.1:8787 --ledger /secure/service-ledger.json --price 10 &lt;service-terms&gt;</code></pre>
+              <pre><code id="service-run">ghostline-paid-api init --ledger /secure/service-ledger.json --session /secure/service-session.json &lt;channel-parameters&gt;&#10;ghostline-paid-api serve --bind 127.0.0.1:8787 --ledger /secure/service-ledger.json --price 10 \&#10;  --service-key-hex &lt;channel-authorization-public-key&gt; \&#10;  --service-output-key-hex &lt;optional-one-time-payout-public-key&gt; &lt;expiry-terms&gt;</code></pre>
             </div>
-            <p>The angle-bracket groups above are explanatory placeholders, not CLI flags. Use the complete, current flags in the detailed quickstart when configuring the reference service.</p>
+            <div class="guide-command">
+              <div class="guide-command-head"><span>OPTIONAL · TWO DISTINCT SERVICE KEYS</span><button class="guide-copy" type="button" data-copy="service-keys">Copy commands</button></div>
+              <pre><code id="service-keys">ghostline wallet key-create --url http://127.0.0.1:5100 --out /secure/service-channel-key-id.json&#10;ghostline wallet key-create --url http://127.0.0.1:5100 --out /secure/service-payout-key-id.json</code></pre>
+            </div>
+            <p>The angle-bracket groups above are explanatory placeholders, not CLI flags. <code>--service-output-key-hex</code> is optional. When used, the quote and voucher bind to that payout key while the channel authorization key still authorizes settlement. Both keys are public in the settlement, so this helps reduce reuse links across later spends; it does not unlink the channel and service.</p>
           </section>
           <section id="open-pay" class="guide-section">
             <p class="guide-label">03 / OPEN AND PAY</p>
             <h2>Review first. Then pay off-chain.</h2>
-            <p>Supply the payer and claim secrets privately to the process. Dry-run the channel open, inspect its fee estimate and required funds, then open with a reviewed positive fee cap.</p>
+            <p>Keep the payer key file and opener wallet's view-only claim key local and separate. Dry-run the channel open, inspect its fee estimate and required funds, then open with a reviewed positive fee cap. After opening, the payer channel file holds the deposit mask and must be protected.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>OPEN ONLY AFTER REVIEW</span><button class="guide-copy" type="button" data-copy="channel-open">Copy commands</button></div>
               <pre><code id="channel-open">ghostline channel open --file /secure/path/channel.json --dry-run&#10;ghostline channel open --file /secure/path/channel.json --max-fee &lt;reviewed-opening-fee-cap&gt;&#10;ghostline channel status --file /secure/path/channel.json</code></pre>
@@ -121,6 +125,13 @@
             </div>
             <div class="guide-actions"><a href="interfaces.html">See CLI, API, and MCP interfaces ↗</a><a href="../index.html#evidence">Inspect the historical run ↗</a></div>
             <div class="guide-callout">Need every deployment-specific flag? <a href="https://github.com/AduAkorful/ghostline/blob/main/docs/quickstart.md" target="_blank" rel="noopener noreferrer">Open the full quickstart reference ↗</a></div>
+          </section>
+          <section id="batch" class="guide-section">
+            <p class="guide-label">RESEARCH PROTOTYPE / POOLED CLOSE</p>
+            <h2>One transaction for multiple channels.</h2>
+            <p>An experimental SDK path can settle multiple channels into a pooled service output. The Esmeralda prototype finalized a transaction spending two channel inputs and creating three stealth outputs; each channel's local service ledger recorded 20 paid calls.</p>
+            <div class="guide-callout warning"><strong>Not coordinator-private or production-ready.</strong> The local builder received every participant's deposit value and mask, and observers can see which channels were grouped in the transaction. Use individual settlement unless a reviewed multi-party proof protocol is available.</div>
+            <div class="guide-actions"><a href="https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f" target="_blank" rel="noopener noreferrer">Inspect pooled Esmeralda transaction ↗</a><a href="https://github.com/AduAkorful/ghostline/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Read full privacy notes ↗</a></div>
           </section>
         </article>
       </div>

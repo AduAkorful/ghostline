@@ -88,11 +88,12 @@
             <p class="guide-label">05 / DATA BOUNDARY</p>
             <h2>Private from observers.<br />Not from the service.</h2>
             <div class="guide-grid">
-              <div class="guide-card"><h3>Payer</h3><p>Knows its own requests, channel details, and signed voucher totals.</p></div>
-              <div class="guide-card"><h3>Service</h3><p>Sees the requests it serves, their prices, and the voucher stream it accepts.</p></div>
-              <div class="guide-card"><h3>Chain observers</h3><p>The tested claim-free settlement and expiry refund hide the deposit and plaintext amounts in transaction fields. Fees, output count, channel metadata, and executed branch remain public.</p></div>
+              <div class="guide-card"><h3>Payer</h3><p>Knows its own requests, channel details, and signed voucher totals. In ordinary individual flows the deposit mask stays in payer-controlled state.</p></div>
+              <div class="guide-card"><h3>Service</h3><p>Sees every request, price, and accepted voucher, plus the declared deposit limit. It does not receive the payer's deposit mask in ordinary individual flows.</p></div>
+              <div class="guide-card"><h3>Chain observers</h3><p>The tested claim-free settlement and expiry refund hide deposit and plaintext transfer amounts in the inspected fields. Fees, timing, output count, channel metadata, authorization data, and branch remain visible.</p></div>
             </div>
-            <p>Funding patterns, timing, and fee payers can still create correlations. Ghostline does not promise anonymity. Call counts come from the service record; chain finality confirms settlement.</p>
+            <div class="guide-callout"><strong>Fresh keys reduce reuse links, not transaction links.</strong> Use separate payer and service authorization keys per channel. An optional one-time payout key separates authorization from later payout spends, but both public keys appear in the same settlement. The pooled settlement prototype is not coordinator-private: its builder sees all deposit openings, and observers see the grouped channel inputs.</div>
+            <p>Funding patterns, timing, and fee payers can still create correlations. Ghostline does not promise anonymity or unlinkable channels. Call counts come from the service record; chain finality confirms settlement.</p>
             <div class="guide-actions"><a href="quickstart.html">Follow the Esmeralda quickstart ↗</a><a href="https://github.com/AduAkorful/ghostline/blob/main/docs/api-reference.md" target="_blank" rel="noopener noreferrer">Full technical reference ↗</a></div>
           </section>
         </article>

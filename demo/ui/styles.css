@@ -454,3 +454,18 @@ h1 span { display:inline-block; margin-top:.12em; color:#c5baff; font-style:ital
   .command-card pre { font-size:12px; }
   .text-link,.back-top { display:inline-flex; min-height:44px; align-items:center; padding-block:8px; font-size:12px; }
 }
+
+.batch-proof { display:grid; grid-template-columns:minmax(220px,.8fr) 1.2fr; gap:40px; margin:38px 0 20px; padding:26px 0; border-top:1px solid rgba(197,186,255,.24); border-bottom:1px solid rgba(197,186,255,.24); }
+.batch-proof .eyebrow { margin:0 0 14px; color:var(--lime); }
+.batch-proof h3 { margin:0; color:var(--ink); font:400 clamp(30px,4vw,52px)/.95 var(--display); letter-spacing:-.05em; }
+.batch-proof h3 span { color:var(--lilac); font-style:italic; }
+.batch-proof-copy p { margin:0 0 12px; max-width:760px; color:#b7b9ca; font-size:13px; line-height:1.7; }
+.batch-proof-copy strong { color:#f1effb; }
+.batch-proof-copy a { display:inline-block; margin-top:4px; color:var(--lime); font:10px var(--mono); text-decoration:none; }
+.batch-proof-copy a:hover { text-decoration:underline; text-underline-offset:3px; }
+.key-boundary { margin:25px 0 0; padding:19px 0; border-top:1px solid rgba(197,186,255,.19); }
+.key-boundary .eyebrow { margin:0 0 8px; color:var(--lime); }
+.key-boundary > p:last-child { max-width:900px; margin:0; color:#b7b9ca; font-size:12px; line-height:1.7; }
+@media (max-width:760px) {
+  .batch-proof { grid-template-columns:1fr; gap:18px; margin-top:28px; padding-block:21px; }
+}
