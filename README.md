@@ -15,7 +15,7 @@ Ghostline lets an agent pay a service request by request while keeping the indiv
   ```
 
 - **[Follow the CLI demo](docs/demo-runbook.md):** run the local quote → voucher → paid-call flow, then inspect the recorded Esmeralda close and its explorer links. The local flow is safe and repeatable; it does not submit a transaction.
-- **Operator live run:** after building this source and configuring a fresh funded Esmeralda channel plus a running paid API, set the documented local variables and run `bash scripts/esmeralda-20-call-demo.sh` for 20 paid calls, one settlement, and an explorer link. The updated CLI/template are not yet in a published release, and this is not a public pre-funded demo.
+- **Operator live run:** install Ghostline `v0.3.1`, configure a fresh funded Esmeralda channel and a running paid API, then run `bash scripts/esmeralda-20-call-demo.sh` for 20 paid calls, one settlement, and an explorer link. This is an operator-run flow, not a public pre-funded demo.
 - **[Open the motion demo](https://ghostline-ui.vercel.app/):** a visual explainer of the CLI flow, not a live wallet or transaction interface.
 - **Static by design:** the hosted page needs no backend, wallet credentials, environment variables, or transaction controls. Use the local smoke command for a safe hands-on try; use your own wallet only for an intentional Esmeralda run.
 - **[Inspect verified Esmeralda evidence](demo/ui/evidence.json):** explorer links show the finalized template publish, channel open, and settlement; the local service ledger separately records 20 paid calls.
