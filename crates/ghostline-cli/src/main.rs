@@ -60,6 +60,9 @@ enum Command {
         session: Option<PathBuf>,
         #[arg(long)]
         vendor_hex: Option<String>,
+        /// Optional one-time service payout key advertised by the service. Defaults to the vendor key.
+        #[arg(long)]
+        service_output_key_hex: Option<String>,
         #[arg(long)]
         budget: Option<u64>,
         #[arg(long)]
@@ -70,6 +73,9 @@ enum Command {
         /// Hex payer secret. Prefer `GHOSTLINE_PAYER_SECRET` or `-` on stdin.
         #[arg(long)]
         secret_hex: Option<String>,
+        /// Private JSON key file created by `ghostline keygen --out`.
+        #[arg(long, conflicts_with = "secret_hex")]
+        secret_file: Option<PathBuf>,
     },
     /// Verify a hex-encoded voucher against the given channel parameters.
     Verify {
@@ -94,7 +100,14 @@ enum Command {
     /// Print `PayTo::Conditions` JSON for `accounts.stealth_transfer`.
     PayTo(OpenArgs),
     /// Print a random Ristretto secret and matching public key as hex.
-    Keygen,
+    Keygen {
+        /// Save the generated keypair in an owner-only JSON file instead of printing its secret.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Label the key's intended use. Service settlement keys are created by `wallet key-create`.
+        #[arg(long, value_parser = ["payer"])]
+        role: Option<String>,
+    },
     /// Seal an open (key-path input → PayTo::Conditions). Prints tx= and deposit_mask=.
     SealOpen {
         #[command(flatten)]
@@ -533,6 +546,14 @@ enum ChannelCommand {
 
 #[derive(Subcommand)]
 enum WalletCommand {
+    /// Allocate a fresh wallet-managed account signing key. Use one per service/channel settlement.
+    KeyCreate {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        /// Save the new wallet KeyId JSON as an owner-only file for `--seal-key-id-file`.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Dry-run or submit an unsigned transaction (`seal-settle` / `seal-refund --unsigned-json`).
     Submit {
         #[arg(long, default_value = "http://127.0.0.1:5100")]
@@ -785,21 +806,31 @@ async fn run(cli: Cli) -> Result<(), String> {
             max_per_call,
             unsafe_no_policy,
             secret_hex,
+            secret_file,
+            service_output_key_hex,
         } => {
             let params = params(&args)?;
-            let secret = secrets::load_secret(
-                secret_hex.as_deref(),
-                secrets::PAYER_SECRET_ENV,
-                "payer secret",
-            )?;
+            let secret = if let Some(path) = secret_file.as_deref() {
+                secrets::load_key_file(path, "payer")?
+            } else {
+                secrets::load_secret(
+                    secret_hex.as_deref(),
+                    secrets::PAYER_SECRET_ENV,
+                    "payer secret",
+                )?
+            };
             let vendor_hex = vendor_hex
                 .or_else(|| std::env::var(secrets::VENDOR_ENV).ok())
                 .ok_or("set --vendor-hex or GHOSTLINE_POLICY_VENDOR_HEX")?;
             let vendor = seal::parse_pk("vendor", vendor_hex.trim())?;
+            let service_output_key = match service_output_key_hex {
+                Some(hex) => seal::parse_pk("service output key", hex.trim())?,
+                None => vendor,
+            };
             let unsafe_ok = unsafe_no_policy || ghostline_policy::env_flag(secrets::UNSAFE_ENV);
             if unsafe_ok {
                 let amount = amount.ok_or("unsafe sign requires --amount")?;
-                let voucher = SignedVoucher::sign(&secret, &params, amount, vendor)
+                let voucher = SignedVoucher::sign(&secret, &params, amount, service_output_key)
                     .map_err(|e| e.to_string())?;
                 println!("{}", to_hex(&voucher.to_bytes()));
             } else {
@@ -837,8 +868,11 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let mut store =
                     ghostline_paywall::ChannelStore::open_or_create(path, params.clone())
                         .map_err(|e| e.to_string())?;
-                let (voucher, _) = ghostline_paywall::gated_sign(
-                    &mut store, engine, vendor, price, &secret, attested,
+                let mut quote =
+                    ghostline_paywall::PaymentRequired::new(price, &params.channel_id());
+                quote.service_output_key = Some(to_hex(service_output_key.as_bytes()));
+                let (voucher, _) = ghostline_paywall::gated_sign_quote(
+                    &mut store, engine, vendor, &quote, &secret, attested,
                 )
                 .map_err(|e| e.to_string())?;
                 println!("{}", to_hex(&voucher.to_bytes()));
@@ -931,6 +965,49 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Wallet { command } => match command {
+            WalletCommand::KeyCreate { url, out } => {
+                if let Some(path) = &out
+                    && path.exists()
+                {
+                    return Err(format!(
+                        "refusing to overwrite key id file: {}",
+                        path.display()
+                    ));
+                }
+                let wallet = connect_wallet(&url).await?;
+                let before = wallet
+                    .keys_list(ghostline_net::ACCOUNT_KEY_BRANCH)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let key = wallet
+                    .keys_create(ghostline_net::ACCOUNT_KEY_BRANCH)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let keys = wallet
+                    .keys_list(ghostline_net::ACCOUNT_KEY_BRANCH)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let (key_id, public_key_hex) = newly_created_account_key(&before, &keys)?;
+                if let Some(path) = &out {
+                    let json = serde_json::to_vec_pretty(&key_id).map_err(|e| e.to_string())?;
+                    ghostline_core::write_private_file(path, &json)
+                        .map_err(|e| format!("key id file: {e}"))?;
+                }
+                let output = serde_json::json!({
+                    "created": key,
+                    "new_key_id": key_id,
+                    "public_key_hex": public_key_hex,
+                    "key_id_file": out.as_ref().map(|path| path.display().to_string()),
+                    "account_keys": keys
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&output).map_err(|e| e.to_string())?
+                );
+                eprintln!(
+                    "Use public_key_hex for this channel's service key; use new_key_id (or the saved file) to sign its one settlement. Do not reuse the key for another channel."
+                );
+            }
             WalletCommand::Submit {
                 url,
                 unsigned_json,
@@ -1063,12 +1140,33 @@ async fn run(cli: Cli) -> Result<(), String> {
                 print_wallet_account(&got);
             }
         },
-        Command::Keygen => {
+        Command::Keygen { out, role } => {
             use tari_crypto::keys::PublicKey as _;
             use tari_crypto::ristretto::RistrettoPublicKey;
             let (secret, public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-            println!("secret={}", to_hex(secret.as_bytes()));
-            println!("public={}", to_hex(public.as_bytes()));
+            let secret_hex = to_hex(secret.as_bytes());
+            let public_hex = to_hex(public.as_bytes());
+            if let Some(path) = out {
+                let role = role.unwrap_or_else(|| "payer".to_string());
+                let json = serde_json::json!({
+                    "format": "ghostline-key-v1",
+                    "role": role,
+                    "secret_hex": secret_hex,
+                    "public_hex": public_hex,
+                });
+                ghostline_core::write_private_file(
+                    &path,
+                    serde_json::to_string_pretty(&json)
+                        .map_err(|e| e.to_string())?
+                        .as_bytes(),
+                )
+                .map_err(|e| format!("key file: {e}"))?;
+                println!("wrote={}", path.display());
+                println!("public={public_hex}");
+            } else {
+                println!("secret={secret_hex}");
+                println!("public={public_hex}");
+            }
         }
         Command::Spec(args) => {
             seal::print_ids(&seal::channel(open_spec(&args)?)?);
@@ -1151,7 +1249,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         channel: &channel,
                         deposit,
                         voucher: &voucher,
-                        service_output: channel.spec().service,
+                        service_output: voucher.service_output_key,
                         resource,
                         max_epoch,
                         scan,
@@ -1194,7 +1292,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         channel: &channel,
                         deposit,
                         voucher: &voucher,
-                        service_output: channel.spec().service,
+                        service_output: voucher.service_output_key,
                         resource,
                         max_epoch,
                         scan,
@@ -2367,7 +2465,7 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
             channel: &channel,
             deposit: funded(channel.params().deposit, &deposit_mask)?,
             voucher: &voucher,
-            service_output: channel.spec().service,
+            service_output: voucher.service_output_key,
             resource,
             max_epoch: args.max_epoch,
             scan,
@@ -3130,6 +3228,54 @@ fn read_key_id(
     serde_json::from_str(raw.trim()).map_err(|e| format!("seal-key-id: {e}"))
 }
 
+/// Find the single account key allocated between two `keys.list` snapshots.
+/// The wallet's documented/live response is `[KeyId, public_key_hex, is_active]`.
+fn newly_created_account_key(
+    before: &[serde_json::Value],
+    after: &[serde_json::Value],
+) -> Result<(serde_json::Value, String), String> {
+    let new_rows: Vec<_> = after
+        .iter()
+        .filter(|row| {
+            let Some(fields) = row.as_array() else {
+                return false;
+            };
+            let Some(key_id) = fields.first() else {
+                return false;
+            };
+            !before.iter().any(|old| {
+                old.as_array()
+                    .and_then(|old_fields| old_fields.first())
+                    .is_some_and(|old_id| old_id == key_id)
+            })
+        })
+        .collect();
+    let [row] = new_rows.as_slice() else {
+        return Err(format!(
+            "expected exactly one new account key, found {}",
+            new_rows.len()
+        ));
+    };
+    let fields = row
+        .as_array()
+        .ok_or_else(|| "wallet keys.list returned a malformed key row".to_string())?;
+    let key_id = fields
+        .first()
+        .cloned()
+        .ok_or_else(|| "wallet keys.list key row has no KeyId".to_string())?;
+    let public_key_hex = fields
+        .get(1)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "wallet keys.list key row has no public key".to_string())?
+        .to_string();
+    let public_key = from_hex(&public_key_hex)
+        .map_err(|_| "wallet keys.list returned a malformed public key".to_string())?;
+    if public_key.len() != 32 {
+        return Err("wallet keys.list public key must be 32 bytes".into());
+    }
+    Ok((key_id, public_key_hex))
+}
+
 fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
     let bytes = from_hex(tx_hex).map_err(|_| "tx: expected even-length hex".to_string())?;
     TransactionEnvelope::from_raw(bytes.into_boxed_slice())
@@ -3142,6 +3288,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wallet_key_create_finds_new_key_id_and_public_key() {
+        let before = serde_json::json!([
+            [{"Derived":{"index":0,"key_branch":"account"}}, "11".repeat(32), true]
+        ]);
+        let after = serde_json::json!([
+            [{"Derived":{"index":0,"key_branch":"account"}}, "11".repeat(32), true],
+            [{"Derived":{"index":1,"key_branch":"account"}}, "22".repeat(32), true]
+        ]);
+        let (key_id, public_hex) =
+            newly_created_account_key(before.as_array().unwrap(), after.as_array().unwrap())
+                .unwrap();
+        assert_eq!(key_id["Derived"]["index"], 1);
+        assert_eq!(public_hex, "22".repeat(32));
+    }
+
+    #[test]
+    fn wallet_key_create_fails_closed_when_new_key_is_ambiguous_or_malformed() {
+        let before = serde_json::json!([]);
+        let no_new_key = serde_json::json!([]);
+        assert!(
+            newly_created_account_key(before.as_array().unwrap(), no_new_key.as_array().unwrap())
+                .is_err()
+        );
+
+        let two_new_keys = serde_json::json!([
+            [{"Derived":{"index":0,"key_branch":"account"}}, "11".repeat(32), true],
+            [{"Derived":{"index":1,"key_branch":"account"}}, "22".repeat(32), true]
+        ]);
+        assert!(
+            newly_created_account_key(before.as_array().unwrap(), two_new_keys.as_array().unwrap())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn live_open_requires_an_explicit_fee_cap() {
         assert_eq!(open_max_fee(true, None).unwrap(), 100_000);
         assert_eq!(open_max_fee(true, Some(15_217)).unwrap(), 15_217);
@@ -3151,9 +3332,11 @@ mod tests {
 
     #[test]
     fn due_close_rejects_a_transaction_max_epoch_in_the_past() {
-        assert!(ensure_transaction_epoch_valid(12403, 12402)
-            .unwrap_err()
-            .contains("set --max-epoch to at least the current epoch"));
+        assert!(
+            ensure_transaction_epoch_valid(12403, 12402)
+                .unwrap_err()
+                .contains("set --max-epoch to at least the current epoch")
+        );
         assert!(ensure_transaction_epoch_valid(12403, 12403).is_ok());
     }
 
@@ -3346,6 +3529,7 @@ mod seal_tests {
     fn seal_open_then_settle_round_trip_hex() {
         let (payer_secret, payer_public) = create_key_pair_from_seed(11);
         let (service_secret, service_public) = create_key_pair_from_seed(13);
+        let (_, payout_public) = create_key_pair_from_seed(14);
         let channel = seal::channel(seal::OpenSpec {
             network_tag: 1,
             deposit: 100,
@@ -3371,15 +3555,19 @@ mod seal_tests {
         )
         .unwrap();
         decode_tx(&open_hex).unwrap();
-        let voucher =
-            SignedVoucher::sign(&payer_secret, channel.params(), 30, channel.spec().service)
-                .unwrap();
+        let voucher = SignedVoucher::sign(
+            &payer_secret,
+            channel.params(),
+            30,
+            payout_public.to_byte_type(),
+        )
+        .unwrap();
         let settle_hex = seal::seal_settle(
             seal::SettleArgs {
                 channel: &channel,
                 deposit: funded(100, &deposit_mask).unwrap(),
                 voucher: &voucher,
-                service_output: channel.spec().service,
+                service_output: voucher.service_output_key,
                 resource: STEALTH_TARI_RESOURCE_ADDRESS,
                 max_epoch: 1,
                 scan: OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
@@ -3499,7 +3687,7 @@ mod seal_tests {
                     mask: RistrettoSecretKey::random(&mut rand::rng()),
                 },
                 voucher: &voucher,
-                service_output: channel.spec().service,
+                service_output: voucher.service_output_key,
                 resource: STEALTH_TARI_RESOURCE_ADDRESS,
                 max_epoch: 1,
                 scan: OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),

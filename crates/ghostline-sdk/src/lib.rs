@@ -11,19 +11,24 @@ mod recover;
 mod spend;
 mod tx;
 
-pub use channel::{Channel, ChannelSpec, SETTLE_FUNCTION};
+pub use channel::{Channel, ChannelSpec, BATCH_SETTLE_FUNCTION, SETTLE_FUNCTION};
 pub use error::SdkError;
 pub use ghostline_core::{
-    ChannelParams, PaymentSession, ServiceLedger, SignedVoucher, VoucherError, sign_voucher,
+    sign_voucher, ChannelParams, PaymentSession, ServiceLedger, SignedVoucher, VoucherError,
 };
 pub use recover::{
-    RecoveredOutput, StealthOutputView, inspect_transaction, unblind_output, unblind_transaction,
+    inspect_transaction, unblind_output, unblind_transaction, RecoveredOutput, StealthOutputView,
 };
-pub use spend::{OpenStatement, OutputScan, fund_open, refund, settle};
+#[cfg(feature = "trusted-local-batch-prototype")]
+pub use spend::settle_batch;
+pub use spend::{
+    fund_open, fund_open_batched, refund, refund_batched, settle, settle_batched_individually,
+    OpenStatement, OutputScan,
+};
 pub use tari_ootle_transaction::{TransactionEnvelope, UnsignedTransaction};
 pub use tari_ootle_wallet_crypto::MaskAndValue;
 pub use tx::{
-    AccountFee, encode_transaction_envelope, seal_hex, seal_hex_with_fee, seal_localnet_hex,
+    encode_transaction_envelope, seal_hex, seal_hex_with_fee, seal_localnet_hex,
     seal_localnet_stealth_transfer, seal_stealth_transfer, seal_stealth_transfer_with_fee,
-    transaction_envelope_hex, unsigned_stealth_transfer_with_fee,
+    transaction_envelope_hex, unsigned_stealth_transfer_with_fee, AccountFee,
 };

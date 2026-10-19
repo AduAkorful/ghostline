@@ -9,6 +9,7 @@ description = "Ghostline payment channel: one-shot voucher settlement for stealt
 
 [dependencies]
 tari_template_lib = "0.34.0"
+curve25519-dalek = { version = "=5.0.0", default-features = false }
 
 [lib]
 crate-type = ["cdylib"]

@@ -25,7 +25,7 @@ fn fixtures() -> (
     let params = ChannelParams {
         network_tag: 1,
         payer,
-        deposit: 100,
+        deposit: 101,
         payer_root: Hash32::from_array([9u8; 32]),
         nonce: [3u8; NONCE_LEN],
     };
@@ -65,6 +65,77 @@ async fn unpaid_request_returns_402_quote() {
     );
     assert_eq!(body["min_expiry_epoch"], 20);
     assert_eq!(body["max_expiry_epoch"], 100);
+}
+
+#[tokio::test]
+async fn quote_advertises_one_time_service_output_key_separately_from_channel_key() {
+    let (secret, payer_public) = create_key_pair_from_seed(31);
+    let (_, output_public) = create_key_pair_from_seed(32);
+    let payer = payer_public.to_byte_type();
+    let params = ChannelParams {
+        network_tag: 1,
+        payer,
+        deposit: 101,
+        payer_root: Hash32::from_array([9u8; 32]),
+        nonce: [4u8; NONCE_LEN],
+    };
+    let service = service_key();
+    let terms = PaymentTerms::new(service, 20, 100)
+        .unwrap()
+        .with_service_output_key(output_public.to_byte_type());
+    let state = AppState::new(ServiceLedger::new(params.clone())).with_payment_terms(terms);
+    let app = router(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/fortune")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let quote: PaymentRequired = serde_json::from_value(json_body(response).await).unwrap();
+    assert_eq!(
+        quote.recipient_key.as_deref(),
+        Some(to_hex(service.as_bytes()).as_str())
+    );
+    assert_eq!(
+        quote.service_output_key.as_deref(),
+        Some(to_hex(output_public.to_byte_type().as_bytes()).as_str())
+    );
+    let (_, wrong_output_public) = create_key_pair_from_seed(33);
+    let mut wrong_session = PaymentSession::new(params.clone());
+    let wrong_voucher = wrong_session
+        .sign_next(&secret, 10, wrong_output_public.to_byte_type())
+        .unwrap();
+    let rejected = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/fortune")
+                .header(VOUCHER_HEADER, encode_voucher_header(&wrong_voucher))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+
+    let mut agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 10), service);
+    let voucher = agent.pay(&quote, &secret).unwrap();
+    assert_eq!(voucher.service_output_key, output_public.to_byte_type());
+    let paid = app
+        .oneshot(
+            Request::builder()
+                .uri("/fortune")
+                .header(VOUCHER_HEADER, encode_voucher_header(&voucher))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(paid.status(), StatusCode::OK);
 }
 
 fn service_key() -> tari_template_lib::types::crypto::RistrettoPublicKeyBytes {

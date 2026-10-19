@@ -5,33 +5,40 @@
 
 mod support;
 
-use ghostline_core::{SignedVoucher, NONCE_LEN};
+use ghostline_core::{NONCE_LEN, SignedVoucher, VOUCHER_DOMAIN, sign_with_nonce, voucher_message};
 use ghostline_sdk::{
-    refund, settle, unblind_output, Channel, ChannelSpec, MaskAndValue, OutputScan,
+    Channel, ChannelSpec, MaskAndValue, OutputScan, refund, settle, unblind_output,
 };
 use ootle_byte_type::ToByteType;
-use support::{fund, CHANNEL, DEPOSIT};
+use support::{CHANNEL, DEPOSIT, fund};
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-use tari_ootle_transaction::{Epoch, Transaction};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_ootle_wallet_crypto::{
-    stealth::{condition_root, create_transfer_statement, script_path_witness_with_data},
     OutputWitness, StealthCryptoApi, StealthInputWitness, StealthOutputWitness,
+    stealth::{condition_root, create_transfer_statement, script_path_witness_with_data},
 };
 use tari_template_lib::types::{
+    Amount, ResourceAddress,
     bytes::Bytes,
+    constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
     stealth::{
         Covenant, RevealedOutput, SpendAuthorization, SpendCondition, SpendWitness,
         StealthTransferStatement,
     },
-    Amount, ResourceAddress,
 };
-use tari_template_test_tooling::{support::spec::OutputAuthSpec, TemplateTest};
+use tari_template_test_tooling::{
+    TemplateTest,
+    support::{
+        spec::OutputAuthSpec,
+        stealth::{generate_transfer_data, generate_transfer_data_to},
+    },
+};
 use tari_utilities::ByteArray;
 
 struct Fixture {
@@ -93,6 +100,35 @@ impl Fixture {
             self.channel.spec().service,
         )
         .unwrap()
+    }
+
+    fn raw_full_deposit_voucher(&self) -> SignedVoucher {
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let output_commitment = MaskAndValue {
+            value: DEPOSIT,
+            mask: mask.clone(),
+        }
+        .to_commitment()
+        .to_byte_type();
+        let message = voucher_message(
+            &self.channel.params().channel_id(),
+            &self.channel.spec().service,
+            &output_commitment,
+        );
+        let signature = sign_with_nonce(
+            &self.payer,
+            RistrettoSecretKey::random(&mut rand::rng()),
+            VOUCHER_DOMAIN,
+            &message,
+        );
+        SignedVoucher {
+            channel_id: self.channel.params().channel_id(),
+            amount: DEPOSIT,
+            mask,
+            service_output_key: self.channel.spec().service,
+            output_commitment,
+            signature,
+        }
     }
 
     fn outputs(&self, voucher: &SignedVoucher, remainder: u64) -> Vec<StealthOutputWitness> {
@@ -276,7 +312,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         f.resource,
         statement,
         &f.service,
-        "invalid settle output count",
+        "settle must have exactly two outputs",
     );
 
     let mut disclosing = f.outputs(&voucher, 70);
@@ -364,6 +400,28 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         .seal(&f.service);
     f.test.execute_expect_success(tx.clone(), vec![]);
     f.test.execute_expect_failure(tx, vec![]);
+}
+
+#[test]
+fn template_rejects_single_output_full_deposit_settlement() {
+    let mut f = Fixture::new(u64::MAX);
+    let voucher = f.raw_full_deposit_voucher();
+    assert_eq!(DEPOSIT - voucher.amount, 0);
+    let only_service_output = [output(
+        f.resource,
+        DEPOSIT,
+        voucher.mask.clone(),
+        SpendAuthorization::Key(voucher.service_output_key),
+        voucher.service_output_key,
+    )];
+    let statement = f.raw_settle(voucher.witness_data(), &only_service_output, None);
+    reject(
+        &mut f.test,
+        f.resource,
+        statement,
+        &f.service,
+        "exactly two outputs",
+    );
 }
 
 #[test]
@@ -471,4 +529,108 @@ fn genuine_balance_covenant_still_requires_a_partition_claim() {
         .finish()
         .seal(&signer);
     test.execute_expect_success(tx, vec![]);
+}
+
+#[test]
+fn settlement_can_pay_its_fee_from_a_separate_stealth_input() {
+    use tari_engine::fees::FeeTable;
+    use tari_engine_types::fees::FeeSource;
+
+    let mut f = Fixture::new(10);
+    f.epoch(1);
+    let (_settlement_key, settlement_public) = create_key_pair_from_seed(91);
+    let settlement_public = settlement_public.to_byte_type();
+    let voucher = SignedVoucher::sign(&f.payer, f.channel.params(), 30, settlement_public).unwrap();
+
+    // Create a separate native-TARI stealth UTXO for fee funding. The fee amount is revealed, but
+    // this route needs no public Account.pay_fee component in the settlement transaction.
+    let (fee_account, fee_owner, fee_wallet_key) = f.test.create_funded_account();
+    f.test.disable_fees();
+    let fee_input_value = 10_000_000u64;
+    let fee_mint = generate_transfer_data(
+        tari_template_test_tooling::support::stealth::NO_INPUTS,
+        Amount::from(fee_input_value),
+        [fee_input_value],
+        Amount::zero(),
+    );
+    let fee_funding_tx = Transaction::builder_localnet(Epoch(2))
+        .call_method(
+            fee_account,
+            "withdraw",
+            args![TARI_TOKEN, Amount::from(fee_input_value)],
+        )
+        .put_last_instruction_output_on_workspace("fee_input")
+        .stealth_transfer_with_input_bucket(TARI_TOKEN, fee_mint.statement.clone(), "fee_input")
+        .build_and_seal(&fee_wallet_key);
+    f.test
+        .execute_expect_success(fee_funding_tx, vec![fee_owner]);
+
+    let fee_mask = fee_mint.output_masks[0].clone();
+    let fee_reserve = 100u64;
+    let fee_transfer = generate_transfer_data_to(
+        [MaskAndValue {
+            mask: fee_mask.clone(),
+            value: fee_input_value,
+        }],
+        Amount::zero(),
+        [fee_input_value - fee_reserve],
+        Amount::from(fee_reserve),
+        f.channel.spec().service,
+    );
+
+    f.test.enable_fees();
+    let mut fee_table = FeeTable::zero_rated();
+    fee_table.per_module_call_cost = 1;
+    f.test.set_fee_table(fee_table);
+    f.test.set_burn_rate_bps(0);
+
+    let settlement = settle(
+        &f.channel,
+        f.deposit.clone(),
+        &voucher,
+        settlement_public,
+        OutputScan::localnet(f.resource),
+    )
+    .unwrap();
+    // This authorization is part of the transaction's public stealth output statement. It is
+    // intentionally distinct from the channel's service key, which authorizes the close below.
+    assert!(
+        settlement
+            .outputs_statement
+            .outputs
+            .iter()
+            .any(|output| output.auth == SpendAuthorization::Key(settlement_public))
+    );
+    assert!(
+        !settlement
+            .outputs_statement
+            .outputs
+            .iter()
+            .any(|output| output.auth == SpendAuthorization::Key(f.channel.spec().service))
+    );
+    let tx = Transaction::builder_localnet(Epoch(2))
+        .with_fee_instructions_builder(|builder| {
+            builder
+                .stealth_transfer(TARI_TOKEN, fee_transfer.statement.clone())
+                .put_last_instruction_output_on_workspace("fee")
+                .pay_fee_from_bucket("fee")
+        })
+        .stealth_transfer(f.resource, settlement)
+        .finish()
+        .add_signer(&f.test.to_public_key_bytes(), &fee_mask)
+        .seal(&f.service);
+
+    let result = f.test.execute_expect_success(tx, vec![]);
+    assert_eq!(
+        result
+            .finalize
+            .fee_receipt
+            .fee_breakdown()
+            .get(FeeSource::RuntimeCall),
+        11
+    );
+    assert_eq!(result.finalize.fee_receipt.unpaid_debt(), 0);
+    assert_eq!(result.finalize.fee_receipt.total_fee_overcharge(), 89);
+    // The channel's service authorization key closes the channel; the independent one-time key owns the payout.
+    assert_ne!(settlement_public, f.channel.spec().service);
 }

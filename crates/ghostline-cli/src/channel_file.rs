@@ -448,9 +448,22 @@ mod tests {
         assert!(text.contains("settle: bb Finalized"));
         assert!(text.contains("does not cryptographically prove off-chain calls"));
         assert!(text.contains("only the transactions supplied to this command"));
-        assert!(view.disclosure.public_chain_data.contains("without revealing the deposit"));
-        assert!(view.disclosure.public_chain_data.contains("exact service amount"));
-        assert!(!view.disclosure.public_chain_data.contains("claim reveals the channel deposit"));
+        assert!(
+            view.disclosure
+                .public_chain_data
+                .contains("without revealing the deposit")
+        );
+        assert!(
+            view.disclosure
+                .public_chain_data
+                .contains("exact service amount")
+        );
+        assert!(
+            !view
+                .disclosure
+                .public_chain_data
+                .contains("claim reveals the channel deposit")
+        );
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("deposit_mask_hex"));
         assert!(!json.contains("voucher_hex"));

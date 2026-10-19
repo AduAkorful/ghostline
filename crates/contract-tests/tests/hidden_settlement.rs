@@ -5,16 +5,16 @@
 
 mod support;
 
-use ghostline_core::{SignedVoucher, NONCE_LEN};
-use ghostline_sdk::{refund, settle, Channel, ChannelSpec, MaskAndValue, OutputScan};
+use ghostline_core::{NONCE_LEN, SignedVoucher};
+use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, OutputScan, refund, settle};
 use ootle_byte_type::ToByteType;
-use support::{fund, CHANNEL, DEPOSIT};
+use support::{CHANNEL, DEPOSIT, fund};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction};
 use tari_template_lib::types::crypto::{
     NoSignatureDomain, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Signature,
 };
-use tari_template_test_tooling::{support::spec::OutputAuthSpec, TemplateTest};
+use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
 
 const NETWORK_TAG: u8 = 1;
 const NONCE: [u8; NONCE_LEN] = [42; NONCE_LEN];

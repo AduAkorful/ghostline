@@ -7,7 +7,8 @@ mod open_channel;
 use ghostline_core::{ChannelParams, SignedVoucher, VoucherError, from_hex, to_hex};
 use ghostline_net::TransactionEnvelope;
 use ghostline_paywall::{
-    ChannelStatus, ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header, gated_sign,
+    ChannelStatus, ChannelStore, PaymentRequired, VOUCHER_HEADER, encode_voucher_header,
+    gated_sign, gated_sign_quote,
 };
 use ghostline_policy::{Policy, PolicyEngine, env_flag};
 use ghostline_sdk::{inspect_transaction, unblind_transaction};
@@ -195,7 +196,38 @@ fn voucher_at(
             .map_err(|e| e.to_string())?;
     }
     let secret = payer_secret_from_env()?;
-    sign_store(&mut store, &secret, quote.price, vendor, attested)
+    sign_store_for_quote(&mut store, &secret, quote, vendor, attested)
+}
+
+fn sign_store_for_quote(
+    store: &mut ChannelStore,
+    secret: &RistrettoSecretKey,
+    quote: &PaymentRequired,
+    vendor: RistrettoPublicKeyBytes,
+    attested: bool,
+) -> Result<String, String> {
+    if env_flag("GHOSTLINE_POLICY_UNSAFE") {
+        let output_key = quote
+            .service_output_public_key()
+            .map_err(|e| e.to_string())?
+            .unwrap_or(vendor);
+        let mut session = store.session().map_err(|e| e.to_string())?;
+        let voucher = session
+            .sign_next(secret, quote.price, output_key)
+            .map_err(|e: VoucherError| e.to_string())?;
+        store.save_session(&session).map_err(|e| e.to_string())?;
+        return Ok(encode_voucher_header(&voucher));
+    }
+    let policy = Policy::from_env()?
+        .ok_or("set GHOSTLINE_POLICY_BUDGET and GHOSTLINE_POLICY_MAX_PER_CALL")?;
+    let engine = PolicyEngine::new(policy)
+        .with_audit_file_from_env()
+        .map_err(|e| e.to_string())?
+        .with_human_rules_from_env()
+        .map_err(|e| e.to_string())?;
+    let (voucher, _) = gated_sign_quote(store, engine, vendor, quote, secret, attested)
+        .map_err(|e| e.to_string())?;
+    Ok(encode_voucher_header(&voucher))
 }
 
 fn sign_store(
@@ -845,6 +877,7 @@ mod tests {
 
         let (secret, public) = create_key_pair_from_seed(11);
         let (_, service) = create_key_pair_from_seed(13);
+        let (_, payout) = create_key_pair_from_seed(14);
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
@@ -864,17 +897,33 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.json");
         ChannelStore::create(&path, params.clone()).unwrap();
-        let quote = serde_json::to_string(&PaymentRequired::new(10, &params.channel_id())).unwrap();
+        let terms = ghostline_paywall::PaymentTerms::new(service.to_byte_type(), 1, 10)
+            .unwrap()
+            .with_service_output_key(payout.to_byte_type());
+        let quote = serde_json::to_string(
+            &PaymentRequired::new(10, &params.channel_id()).with_terms(&terms),
+        )
+        .unwrap();
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
+        let captured_voucher = Arc::new(Mutex::new(None));
+        let server_voucher = captured_voucher.clone();
         std::thread::spawn(move || {
             for _ in 0..2 {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut buf = [0u8; 8192];
                 let n = stream.read(&mut buf).unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
-                let paid = req.contains("ghostline-voucher:");
+                let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let paid = req.to_ascii_lowercase().contains("ghostline-voucher:");
+                if paid {
+                    let voucher = req
+                        .lines()
+                        .find(|line| line.to_ascii_lowercase().starts_with("ghostline-voucher:"))
+                        .and_then(|line| line.split_once(':').map(|(_, value)| value.trim()))
+                        .map(str::to_string);
+                    *server_voucher.lock().unwrap() = voucher;
+                }
                 let (status, body) = if paid {
                     ("200 OK", "{\"fortune\":\"ok\"}")
                 } else {
@@ -916,6 +965,9 @@ mod tests {
         assert!(result.body.contains("fortune"));
         let loaded = ChannelStore::open(&path).unwrap();
         assert_eq!(loaded.session().unwrap().cumulative(), 10);
+        let voucher_hex = captured_voucher.lock().unwrap().clone().unwrap();
+        let voucher = SignedVoucher::from_bytes(&from_hex(&voucher_hex).unwrap()).unwrap();
+        assert_eq!(voucher.service_output_key, payout.to_byte_type());
     }
 
     #[test]
@@ -1580,7 +1632,7 @@ mod tests {
         assert!(!text.contains("component_secret"));
         assert!(!text.contains(&"11".repeat(32)));
         assert_eq!(view.status.accepted, 10);
-        assert_eq!(view.status.remainder_at_accepted, 90);
+        assert_eq!(view.status.remainder_at_accepted, 89);
         assert_eq!(view.output_presence, "not_checked");
         assert_eq!(listed.len(), 1);
         assert_eq!(

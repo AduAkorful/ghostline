@@ -27,7 +27,10 @@ impl fmt::Display for VoucherError {
                 write!(f, "voucher service output key is not a valid Ristretto key")
             }
             Self::ExceedsDeposit { amount, deposit } => {
-                write!(f, "voucher exceeds deposit ({amount} > {deposit})")
+                write!(
+                    f,
+                    "voucher exceeds channel spend limit ({amount} > {deposit})"
+                )
             }
             Self::NotIncreased { amount, accepted } => {
                 write!(

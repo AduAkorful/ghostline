@@ -26,20 +26,27 @@ An unpaid request returns HTTP `402` with a JSON body shaped like:
   "unit_price": 10,
   "units": 3,
   "recipient_key": "<64 hex characters>",
+  "service_output_key": "<optional 64 hex characters>",
   "min_expiry_epoch": 12000,
   "max_expiry_epoch": 13000
 }
 ```
 
-`price` is the total amount due for this request, in micro-units. `basis` is `fixed`, `per_request`, or `metered`; `unit_price` and `units` are present for metered quotes. The reference API requires recipient and inclusive expiry terms at startup and returns them together. Older/shared quote producers may omit those opening terms; clients must accept either all three terms (`recipient_key`, minimum and maximum epoch) or none.
+`price` is the total amount due for this request, in micro-units. `basis` is `fixed`, `per_request`, or `metered`; `unit_price` and `units` are present for metered quotes. `recipient_key` and the inclusive expiry bounds identify the channel's authorized service and opening range. `service_output_key` is optional; when present, the payer binds the voucher to that payout key instead of reusing `recipient_key` as the output key. Older/shared quote producers may omit the opening terms; clients accept either all three (`recipient_key`, minimum and maximum epoch) or none.
 
-Before signing, the payer checks the scheme and channel id. If opening terms are present, it also checks the recipient key and chooses an expiry inside the inclusive range. The HTTP payer rejects an incomplete terms tuple, wrong recipient, wrong channel id, or unsupported scheme before signing or opening.
+Before signing, the payer checks the scheme and channel id. If opening terms are present, it also checks the recipient key and chooses an expiry inside the inclusive range. If `service_output_key` is present, it validates that key and signs the voucher for it. The HTTP payer rejects an incomplete terms tuple, malformed payout key, wrong recipient, wrong channel id, or unsupported scheme before signing or opening.
 
 ### Paid request and errors
 
-The payer signs the **cumulative total owed for the channel**, not merely the current request's `price`, then retries with `ghostline-voucher`. The server verifies the signature against the ledger's channel, enforces that the total increases and stays within the deposit, writes the accepted state, and only then serves the resource. Replaying the latest accepted voucher is idempotent and charges no additional delta. Older totals, a mismatched channel, malformed signatures, or over-deposit amounts are rejected.
+The payer signs the **cumulative total owed for the channel**, not merely the current request's `price`, then retries with `ghostline-voucher`. The server verifies the signature against the ledger's channel, enforces that the total increases and stays at or below `deposit - 1 µT`, writes the accepted state, and only then serves the resource. The reserved micro-unit guarantees a payer-change output in settlement. Replaying the latest accepted voucher is idempotent and charges no additional delta. Older totals, a mismatched channel, malformed signatures, or amounts above the spend limit are rejected.
 
 Rejected payment responses use JSON `{ "scheme": "ghostline.channel.voucher.v1", "status": <HTTP status>, "reason": "<description>" }`. A zero or overflowing metered price is a bad request. A missing voucher is the 402 quote path; other failures use the status associated with the typed paywall error.
+
+## Wallet key rotation
+
+Create a fresh service signing key for each one-settlement channel with `ghostline wallet key-create --url http://127.0.0.1:5100 --out /secure/path/service-channel-key-id.json`. The command allocates a wallet-managed `account`-branch key, prints its public key, and can save the matching wallet-local KeyId JSON with owner-only permissions. Use the public key in channel terms and the saved KeyId file for settlement signing. The file is a signer reference, not private key material, and only works with the wallet that created it. The wallet daemon endpoint is administrative and must remain on loopback. Fresh keys reduce repeated-key correlation across channels but do not conceal funding, fee, timing, or the payer/service relationship within a settlement transaction.
+
+For distinct channel authorization and payout identities, create a second wallet key and pass its public key as `ghostline-paid-api serve --service-output-key-hex`. That key is included in 402 quotes and signed into the payer's voucher; the channel's original service key still authorizes settlement. This option is for a single channel/ledger server. The transaction reveals both keys together, so it does not hide the relationship between the channel and its payout. It prevents later payouts from reusing the channel authorization key.
 
 ### Reference API routes
 

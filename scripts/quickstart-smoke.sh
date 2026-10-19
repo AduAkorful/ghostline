@@ -104,7 +104,7 @@ call_output="$(GHOSTLINE_PAYER_SECRET="$payer_secret" target/debug/ghostline-pai
   --max-per-call 10)"
 grep -q '^ok_calls=3$' <<<"$call_output"
 grep -q '^cumulative=30$' <<<"$call_output"
-grep -q '^unspent_on_channel=99970$' <<<"$call_output"
+grep -q '^unspent_on_channel=99969$' <<<"$call_output"
 curl -sS "http://$bind/metrics" >"$tmp_dir/metrics.txt"
 grep -q '^ghostline_paid_requests_total 3$' "$tmp_dir/metrics.txt"
 grep -q '^ghostline_payment_required_total 4$' "$tmp_dir/metrics.txt"

@@ -88,10 +88,11 @@ impl SignedVoucher {
         if amount == 0 {
             return Err(VoucherError::ZeroAmount);
         }
-        if amount > params.deposit {
+        let max_spend = params.max_spend();
+        if amount > max_spend {
             return Err(VoucherError::ExceedsDeposit {
                 amount,
-                deposit: params.deposit,
+                deposit: max_spend,
             });
         }
         let channel_id = params.channel_id();
@@ -121,10 +122,11 @@ impl SignedVoucher {
         if self.amount == 0 {
             return Err(VoucherError::ZeroAmount);
         }
-        if self.amount > params.deposit {
+        let max_spend = params.max_spend();
+        if self.amount > max_spend {
             return Err(VoucherError::ExceedsDeposit {
                 amount: self.amount,
-                deposit: params.deposit,
+                deposit: max_spend,
             });
         }
         if RistrettoPublicKey::from_canonical_bytes(self.service_output_key.as_bytes()).is_err() {

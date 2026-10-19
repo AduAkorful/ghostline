@@ -6,7 +6,7 @@ No, if you use the glibc-based Linux x86-64 release. The [installer](install.md)
 
 ## What does Ghostline hide?
 
-The service sees each request, its price, and the payer's voucher. Those details stay in service-side records rather than appearing as one chain transaction per request. Fresh Esmeralda claim-free settlement and expiry-refund transactions finalized without exposing the deposit or plaintext amounts in public transaction fields. Fees, timing, branch, opaque channel id, authorization data, output commitments, and output count also remain visible. Funding and timing can still link transactions. See [Privacy](privacy.md).
+The service sees each request, its price, and the payer's voucher. Those details stay in service-side records rather than appearing as one chain transaction per request. A fresh claim-free settlement and expiry refund using the latest Esmeralda template finalized without revealing the deposit or output amounts in the inspected public transaction fields. The wallet confirmed the refund channel output was spent, but we did not locally unblind the recipient output to verify its amount. Fees, timing, branch, opaque channel id, authorization data, output commitments, and output counts remain visible. A pooled batch prototype also finalized, but its local builder handled both deposit openings and the chain shows both channels in one transaction. Funding and timing can still link transactions. See [Privacy](privacy.md).
 
 ## Is the service blind to my spending?
 
@@ -54,4 +54,4 @@ No. It is early development, has not had an independent audit, and is intended f
 
 ## Does the side-by-side demo exist?
 
-A [read-only prototype](../demo/ui/README.md) presents sanitized Esmeralda evidence for one paid call on the commitment-based settlement template. It contains no wallet connection or transaction controls. Call counts come from service records; the page and CLI privacy receipts are operator summaries, not cryptographic proof of the off-chain call log.
+A [read-only prototype](../demo/ui/README.md) presents sanitized Esmeralda evidence for 20 paid calls followed by one settlement using the newly published fixed-output template. It contains no wallet connection or transaction controls. Call counts come from service records; the page and CLI privacy receipts are operator summaries, not cryptographic proof of the off-chain call log.

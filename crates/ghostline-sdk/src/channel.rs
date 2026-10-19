@@ -3,16 +3,17 @@
 use ghostline_core::{ChannelParams, NONCE_LEN};
 use tari_ootle_wallet_crypto::stealth::condition_root;
 use tari_template_lib::types::{
-    FunctionName, Hash32, TemplateAddress,
     bytes::Bytes,
     crypto::RistrettoPublicKeyBytes,
     rule,
     stealth::{BuiltinPredicate, SpendCondition, TemplateFunction},
+    FunctionName, Hash32, TemplateAddress,
 };
 
 use crate::SdkError;
 
 pub const SETTLE_FUNCTION: &str = "settle";
+pub const BATCH_SETTLE_FUNCTION: &str = "settle_batch";
 
 /// All values the payer fixes when opening a stealth channel.
 #[derive(Debug, Clone)]
@@ -26,13 +27,15 @@ pub struct ChannelSpec {
     pub channel_template: TemplateAddress,
 }
 
-/// The two-leaf condition tree committed by a stealth deposit, plus the bound channel params.
+/// The channel condition leaves committed by a stealth deposit, plus the bound channel params.
 #[derive(Debug, Clone)]
 pub struct Channel {
     spec: ChannelSpec,
     params: ChannelParams,
     payer_target: SpendCondition,
     settle_leaf: SpendCondition,
+    batched_individual_settle_leaf: SpendCondition,
+    batch_settle_leaf: SpendCondition,
     refund_leaf: SpendCondition,
 }
 
@@ -40,6 +43,9 @@ impl Channel {
     pub fn open(spec: ChannelSpec) -> Result<Self, SdkError> {
         if spec.deposit == 0 {
             return Err(SdkError::ZeroDeposit);
+        }
+        if spec.deposit <= ghostline_core::SETTLEMENT_RESERVE {
+            return Err(SdkError::DepositTooSmall);
         }
 
         let payer_target = SpendCondition::access_rule(rule!(public_key(spec.payer)));
@@ -65,6 +71,31 @@ impl Channel {
             SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),
             SpendCondition::access_rule(rule!(public_key(spec.service))),
         ]);
+        let batch_settle_leaf = conjunction([
+            SpendCondition::template_function(TemplateFunction::new(
+                spec.channel_template,
+                FunctionName::try_from(BATCH_SETTLE_FUNCTION)
+                    .expect("settle_batch is a valid function name"),
+                vec![
+                    encode_arg(&Hash32::from_array(params.channel_id()))?,
+                    encode_arg(&spec.payer)?,
+                    encode_arg(&payer_root)?,
+                ],
+            )),
+            SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),
+        ]);
+        let batched_individual_settle_leaf = conjunction([
+            SpendCondition::template_function(TemplateFunction::new(
+                spec.channel_template,
+                settle_function(),
+                vec![
+                    encode_arg(&Hash32::from_array(params.channel_id()))?,
+                    encode_arg(&spec.payer)?,
+                    encode_arg(&payer_root)?,
+                ],
+            )),
+            SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),
+        ]);
         let refund_leaf = conjunction([
             SpendCondition::builtin(BuiltinPredicate::AfterEpoch(spec.expiry_epoch)),
             SpendCondition::access_rule(rule!(public_key(spec.payer))),
@@ -75,6 +106,8 @@ impl Channel {
             params,
             payer_target,
             settle_leaf,
+            batched_individual_settle_leaf,
+            batch_settle_leaf,
             refund_leaf,
         })
     }
@@ -95,6 +128,14 @@ impl Channel {
         &self.settle_leaf
     }
 
+    pub fn batch_settle_leaf(&self) -> &SpendCondition {
+        &self.batch_settle_leaf
+    }
+
+    pub fn batched_individual_settle_leaf(&self) -> &SpendCondition {
+        &self.batched_individual_settle_leaf
+    }
+
     pub fn refund_leaf(&self) -> &SpendCondition {
         &self.refund_leaf
     }
@@ -105,6 +146,16 @@ impl Channel {
 
     pub fn leaves_vec(&self) -> Vec<SpendCondition> {
         self.leaves().into()
+    }
+
+    /// Condition tree for channels that may settle in a pooled batch, settle individually, or refund after expiry.
+    pub fn batched_leaves_vec(&self) -> Vec<SpendCondition> {
+        [
+            self.batch_settle_leaf.clone(),
+            self.batched_individual_settle_leaf.clone(),
+            self.refund_leaf.clone(),
+        ]
+        .into()
     }
 
     pub fn condition_root(&self) -> Result<Hash32, SdkError> {
@@ -155,6 +206,13 @@ mod tests {
     }
 
     #[test]
+    fn open_rejects_deposit_without_room_for_change_reserve() {
+        let mut s = spec();
+        s.deposit = ghostline_core::SETTLEMENT_RESERVE;
+        assert!(matches!(Channel::open(s), Err(SdkError::DepositTooSmall)));
+    }
+
+    #[test]
     fn payer_root_is_the_payer_key_leaf() {
         let channel = Channel::open(spec()).unwrap();
         let expected = condition_root(std::slice::from_ref(channel.payer_target())).unwrap();
@@ -167,5 +225,17 @@ mod tests {
         assert_eq!(channel.leaves_vec().len(), 2);
         assert_eq!(channel.settle_leaf().conditions().len(), 3);
         assert_eq!(channel.refund_leaf().conditions().len(), 2);
+    }
+
+    #[test]
+    fn batched_channel_tree_selects_batch_settle_function() {
+        let channel = Channel::open(spec()).unwrap();
+        assert_eq!(channel.batched_leaves_vec().len(), 3);
+        assert_eq!(channel.batch_settle_leaf().conditions().len(), 2);
+        assert_ne!(channel.batch_settle_leaf(), channel.settle_leaf());
+        assert!(channel
+            .batched_leaves_vec()
+            .contains(channel.batched_individual_settle_leaf()));
+        assert!(!channel.batched_leaves_vec().contains(channel.settle_leaf()));
     }
 }

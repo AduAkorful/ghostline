@@ -9,7 +9,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use ghostline_core::{ChannelParams, NONCE_LEN, from_hex};
 use ghostline_paid_api::{AppState, router, router_with_metrics};
-use ghostline_paywall::{ChannelStore, PaymentRequired, PaymentTerms, VOUCHER_HEADER, gated_sign};
+use ghostline_paywall::{ChannelStore, PaymentRequired, PaymentTerms, VOUCHER_HEADER};
 use ghostline_policy::PolicyEngine;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -52,6 +52,9 @@ enum Command {
         /// Public key authorized to settle channels for this service.
         #[arg(long)]
         service_key_hex: String,
+        /// Optional fresh one-time public key that receives this channel's settlement output.
+        #[arg(long)]
+        service_output_key_hex: Option<String>,
         /// Inclusive lower expiry accepted for newly opened channels.
         #[arg(long)]
         min_expiry_epoch: u64,
@@ -163,6 +166,7 @@ async fn run() -> Result<(), String> {
             ledger,
             price,
             service_key_hex,
+            service_output_key_hex,
             min_expiry_epoch,
             max_expiry_epoch,
             metrics,
@@ -170,8 +174,13 @@ async fn run() -> Result<(), String> {
             let store = ChannelStore::open(&ledger).map_err(|e| e.to_string())?;
             let service_key = RistrettoPublicKeyBytes::from_hex(service_key_hex.trim())
                 .map_err(|e| format!("--service-key-hex: {e}"))?;
-            let terms = PaymentTerms::new(service_key, min_expiry_epoch, max_expiry_epoch)
+            let mut terms = PaymentTerms::new(service_key, min_expiry_epoch, max_expiry_epoch)
                 .map_err(|e| e.to_string())?;
+            if let Some(output_key_hex) = service_output_key_hex {
+                let output_key = RistrettoPublicKeyBytes::from_hex(output_key_hex.trim())
+                    .map_err(|e| format!("--service-output-key-hex: {e}"))?;
+                terms = terms.with_service_output_key(output_key);
+            }
             let state = AppState::with_store(store, price)
                 .map_err(|e| e.to_string())?
                 .with_payment_terms(terms);
@@ -229,9 +238,10 @@ async fn run() -> Result<(), String> {
                 } else {
                     false
                 };
-                let (voucher, next) =
-                    gated_sign(&mut store, engine, vendor, quote.price, &secret, attested)
-                        .map_err(|e| e.to_string())?;
+                let (voucher, next) = ghostline_paywall::gated_sign_quote(
+                    &mut store, engine, vendor, &quote, &secret, attested,
+                )
+                .map_err(|e| e.to_string())?;
                 engine = next;
                 let paid = client
                     .get(&url)
@@ -253,7 +263,7 @@ async fn run() -> Result<(), String> {
             }
             let session = store.session().map_err(|e| e.to_string())?;
             let cumulative = session.cumulative();
-            let remaining = session.params().deposit.saturating_sub(cumulative);
+            let remaining = session.params().max_spend().saturating_sub(cumulative);
             println!("ok_calls={ok}");
             println!("cumulative={cumulative}");
             println!("unspent_on_channel={remaining}");

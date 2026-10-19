@@ -418,6 +418,17 @@ impl ChannelDirectory {
         self.stores[index].commit_charge(&ledger, price, hex)
     }
 
+    /// Charge only if the voucher directs the service output to the configured payout key.
+    pub fn charge_to_output_key(
+        &mut self,
+        price: u64,
+        voucher_hex: Option<&str>,
+        expected_output_key: &RistrettoPublicKeyBytes,
+    ) -> Result<u64, PaywallError> {
+        crate::gate::validate_output_key(voucher_hex, expected_output_key)?;
+        self.charge(price, voucher_hex)
+    }
+
     fn store_index(&self, channel_id: &[u8; CHANNEL_ID_LEN]) -> Option<usize> {
         self.stores
             .iter()

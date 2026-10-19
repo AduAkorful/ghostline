@@ -8,6 +8,7 @@ use tari_ootle_wallet_crypto::WalletCryptoError;
 #[derive(Debug)]
 pub enum SdkError {
     ZeroDeposit,
+    DepositTooSmall,
     ZeroInput,
     Overflow,
     InsufficientFunds { have: u64, need: u64 },
@@ -21,12 +22,19 @@ pub enum SdkError {
     Decrypt(String),
     TagMismatch,
     UnknownNetwork(u8),
+    InvalidBatchSize,
+    DuplicateBatchEntry,
+    DegenerateBatchProof,
 }
 
 impl fmt::Display for SdkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroDeposit => write!(f, "channel deposit must be greater than zero"),
+            Self::DepositTooSmall => write!(
+                f,
+                "channel deposit must be greater than the 1 µT settlement reserve"
+            ),
             Self::ZeroInput => write!(f, "open inputs must each be greater than zero"),
             Self::Overflow => write!(f, "input values overflow u64"),
             Self::InsufficientFunds { have, need } => {
@@ -51,6 +59,17 @@ impl fmt::Display for SdkError {
             Self::UnknownNetwork(byte) => write!(
                 f,
                 "transaction network byte {byte:#04x} is not an Ootle Network"
+            ),
+            Self::InvalidBatchSize => {
+                write!(f, "batch settlement must contain between 2 and 12 channels")
+            }
+            Self::DuplicateBatchEntry => write!(
+                f,
+                "batch settlement contains a duplicate channel, input, or payer root"
+            ),
+            Self::DegenerateBatchProof => write!(
+                f,
+                "batch settlement has a zero mask-excess proof; rebuild with fresh change masks"
             ),
         }
     }

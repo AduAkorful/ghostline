@@ -22,10 +22,11 @@ impl PaymentSession {
 
     /// Restores a session after a crash. `cumulative` must be the last signed total.
     pub fn resume(params: ChannelParams, cumulative: u64) -> Result<Self, VoucherError> {
-        if cumulative > params.deposit {
+        let max_spend = params.max_spend();
+        if cumulative > max_spend {
             return Err(VoucherError::ExceedsDeposit {
                 amount: cumulative,
-                deposit: params.deposit,
+                deposit: max_spend,
             });
         }
         Ok(Self { params, cumulative })
@@ -72,10 +73,11 @@ impl ServiceLedger {
     }
 
     pub fn resume(params: ChannelParams, accepted: u64) -> Result<Self, VoucherError> {
-        if accepted > params.deposit {
+        let max_spend = params.max_spend();
+        if accepted > max_spend {
             return Err(VoucherError::ExceedsDeposit {
                 amount: accepted,
-                deposit: params.deposit,
+                deposit: max_spend,
             });
         }
         Ok(Self { params, accepted })
@@ -90,7 +92,7 @@ impl ServiceLedger {
     }
 
     pub fn remaining(&self) -> u64 {
-        self.params.deposit - self.accepted
+        self.params.max_spend() - self.accepted
     }
 
     /// Verifies the voucher and records it.
@@ -153,7 +155,7 @@ mod tests {
         let second = payer.sign_next(&secret, 25, service_key).unwrap();
         assert_eq!(service.accept(&second).unwrap(), 25);
         assert_eq!(service.accepted(), 35);
-        assert_eq!(service.remaining(), 65);
+        assert_eq!(service.remaining(), 64);
     }
 
     #[test]
@@ -198,7 +200,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
-            deposit: 10_000,
+            deposit: 10_001,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };

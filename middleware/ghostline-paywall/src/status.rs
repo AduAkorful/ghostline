@@ -205,13 +205,22 @@ mod observer_tests {
     #[test]
     fn panel_reports_live_settlement_disclosures() {
         let panel = ObserverView::default_panel();
-        assert!(panel.at_settle.contains(&"not the channel deposit amount (claim-free Esmeralda settlement)"));
+        assert!(
+            panel
+                .at_settle
+                .contains(&"not the channel deposit amount (claim-free Esmeralda settlement)")
+        );
         assert!(
             panel
                 .at_settle
                 .contains(&"not the exact service amount or payer remainder")
         );
-        assert!(!panel.at_settle.iter().any(|item| item.contains("revealed in the covenant claim")));
+        assert!(
+            !panel
+                .at_settle
+                .iter()
+                .any(|item| item.contains("revealed in the covenant claim"))
+        );
         assert!(!panel.at_settle.contains(&"the voucher amount"));
     }
 }
@@ -265,19 +274,23 @@ impl ChannelStatus {
         expiry_epoch: Option<u64>,
         current_epoch: Option<u64>,
     ) -> Result<Self, PaywallError> {
-        let remainder_at_accepted = deposit.checked_sub(accepted).ok_or(PaywallError::Voucher(
-            ghostline_core::VoucherError::ExceedsDeposit {
-                amount: accepted,
-                deposit,
-            },
-        ))?;
+        let spend_limit = deposit.saturating_sub(ghostline_core::SETTLEMENT_RESERVE);
+        let remainder_at_accepted =
+            spend_limit
+                .checked_sub(accepted)
+                .ok_or(PaywallError::Voucher(
+                    ghostline_core::VoucherError::ExceedsDeposit {
+                        amount: accepted,
+                        deposit: spend_limit,
+                    },
+                ))?;
         let remainder_at_cumulative =
-            deposit
+            spend_limit
                 .checked_sub(cumulative)
                 .ok_or(PaywallError::Voucher(
                     ghostline_core::VoucherError::ExceedsDeposit {
                         amount: cumulative,
-                        deposit,
+                        deposit: spend_limit,
                     },
                 ))?;
         let epochs_until_expiry = match (expiry_epoch, current_epoch) {
@@ -333,7 +346,7 @@ mod tests {
         let mut store = ChannelStore::create(&path, params()).unwrap();
         store.set_totals(40, 40).unwrap();
         let view = ChannelStatus::from_store(&store, Some(50), Some(40)).unwrap();
-        assert_eq!(view.remainder_at_accepted, 60);
+        assert_eq!(view.remainder_at_accepted, 59);
         assert_eq!(view.settle_window, SettleWindow::SettleOpen);
         let late = ChannelStatus::from_store(&store, Some(50), Some(50)).unwrap();
         assert_eq!(late.settle_window, SettleWindow::RefundOpen);

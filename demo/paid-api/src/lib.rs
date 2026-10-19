@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use ghostline_core::ServiceLedger;
 use ghostline_paywall::{
     CHANNEL_HEADER, ChannelDirectory, ChannelStore, PaymentRejection, PaymentTerms, PriceKind,
-    VOUCHER_HEADER, charge, quote,
+    VOUCHER_HEADER, charge, charge_to_output_key, quote,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -202,7 +202,17 @@ async fn serve(
         .and_then(|value| value.to_str().ok());
     let mut ledger = state.ledger.lock().await;
     let mut next_ledger = ledger.clone();
-    match charge(&mut next_ledger, quoted.price, voucher) {
+    let charge_result = match state.payment_terms.as_ref() {
+        Some(terms) => match terms.service_output_public_key() {
+            Ok(Some(output_key)) => {
+                charge_to_output_key(&mut next_ledger, quoted.price, voucher, &output_key)
+            }
+            Ok(None) => charge(&mut next_ledger, quoted.price, voucher),
+            Err(err) => Err(err),
+        },
+        None => charge(&mut next_ledger, quoted.price, voucher),
+    };
+    match charge_result {
         Ok(_) => {
             if let Some(store) = &state.store {
                 let mut store = store.lock().await;
@@ -318,7 +328,17 @@ async fn serve_directory(
     let requested = headers
         .get(CHANNEL_HEADER)
         .and_then(|value| value.to_str().ok());
-    match directory.charge(quoted.price, voucher) {
+    let charge_result = match state.payment_terms.as_ref() {
+        Some(terms) => match terms.service_output_public_key() {
+            Ok(Some(output_key)) => {
+                directory.charge_to_output_key(quoted.price, voucher, &output_key)
+            }
+            Ok(None) => directory.charge(quoted.price, voucher),
+            Err(err) => Err(err),
+        },
+        None => directory.charge(quoted.price, voucher),
+    };
+    match charge_result {
         Ok(_) => {
             state.metrics.paid();
             tracing::info!(event = "payment_request", outcome = "paid");
@@ -616,7 +636,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 10_000,
+            deposit: 10_001,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };

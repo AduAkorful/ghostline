@@ -35,6 +35,31 @@ pub fn charge(
     Ok(ledger.accept(&voucher)?)
 }
 
+/// Charge only if the signed voucher pays the payout key the service advertised.
+pub fn charge_to_output_key(
+    ledger: &mut ServiceLedger,
+    price: u64,
+    voucher_hex: Option<&str>,
+    expected_output_key: &tari_template_lib::types::crypto::RistrettoPublicKeyBytes,
+) -> Result<u64, PaywallError> {
+    validate_output_key(voucher_hex, expected_output_key)?;
+    charge(ledger, price, voucher_hex)
+}
+
+pub(crate) fn validate_output_key(
+    voucher_hex: Option<&str>,
+    expected_output_key: &tari_template_lib::types::crypto::RistrettoPublicKeyBytes,
+) -> Result<(), PaywallError> {
+    let Some(hex) = voucher_hex.filter(|value| !value.is_empty()) else {
+        return Err(PaywallError::MissingVoucher);
+    };
+    let voucher = decode_voucher_header(hex)?;
+    if &voucher.service_output_key != expected_output_key {
+        return Err(PaywallError::WrongServiceOutputKey);
+    }
+    Ok(())
+}
+
 pub fn channel_id_hex(ledger: &ServiceLedger) -> String {
     ghostline_core::to_hex(&ledger_channel_id(ledger))
 }
@@ -91,6 +116,25 @@ mod tests {
         let hex = encode_voucher_header(&voucher);
         assert_eq!(charge(&mut ledger, 10, Some(&hex)).unwrap(), 10);
         assert_eq!(charge(&mut ledger, 10, Some(&hex)).unwrap(), 0);
+    }
+
+    #[test]
+    fn service_rejects_voucher_directed_to_an_unquoted_output_key() {
+        let (mut payer, mut ledger, secret, service_key) = setup();
+        let voucher = payer.sign_next(&secret, 10, service_key).unwrap();
+        let hex = encode_voucher_header(&voucher);
+        let (_, other_public) = create_key_pair_from_seed(99);
+        let other_key = other_public.to_byte_type();
+
+        assert_eq!(
+            charge_to_output_key(&mut ledger, 10, Some(&hex), &other_key),
+            Err(PaywallError::WrongServiceOutputKey)
+        );
+        assert_eq!(ledger.accepted(), 0);
+        assert_eq!(
+            charge_to_output_key(&mut ledger, 10, Some(&hex), &service_key).unwrap(),
+            10
+        );
     }
 
     #[test]

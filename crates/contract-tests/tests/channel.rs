@@ -161,13 +161,14 @@ fn settle_valid_voucher_pays_service_and_returns_remainder() {
 }
 
 #[test]
-fn settle_full_deposit_omits_zero_remainder_output() {
-    run(Scenario {
+fn settle_full_deposit_is_rejected_to_preserve_fixed_output_shape() {
+    let reason = run(Scenario {
         signed_amount: DEPOSIT,
         claimed_amount: DEPOSIT,
         ..Scenario::settle()
     })
-    .expect("full-deposit voucher must settle without a zero-value payer output");
+    .expect_err("full-deposit voucher must not be accepted");
+    assert!(reason.contains("channel spend limit"));
 }
 
 #[test]
@@ -200,7 +201,7 @@ fn settle_amount_above_deposit_is_rejected() {
             claimed_amount: 150,
             ..Scenario::settle()
         }),
-        "voucher exceeds deposit",
+        "channel spend limit",
     );
 }
 

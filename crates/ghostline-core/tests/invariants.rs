@@ -19,8 +19,8 @@ fn params(deposit: u64) -> ChannelParams {
 
 proptest! {
     #[test]
-    fn ledger_never_exceeds_deposit_and_sums_with_remaining(
-        deposit in 1u64..500,
+    fn ledger_never_exceeds_spend_limit_and_sums_with_remaining(
+        deposit in 2u64..500,
         increments in prop::collection::vec(1u64..40, 1..12),
     ) {
         let (secret, _) = create_key_pair_from_seed(11);
@@ -34,14 +34,14 @@ proptest! {
             match payer.sign_next(&secret, inc, service_key) {
                 Ok(voucher) => {
                     let delta = service.accept(&voucher).unwrap();
-                    prop_assert!(service.accepted() <= deposit);
-                    prop_assert_eq!(service.accepted() + service.remaining(), deposit);
+                    prop_assert!(service.accepted() <= deposit.saturating_sub(1));
+                    prop_assert_eq!(service.accepted() + service.remaining(), deposit.saturating_sub(1));
                     prop_assert_eq!(delta, voucher.amount - last_ok);
                     last_ok = voucher.amount;
                     prop_assert_eq!(service.accept(&voucher).unwrap(), 0);
                 }
                 Err(_) => {
-                    prop_assert!(payer.cumulative().saturating_add(inc) > deposit);
+                    prop_assert!(payer.cumulative().saturating_add(inc) > deposit.saturating_sub(1));
                     prop_assert_eq!(payer.cumulative(), last_ok);
                     prop_assert_eq!(service.accepted(), last_ok);
                 }

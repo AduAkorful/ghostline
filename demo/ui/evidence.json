@@ -1,31 +1,122 @@
 {
   "label": "Verified Esmeralda deposit-masking runs",
   "network": "Esmeralda",
-  "runDate": "2026-10-17",
+  "runDate": "2026-10-19",
+  "templateRecord": {
+    "address": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
+    "publishTransactionId": "59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741",
+    "publishTransactionUrl": "https://explorer.tari.mw/tx/59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741",
+    "publishFeeMicroTari": 920361,
+    "publishFeeCapMicroTari": 920373,
+    "finality": "Finalized Commit"
+  },
   "serviceRecord": {
     "source": "local HTTP paywall ledger",
     "endpoint": "/fortune",
-    "successfulCalls": 1,
+    "successfulCalls": 20,
     "unitPriceMicroTari": 10,
-    "acceptedTotalMicroTari": 10
+    "acceptedTotalMicroTari": 200
   },
   "chainRecord": {
     "source": "Esmeralda indexer and wallet",
-    "openTransactionId": "694f03c48bd0d6ee6c1419183e7a4a2c0da2cf06ea4b4a013afc308e70ae02ab",
-    "openTransactionUrl": "https://explorer.tari.mw/tx/694f03c48bd0d6ee6c1419183e7a4a2c0da2cf06ea4b4a013afc308e70ae02ab",
-    "openFinality": "Finalized",
-    "settlementTransactionId": "9c8887f32141bbec3e5d7fa4a8b147c8e1a1bab9599e46e1d8704781ae85b668",
-    "settlementTransactionUrl": "https://explorer.tari.mw/tx/9c8887f32141bbec3e5d7fa4a8b147c8e1a1bab9599e46e1d8704781ae85b668",
-    "settlementFinality": "Finalized",
+    "templateAddress": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
+    "openTransactionId": "1ea836af8636a655abda0ee6e32a7880551624960c1cb6d12a3eac0a936ffca9",
+    "openTransactionUrl": "https://explorer.tari.mw/tx/1ea836af8636a655abda0ee6e32a7880551624960c1cb6d12a3eac0a936ffca9",
+    "openFinality": "Finalized Commit",
+    "openFeeCapMicroTari": 15200,
+    "openFeeMicroTari": 15200,
+    "settlementTransactionId": "6a44670272ee5cb5528c8b7bfac3ce89170b6885afb6cfdf1ae1cd0952424e17",
+    "settlementTransactionUrl": "https://explorer.tari.mw/tx/6a44670272ee5cb5528c8b7bfac3ce89170b6885afb6cfdf1ae1cd0952424e17",
+    "settlementFinality": "Finalized Commit",
     "settledTotalMicroTari": null,
     "settlementAmountVisibility": "Not revealed in public transaction fields",
-    "depositVisibility": "Not revealed in the tested claim-free open, settlement, or refund transaction fields",
-    "settlementFeeMicroTari": null,
+    "depositVisibility": "Not revealed in the tested claim-free open or settlement transaction fields",
+    "settlementFeeCapMicroTari": 17756,
+    "settlementFeeMicroTari": 17744,
     "feePayerRole": "service-side fee account",
-    "channelOutputAfterSettlement": "down"
+    "channelOutputAfterSettlement": "down",
+    "settlementShape": {
+      "scope": "confidential transfer statement; fee instructions are separate and public",
+      "covenantClaimCount": 0,
+      "revealedInputAmountMicroTari": 0,
+      "revealedOutput": false,
+      "outputCount": 2,
+      "outputValuePromises": [
+        1,
+        1
+      ]
+    }
+  },
+  "batchRecord": {
+    "status": "Trusted-local prototype; not coordinator-private",
+    "templateAddress": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
+    "channels": [
+      {
+        "openTransactionId": "68e064b6a8ad868c7565a432469ebd61aa54fb91ddf5952bd97b4eb269982f0a",
+        "openTransactionUrl": "https://explorer.tari.mw/tx/68e064b6a8ad868c7565a432469ebd61aa54fb91ddf5952bd97b4eb269982f0a",
+        "openFinality": "Finalized Commit",
+        "openFeeMicroTari": 15199,
+        "depositUnblindedLocally": true,
+        "successfulCalls": 20,
+        "channelOutputAfterSettlement": "down"
+      },
+      {
+        "openTransactionId": "dd66ceb4c9965793d4e5eb417bac0e75c4993a2102827d7d4061e28e958038d5",
+        "openTransactionUrl": "https://explorer.tari.mw/tx/dd66ceb4c9965793d4e5eb417bac0e75c4993a2102827d7d4061e28e958038d5",
+        "openFinality": "Finalized Commit",
+        "openFeeMicroTari": 15199,
+        "depositUnblindedLocally": true,
+        "successfulCalls": 20,
+        "channelOutputAfterSettlement": "down"
+      }
+    ],
+    "settlementTransactionId": "0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f",
+    "settlementTransactionUrl": "https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f",
+    "settlementFinality": "Finalized Commit",
+    "feeCapMicroTari": 38422,
+    "feeMicroTari": 38409,
+    "inputCount": 2,
+    "outputCount": 3,
+    "pooledServiceOutputUnblindedLocally": true,
+    "pooledServiceOutputAmountPublished": false,
+    "observerCanReadPooledAmount": false,
+    "coordinatorPrivacy": "The local batch builder handled both deposit values and masks; a hosted coordinator would learn them.",
+    "linkabilityLimit": "Observers can see both channel inputs participate in the same batch transaction. This does not unlink the channels from each other."
   },
   "refundRecord": {
-    "testDescription": "Separate fresh channel; refunded by the payer after expiry",
+    "testDescription": "Fresh payer-initiated expiry refund against the latest published template.",
+    "templateVersion": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
+    "channelOpenTransactionId": "3411459ed95199a041fb289df5a24037acff0557769a280c607f3f5c87e6bdf3",
+    "channelOpenTransactionUrl": "https://explorer.tari.mw/tx/3411459ed95199a041fb289df5a24037acff0557769a280c607f3f5c87e6bdf3",
+    "channelOpenFinality": "Finalized Commit",
+    "expiryEpoch": 12466,
+    "refundTransactionId": "050dc1cb38803875deb5bcbba7f124086c62f40a5ae82e902a780f3c171cd2a2",
+    "refundTransactionUrl": "https://explorer.tari.mw/tx/050dc1cb38803875deb5bcbba7f124086c62f40a5ae82e902a780f3c171cd2a2",
+    "refundFinality": "Finalized Commit",
+    "covenantClaimCount": 0,
+    "inputRevealedAmountMicroTari": 0,
+    "revealedOutput": false,
+    "outputCount": 1,
+    "outputValuePromiseMicroTari": 1,
+    "channelOutputAfterRefund": "down",
+    "feePayerRole": "payer-side fee account",
+    "feeCapMicroTari": 10000,
+    "dryRunRequiredFeeMicroTari": 9510,
+    "feePaidMicroTari": 9498
+  },
+  "notes": [
+    "The current template was published and finalized before the fresh standard, pooled-batch, and expiry-refund runs.",
+    "The standard run accepted 20 HTTP /fortune calls at 10 µT each (200 µT cumulative) in a local service ledger, then finalized one settlement. The chain does not prove the call count or exact service amount.",
+    "The standard settlement used a claim-free confidential transfer with zero revealed input amount, no revealed output, and exactly two stealth outputs. The deposit, service amount, and payer remainder were not readable in public transaction fields.",
+    "The batch run accepted 20 calls in each of two local service ledgers, then finalized one two-input pooled settlement. Its three outputs were one pooled service output and two payer-change outputs; the pooled value was confirmed locally with the one-time payout key, but the amount is omitted from this public evidence file.",
+    "The batch prototype is trusted-local only: its builder received both deposit masks and values. Observers can see the two channels are grouped in one transaction, and the coordinator can learn the deposits.",
+    "The fresh current-template expiry refund finalized with a zero revealed input amount, no revealed output, one stealth output, and no covenant claims. The wallet confirmed the channel output is down. The dry-run estimated a 9,510 µT fee; the finalized transaction paid 9,498 µT from the payer-side fee account.",
+    "Fees are public. Standard open fee: 15,200 µT; standard settlement fee: 17,744 µT. Each batch open fee: 15,199 µT; pooled settlement fee: 38,409 µT.",
+    "The 20-call totals are local-ledger evidence, not chain proof. This is a static evidence record; use the linked Esmeralda explorer transactions to inspect chain data."
+  ],
+  "historicalPreviousTemplateRefundRecord": {
+    "testDescription": "Historical previous-template refund retained for reference; see refundRecord above for the fresh latest-template refund proof.",
+    "templateVersion": "Previous published template",
     "channelOpenTransactionId": "9fafd105e83788ff169b5aa557b5a8230e71834fb4c238daf7ee0a449c23b7fc",
     "channelOpenTransactionUrl": "https://explorer.tari.mw/tx/9fafd105e83788ff169b5aa557b5a8230e71834fb4c238daf7ee0a449c23b7fc",
     "channelOpenFinality": "Finalized",
@@ -37,13 +128,5 @@
     "revealedOutput": false,
     "outputCount": 1,
     "channelOutputAfterRefund": "down"
-  },
-  "notes": [
-    "One HTTP /fortune request was accepted off-chain for 10 µT and settled in one finalized transaction.",
-    "The serialized settlement had no covenant claims and revealed no plaintext input or output amounts; the channel deposit, service amount, and payer remainder were masked from transaction fields.",
-    "The separate expired-channel payer refund also finalized with zero covenant claims, zero revealed input amount, and no revealed output amount.",
-    "The chain confirms transaction finality and fee. The call and accepted amount come from the local service ledger, not a chain proof.",
-    "The deposit amount and fee are omitted here; fees, timing, branch, opaque channel id, authorization data, output commitments, and output count remain public.",
-    "This is a static evidence record; follow the linked Esmeralda explorer transactions to inspect live chain data."
-  ]
+  }
 }

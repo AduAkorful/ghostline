@@ -12,9 +12,9 @@ mod protocol;
 mod status;
 mod store;
 
-pub use agent::{AgentPayer, gated_sign};
+pub use agent::{AgentPayer, gated_sign, gated_sign_quote};
 pub use error::{AgentError, PaywallError};
-pub use gate::{channel_id_hex, charge, ledger_channel_id};
+pub use gate::{channel_id_hex, charge, charge_to_output_key, ledger_channel_id};
 pub use ghostline_core::{PaymentSession, ServiceLedger, SignedVoucher};
 pub use ghostline_policy::{AuditEvent, Policy, PolicyEngine, PolicyError, RateLimit};
 pub use price::{PriceKind, Quote, quote};

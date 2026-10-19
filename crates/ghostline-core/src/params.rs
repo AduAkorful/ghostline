@@ -18,6 +18,11 @@ pub struct ChannelParams {
 }
 
 impl ChannelParams {
+    /// Amount available to vouchers after reserving one micro-unit for a payer-change output.
+    pub fn max_spend(&self) -> u64 {
+        self.deposit.saturating_sub(crate::SETTLEMENT_RESERVE)
+    }
+
     pub fn channel_id(&self) -> [u8; CHANNEL_ID_LEN] {
         let mut hasher = Blake2b256::new();
         hasher.update(CHANNEL_ID_DOMAIN);

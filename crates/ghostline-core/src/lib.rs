@@ -26,10 +26,13 @@ pub use session::{PaymentSession, ServiceLedger};
 pub use voucher::{SignedVoucher, sign_voucher, voucher_message};
 
 pub const VOUCHER_DOMAIN: &[u8] = b"ghostline.channel.voucher.v1";
+pub const BATCH_BALANCE_DOMAIN: &[u8] = b"ghostline.channel.batch-balance.v1";
 pub const CHANNEL_ID_DOMAIN: &[u8] = b"ghostline.channel.id.v1";
 pub const NONCE_LEN: usize = 32;
 pub const CHANNEL_ID_LEN: usize = 32;
 pub const MESSAGE_LEN: usize = CHANNEL_ID_LEN + 32 + 32;
+/// Keep one micro-unit of payer change so every settlement has the same public output count.
+pub const SETTLEMENT_RESERVE: u64 = 1;
 
 fn sign_with_domain(
     secret: &RistrettoSecretKey,

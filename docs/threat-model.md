@@ -17,7 +17,8 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 |---|---|
 | Payer / agent | Holds the voucher key. Assumed to want to spend, not to protect the operator from itself |
 | Policy engine | Runs outside the agent. Enforces limits only if the agent actually signs through it; the human gate depends on a separate CLI operator or MCP host UI |
-| Service | Sees every voucher. Can settle any valid cumulative amount it holds, once |
+| Service | Knows the declared channel deposit limit, sees every request and voucher (including voucher amount/mask), and can settle any valid cumulative amount it holds, once. It does not receive the deposit UTXO mask in ordinary individual flows. |
+| Batch coordinator | No production coordinator exists. The current SDK batch prototype receives every channel's deposit value and mask in one process, so that process can learn every opening. It is not suitable as a hosted multi-user coordinator. |
 | Public observer | Claim-free Esmeralda settlement and payer-refund transactions hid the deposit and plaintext values in transaction fields. Fees, condition branches, and other transaction metadata remain visible. |
 | Wallet daemon | If used for open/settle, it sees amounts, masks, and keys it holds |
 | Ootle validators | See the same public fields any observer sees, plus whatever the protocol leaks in proofs and fees |
@@ -29,12 +30,16 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 3. The payer cannot reclaim the deposit on the settle path before expiry without the service's key.
 4. After expiry, settle and refund are mutually exclusive at the same epoch (tested in-process).
 5. An agent that only signs through the policy engine cannot exceed the configured budget or per-call ceiling.
+6. A future batch coordinator must not learn participants' deposit openings; this property is **not implemented** by the local batch prototype.
 
 ## What we do not try to meet
 
 - Hiding the relationship from the service you pay
+- Hiding the declared deposit limit or voucher details from the service; the service needs them to validate and serve payments
+- Hiding deposit openings from a coordinator in the current batch prototype; production flows do not use that prototype
 - Hiding transaction fees or the account that paid them
-- Hiding fees, timing, output count, opaque channel id, and authorization data revealed by the selected spend leaf
+- Hiding fees, timing, the fixed two-output shape, opaque channel id, and authorization data revealed by the selected spend leaf
+- Hiding the payer/service association within a settlement, even when the service uses separate channel-authorization and payout keys
 - Stopping an agent that signs with `--unsafe-no-policy` or a raw secret
 - Hiding the faucet (or other public funding) of the fee-paying account
 - Anonymity on the HTTP path (IP, TLS, logs)
@@ -47,7 +52,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 **Wrong-channel voucher.** Vouchers are bound to `channel_id` (network tag, payer, deposit, payer root, nonce). A voucher for another channel must fail verification.
 
-**Settlement amount confidentiality.** The payer signs the service output's Pedersen commitment, and the template requires that exact commitment to be paid to the signed service key. The witness contains no amount or commitment opening, outputs use a one-unit minimum-value promise, and the template rejects revealed values or extra inputs. Fresh Esmeralda settlement and expiry-refund transactions finalized with empty covenant-claim lists and no plaintext amounts. Output count, branch, opaque channel id, authorization data, timing, and fees remain visible; this does not hide activity from the service.
+**Settlement amount confidentiality.** The payer signs the service output's Pedersen commitment, and the template requires that exact commitment to be paid to the signed service key. The witness contains no amount or commitment opening, outputs use a one-unit minimum-value promise, and the template rejects revealed values or extra inputs. Fresh Esmeralda settlement and expiry-refund transactions finalized with empty covenant-claim lists and no plaintext amounts. Branch, opaque channel id, authorization data, timing, and fees remain visible; this does not hide activity from the service. The local contract now also enforces exactly two outputs and rejects a full-deposit voucher. Deploy and retest that change before treating output shape as private on Esmeralda.
 
 **Policy bypass.** If the agent can reach the payer secret, policy is advisory. The on-chain limit is the deposit. Human rules can gate every payment, calls at or above a configured µT threshold, or a vendor's first payment. The CLI asks for terminal confirmation and MCP requests client elicitation; the MCP host must actually present the prompt to a person. The low-level policy API trusts its caller's attestation boolean. Optional JSONL audit logging is append-only and fails closed on write errors, but it does not protect against an operator who can edit or replace the file.
 

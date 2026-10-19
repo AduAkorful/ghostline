@@ -11,22 +11,39 @@ Ghostline is early development, unaudited, and testnet only. Do not use real fun
 - The installed `ghostline`, `ghostline-paid-api`, and, for the MCP path, `ghostline-mcp` executables.
 - A compatible Ootle wallet daemon connected to Esmeralda at `http://127.0.0.1:5100` (or your own loopback URL), with funded opener and service fee accounts. Ghostline uses the daemon's `None` authentication flow; do not expose this endpoint publicly. A separately funded fee wallet can reduce direct linkage but does not guarantee privacy.
 - The real Esmeralda indexer URL, network tag, deployed Ghostline template hash, and wallet account names/components for your setup.
-- A service signing key available in the fee wallet, matching the channel's service public key. Obtain its KeyId JSON reference from the wallet operator and save that JSON value in an owner-only file. This is a wallet-local key reference, not the service secret and not the whole RPC response. The fee account owner key is a separate signer unless the deployment deliberately uses the same key for both roles.
+- A fresh service signing key in the fee wallet for each channel. Create it with `ghostline wallet key-create --out /secure/path/service-channel-key-id.json`; the command prints the matching public key and saves the wallet-local KeyId reference in an owner-only file. The fee account owner key is a separate signer unless the deployment deliberately uses the same key for both roles.
 - An MCP client that supports elicitation if you choose MCP with a human approval gate.
 
-Supply `GHOSTLINE_PAYER_SECRET` through the signing process's private environment to sign vouchers. Supply `GHOSTLINE_CLAIM_SECRET` from the opener wallet's `view_only_key` at index 0 so Ghostline can unblind the opened output. They are separate keys. The examples assume the opener's default receiving address uses that key; confirm your wallet's key index if you change the destination. Keep wallet credentials and channel state private. The channel file becomes sensitive after opening because it contains the deposit mask. Never put secrets in tool arguments, shell history, or shared MCP client configuration.
+Generate a fresh payer key for each channel and save it in an owner-only file:
+
+```sh
+ghostline keygen --role payer --out /secure/path/payer-channel.json
+```
+
+Use its `public_hex` when preparing the channel and pass the file to `ghostline sign --secret-file /secure/path/payer-channel.json`. Generate a wallet-managed service authorization key and use its public key in the channel's service terms. By default, this key also receives the settlement output; the optional second key below separates those roles. Fresh keys reduce reused-key correlation; they do not hide funding paths, fees, timing, or the payer/service relationship revealed within one settlement.
+
+```sh
+ghostline wallet key-create --url http://127.0.0.1:5100 \
+  --out /secure/path/service-channel-key-id.json
+ghostline wallet key-create --url http://127.0.0.1:5100 \
+  --out /secure/path/service-payout-key-id.json
+```
+
+Run the command twice to create distinct keys. Use the first `public_key_hex` as the channel's `--service-hex` and the second as `--service-output-key-hex` when starting the paid API. The API advertises the payout key in its 402 response, so the payer signs the cumulative voucher for that key; settlement still requires the channel authorization key from the first file via `--seal-key-id-file`. Keep the second KeyId reference with the channel so the wallet can later spend the payout output. Both files are wallet-local signer references, not private keys. Use fresh keys for each channel and do not share the wallet daemon endpoint.
+
+Supply `GHOSTLINE_CLAIM_SECRET` from the opener wallet's `view_only_key` at index 0 so Ghostline can unblind the opened output. It is separate from the channel payer key. The examples assume the opener's default receiving address uses that key; confirm your wallet's key index if you change the destination. Keep wallet credentials and channel state private. The channel file becomes sensitive after opening because it contains the deposit mask. Never put secrets in tool arguments, shell history, or shared MCP client configuration.
 
 After funding, confirm native tTARI appears as unspent in the opener wallet. `ghostline wallet account-create` associates the resource and requests an asynchronous scan. Missing funding needs wallet/indexer investigation; neither installation nor waiting alone guarantees recovery. See [troubleshooting](#troubleshooting).
 
-Use an owner-only working directory and keep service and payer state in separate files. Replace `/secure/path` throughout the examples with your actual private directory. To create a new Ghostline payer key, save its output directly to a private file:
+Use an owner-only working directory and keep service and payer state in separate files. Replace `/secure/path` throughout the examples with your actual private directory. The service key must also be imported into the service wallet if that wallet will sign the settlement.
 
 ```sh
 umask 077
 mkdir -p /secure/path
-ghostline keygen > /secure/path/payer-key.txt
+ghostline keygen --role payer --out /secure/path/payer-channel.json
 ```
 
-The file contains `secret=` and `public=` lines. Use only its public value in channel parameters and provide its secret through your private environment. Generate a unique 32-byte nonce for each channel; `openssl rand -hex 32` can produce one if OpenSSL is installed. These are separate from the wallet seed and provider's service key.
+Use `public_hex` in channel parameters and pass the private file to `ghostline sign --secret-file`. Generate a unique 32-byte nonce for each channel; `openssl rand -hex 32` can produce one if OpenSSL is installed. Keep the payer key file separate from the wallet seed. Create a fresh service authorization key for each channel and keep its `KeyId` reference with that channel's settlement state. If using a separate payout key, retain that key's KeyId with the same channel record.
 
 ## 1. Prepare a channel file
 
@@ -92,11 +109,12 @@ ghostline-paid-api serve \
   --ledger /secure/path/ledger.json \
   --price 10 \
   --service-key-hex <service-public-key-hex> \
+  --service-output-key-hex <one-time-payout-public-key-hex> \
   --min-expiry-epoch <minimum-accepted-expiry> \
   --max-expiry-epoch <maximum-accepted-expiry>
 ```
 
-The service public key must be the key committed to the channel's settle branch. Choose the expiry bounds from the service's operating policy; both are inclusive epochs. The HTTP 402 response includes this key and range alongside the price and channel id, so a payer can check the intended recipient before opening.
+The service public key must be the key committed to the channel's settle branch. The optional `--service-output-key-hex` selects a distinct one-time payout key; when set, the HTTP 402 response advertises both keys, and the payer binds the voucher to the payout key while checking the channel authorization key against its configured vendor. Choose the expiry bounds from the service's operating policy; both are inclusive epochs. The authorization and payout keys are both visible in the settlement transaction, so this separates key reuse across later spends but does not hide the payer/service relationship. Use this single-ledger server option with a key dedicated to that channel.
 
 Keep the service ledger and payer session at separate paths. The channel record and paid API use the same ledger path; the channel record and signing process use the same session path. `paid-api init` creates both snapshots; opening the channel uses the matching session without resetting its cumulative total. Do not run `init` again over existing files.
 
@@ -237,7 +255,7 @@ ghostline-paid-api call \
   --max-per-call 10
 ```
 
-The 0.1 tTARI example deposit covers 1,000 calls at 10 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement using the earlier template; it proves batching, not amount confidentiality. The new commitment-based template separately passed a live one-call hidden-settlement test. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
+The 0.1 tTARI example deposit covers 1,000 calls at 10 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement using the earlier template; it proves batching, not amount confidentiality. The current commitment-based template was published and a fresh Esmeralda run accepted 20 HTTP calls before one finalized fixed-shape settlement. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
 
 For more commands, see the [API reference](api-reference.md). For privacy limits, read [privacy notes](privacy.md) and the [threat model](threat-model.md).
 

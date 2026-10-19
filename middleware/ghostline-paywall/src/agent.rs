@@ -53,7 +53,8 @@ impl AgentPayer {
             self.session.cumulative(),
             Instant::now(),
         )?;
-        Ok(self.session.sign_next(secret, quote.price, self.vendor)?)
+        let output_key = quote.service_output_public_key()?.unwrap_or(self.vendor);
+        Ok(self.session.sign_next(secret, quote.price, output_key)?)
     }
 
     /// Operator has already confirmed this quote. Use when the engine was built with `require_human`.
@@ -69,7 +70,8 @@ impl AgentPayer {
             self.session.cumulative(),
             Instant::now(),
         )?;
-        Ok(self.session.sign_next(secret, quote.price, self.vendor)?)
+        let output_key = quote.service_output_public_key()?.unwrap_or(self.vendor);
+        Ok(self.session.sign_next(secret, quote.price, output_key)?)
     }
 
     fn validate_quote(&self, quote: &PaymentRequired) -> Result<(), AgentError> {
@@ -113,6 +115,26 @@ pub fn gated_sign(
     let mut payer = AgentPayer::with_engine(store.session()?, engine, vendor);
     let channel_id = store.channel_id()?;
     let voucher = payer.pay_price(price, &channel_id, secret, attested)?;
+    store.save_session(payer.session())?;
+    Ok((voucher, payer.into_engine()))
+}
+
+/// Sign a quote while keeping policy tied to the channel's service identity and paying the
+/// optional one-time output key advertised by that service.
+pub fn gated_sign_quote(
+    store: &mut ChannelStore,
+    engine: PolicyEngine,
+    vendor: RistrettoPublicKeyBytes,
+    quote: &PaymentRequired,
+    secret: &RistrettoSecretKey,
+    attested: bool,
+) -> Result<(SignedVoucher, PolicyEngine), AgentError> {
+    let mut payer = AgentPayer::with_engine(store.session()?, engine, vendor);
+    let voucher = if attested {
+        payer.pay_attested(quote, secret)?
+    } else {
+        payer.pay(quote, secret)?
+    };
     store.save_session(payer.session())?;
     Ok((voucher, payer.into_engine()))
 }
@@ -201,6 +223,37 @@ mod tests {
             Err(AgentError::Paywall(PaywallError::InvalidQuote(_)))
         ));
         assert_eq!(agent.session().cumulative(), 0);
+    }
+
+    #[test]
+    fn quote_can_route_the_settlement_to_a_distinct_one_time_key() {
+        use crate::PaymentTerms;
+
+        let (secret, payer_public) = create_key_pair_from_seed(11);
+        let (_, payout_public) = create_key_pair_from_seed(12);
+        let payer = payer_public.to_byte_type();
+        let vendor = payer;
+        let params = ChannelParams {
+            network_tag: 1,
+            payer,
+            deposit: 100,
+            payer_root: Hash32::from_array([9u8; 32]),
+            nonce: [3u8; NONCE_LEN],
+        };
+        let mut agent = AgentPayer::new(
+            PaymentSession::new(params.clone()),
+            Policy::new(100, 10),
+            vendor,
+        );
+        let terms = PaymentTerms::new(vendor, 20, 100)
+            .unwrap()
+            .with_service_output_key(payout_public.to_byte_type());
+        let quote = PaymentRequired::new(10, &params.channel_id()).with_terms(&terms);
+        let voucher = agent.pay(&quote, &secret).unwrap();
+
+        assert_eq!(voucher.service_output_key, payout_public.to_byte_type());
+        assert_ne!(voucher.service_output_key, vendor);
+        voucher.verify(&params).unwrap();
     }
 
     #[test]
