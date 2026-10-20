@@ -35,26 +35,33 @@
       <header class="guide-hero">
         <p class="eyebrow">YOUR WALLET · YOUR DEPLOYMENT</p>
         <h1>Open once.<br /><em>Pay per call.</em></h1>
-        <p>Use Ghostline with your own Esmeralda wallet, provider terms, and fee settings. This guide outlines the CLI path from channel setup to one verified settlement.</p>
+        <p>Choose a guided Esmeralda run, or follow the optional manual CLI walkthrough. The guided run is complete on its own; you do not continue through the manual steps afterward.</p>
         <div class="guide-meta"><span>ESMERALDA TESTNET</span><span>PLACEHOLDERS MUST BE REPLACED</span></div>
       </header>
       <div class="guide-layout">
         <nav class="guide-nav" aria-label="On this page">
-          <p class="nav-label">CLI QUICKSTART</p>
-          <a href="#guided-demo">Guided demo</a><a href="#requirements">Before you start</a><a href="#prepare">Prepare</a><a href="#service">Start a service</a><a href="#open-pay">Open and pay</a><a href="#settle">Settle and verify</a><a href="#refund">Refund path</a><a href="#batch">Batch prototype</a>
+          <p class="nav-label">CHOOSE A PATH</p>
+          <a href="#guided-demo">Guided Esmeralda run</a><a href="#manual-walkthrough">Manual walkthrough (optional)</a>
+          <p class="nav-label">MANUAL WALKTHROUGH</p>
+          <a href="#requirements">Before you start</a><a href="#prepare">Prepare</a><a href="#service">Start a service</a><a href="#open-pay">Open and pay</a><a href="#settle">Settle and verify</a><a href="#refund">Refund path</a><a href="#batch">Batch prototype</a>
         </nav>
         <article class="guide-content">
           <div class="guide-callout warning"><strong>Unaudited, testnet software.</strong> Ghostline is early development and for Esmeralda only. Do not use real funds. Examples are templates; they contain no valid deployment identifiers or credentials.</div>
           <section id="guided-demo" class="guide-section">
-            <p class="guide-label">QUICK PATH / LIVE ESMERALDA</p>
+            <p class="guide-label">PATH 1 / GUIDED LIVE ESMERALDA RUN</p>
             <h2>Let the runner guide you.</h2>
             <p>The script checks the documented deployment profile, creates fresh local keys, starts the sample API on loopback, makes paid calls, and offers separate confirmations before channel open and settlement. Review both fee dry-runs; the open cap may not be refunded in full.</p>
-            <div class="guide-callout warning"><strong>Before you run it:</strong> Install Ghostline <code>v0.3.2</code> after its tagged release is published, start a compatible local Esmeralda wallet daemon, and fund an account with test tTARI. The runner asks for your wallet view-only key through hidden terminal input. The simplest run uses the same account to pay open and settlement fees, so funding and fee activity are linkable. The runner never asks for a seed phrase or sends secrets to this site.</div>
+            <div class="guide-callout warning"><strong>Before you run it:</strong> Install <a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2" target="_blank" rel="noopener noreferrer">Ghostline v0.3.2</a>, start a compatible local Esmeralda wallet daemon, and fund an account with test tTARI. The runner asks for your wallet view-only key through hidden terminal input. The simplest run uses the same account to pay open and settlement fees, so funding and fee activity are linkable. The runner never asks for a seed phrase or sends secrets to this site.</div>
             <div class="guide-command">
-              <div class="guide-command-head"><span>DOWNLOAD · REVIEW · RUN LOCALLY</span><button class="guide-copy" type="button" data-copy="guided-demo">Copy commands</button></div>
-              <pre><code id="guided-demo">curl -fsSLo ghostline-esmeralda-demo.sh https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/ghostline-esmeralda-demo.sh&#10;less ghostline-esmeralda-demo.sh&#10;bash ghostline-esmeralda-demo.sh</code></pre>
+              <div class="guide-command-head"><span>DOWNLOAD · REVIEW · RUN LOCALLY</span><button class="guide-copy" type="button" data-copy="guided-demo-commands">Copy commands</button></div>
+              <pre><code id="guided-demo-commands">curl -fsSLo ghostline-esmeralda-demo.sh https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/ghostline-esmeralda-demo.sh&#10;less ghostline-esmeralda-demo.sh&#10;bash ghostline-esmeralda-demo.sh</code></pre>
             </div>
             <p>The defaults are 3 calls at 10 µT each with a 100,000 µT deposit. The run is real testnet activity and requires two confirmations. It keeps an owner-only state directory containing the channel mask and service call ledger; remove it only after saving the explorer links and when you no longer need the local record.</p>
+          </section>
+          <section id="manual-walkthrough" class="guide-section">
+            <p class="guide-label">PATH 2 / OPTIONAL MANUAL ROUTE</p>
+            <h2>Configure each CLI step yourself.</h2>
+            <p>This walkthrough is for people who want to assemble the channel, service, payment, and settlement commands manually. It is an alternative to the guided run above; completing the guided run does not require these steps.</p>
           </section>
           <section id="requirements" class="guide-section">
             <p class="guide-label">00 / BEFORE YOU START</p>

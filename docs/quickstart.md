@@ -1,12 +1,12 @@
 # Esmeralda quickstart
 
-Run a local paid API, open an Esmeralda channel, pay through the CLI or MCP, and settle once. Install the executables using the [installation guide](install.md); no repository clone is needed for the downloaded commands.
+Choose one of two routes: use the guided Esmeralda runner below, or follow the optional manual CLI walkthrough later in this document. The guided run is complete on its own; you do not continue through the manual steps afterward. Install the executables using the [installation guide](install.md); no repository clone is needed for the downloaded commands.
 
 Wallet and network identifiers must come from your deployment and wallet. This is an operator setup guide with placeholders, not a hosted demo or a preconfigured wallet.
 
 ## Guided Esmeralda demo
 
-After publishing and installing Ghostline `v0.3.2` (which adds `channel settle --max-fee`), use the guided runner instead of assembling the commands below by hand. It verifies the documented template is active at its Esmeralda address (indexers may no longer retain the original publish transaction result), creates fresh local payer and service keys, starts the sample API on loopback, asks before opening and settling, then prints the finalized transaction links. It does not host a signer or receive wallet credentials.
+Install Ghostline [`v0.3.2`](https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2), which adds `channel settle --max-fee`, then use the guided runner instead of assembling the commands below by hand. It verifies the documented template is active at its Esmeralda address (indexers may no longer retain the original publish transaction result), creates fresh local payer and service keys, starts the sample API on loopback, asks before opening and settling, then prints the finalized transaction links. It does not host a signer or receive wallet credentials.
 
 The runner needs a working Esmeralda wallet daemon and test funds. It requires Ootle walletd `0.47.0` or newer: the official `0.46.1` daemon fails to decode current Esmeralda component/resource substates during transaction submission. Tari now publishes `0.47.0` as a pre-release with binaries, so judges do not need to build walletd from source. Download the binary and matching `.sha256` asset for your OS/architecture from the [official Ootle v0.47.0 release](https://github.com/tari-project/tari-ootle/releases/tag/v0.47.0). For Linux x86_64, the exact asset we checksum-verified is [`tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64`](https://github.com/tari-project/tari-ootle/releases/download/v0.47.0/tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64); download the adjacent `.sha256` file and run `sha256sum -c` before using it. The successful end-to-end run was performed with a development build of walletd 0.47.0; the official asset was checksum-verified and its Esmeralda account JSON-RPC tested. The runner checks wallet version and network before any transaction, and refuses older daemons.
 
@@ -35,7 +35,11 @@ It defaults to 3 calls at 10 µT each and a 100,000 µT channel deposit. You can
 
 Ghostline is early development, unaudited, and testnet only. Do not use real funds.
 
-## Prerequisites
+## Optional manual CLI walkthrough
+
+The sections below this heading are for people who want to configure each Ghostline CLI step themselves. They are an alternative to the guided runner, not additional steps required after it.
+
+### Prerequisites
 
 - The installed `ghostline`, `ghostline-paid-api`, and, for the MCP path, `ghostline-mcp` executables.
 - A compatible Ootle wallet daemon connected to Esmeralda at `http://127.0.0.1:5100` (or your own loopback URL), with funded opener and service fee accounts. Ghostline uses the daemon's `None` authentication flow; do not expose this endpoint publicly. A separately funded fee wallet can reduce direct linkage but does not guarantee privacy.

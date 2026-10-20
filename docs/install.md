@@ -1,6 +1,6 @@
 # Install Ghostline
 
-Ghostline `v0.3.2` is the source version prepared for the guided Esmeralda runner. Its prebuilt download will be available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2) after the matching tag is pushed and CI publishes it. The download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
+Ghostline `v0.3.2` is available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2). The Linux x86-64 download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
 
 ## Download the executables
 
@@ -20,7 +20,7 @@ ghostline-paid-api --help
 
 Add that PATH line to your shell's startup file to keep it after reopening the terminal. Launch `ghostline-mcp` through an MCP client; it communicates over stdio.
 
-After the `v0.3.2` release is published, select it explicitly:
+To install `v0.3.2` explicitly:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.3.2 sh

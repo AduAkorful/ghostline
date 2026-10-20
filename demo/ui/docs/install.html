@@ -56,7 +56,7 @@
               <div class="guide-card"><h3>What gets installed</h3><p><code>ghostline</code> for channel operations, <code>ghostline-paid-api</code> for the reference service, and <code>ghostline-mcp</code> for MCP clients.</p></div>
               <div class="guide-card"><h3>What the checksum means</h3><p>It checks the downloaded archive against the release checksum file. It is not an independent publisher signature.</p></div>
             </div>
-            <p>Required system tools: <code>curl</code>, <code>tar</code>, <code>sha256sum</code>, and <code>awk</code>. The pinned <code>v0.3.2</code> command will work after its matching tag is pushed and CI publishes the release:</p>
+            <p>Required system tools: <code>curl</code>, <code>tar</code>, <code>sha256sum</code>, and <code>awk</code>. <a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2" target="_blank" rel="noopener noreferrer">Ghostline v0.3.2 is available now</a>; use this command to install that version explicitly:</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>PIN GHOSTLINE v0.3.2</span><button class="guide-copy" type="button" data-copy="install-pinned">Copy command</button></div>
               <pre><code id="install-pinned">curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.3.2 sh</code></pre>
