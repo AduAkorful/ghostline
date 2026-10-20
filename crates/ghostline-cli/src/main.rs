@@ -455,6 +455,9 @@ enum ChannelCommand {
         dry_run: bool,
         #[arg(long)]
         seal_key_id_file: Option<PathBuf>,
+        /// Maximum µT fee. Review the dry-run requirement and set an acceptable cap before submitting.
+        #[arg(long, default_value_t = 100_000)]
+        max_fee: u64,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
     },
@@ -2185,6 +2188,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             submit,
             dry_run,
             seal_key_id_file,
+            max_fee,
             timeout_secs,
         } => {
             let record = channel_file::ChannelFile::load(&path)?;
@@ -2210,7 +2214,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 resource_hex: None,
                 ootle_network: record.ootle_network.clone(),
                 fee_account,
-                max_fee: 100_000,
+                max_fee,
                 out: None,
                 submit,
                 wallet_url: record
@@ -3286,6 +3290,26 @@ fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_settle_accepts_reviewed_fee_cap() {
+        let cli = Cli::try_parse_from([
+            "ghostline",
+            "channel",
+            "settle",
+            "--file",
+            "channel.json",
+            "--max-fee",
+            "23456",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Channel {
+                command: ChannelCommand::Settle { max_fee, .. },
+            } => assert_eq!(max_fee, 23_456),
+            _ => panic!("expected channel settle command"),
+        }
+    }
 
     #[test]
     fn wallet_key_create_finds_new_key_id_and_public_key() {

@@ -38,6 +38,8 @@ jobs:
         run: npm ci --prefix packages/ghostline && npm test --prefix packages/ghostline
       - name: Execute the local quickstart smoke test
         run: bash scripts/quickstart-smoke.sh
+      - name: Check the interactive Esmeralda runner syntax
+        run: bash -n scripts/ghostline-esmeralda-demo.sh
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

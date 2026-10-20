@@ -1,6 +1,6 @@
 # Install Ghostline
 
-Ghostline `v0.3.1` is available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.3.1). The download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
+Ghostline `v0.3.2` is the source version prepared for the guided Esmeralda runner. Its prebuilt download will be available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2) after the matching tag is pushed and CI publishes it. The download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
 
 ## Download the executables
 
@@ -20,10 +20,10 @@ ghostline-paid-api --help
 
 Add that PATH line to your shell's startup file to keep it after reopening the terminal. Launch `ghostline-mcp` through an MCP client; it communicates over stdio.
 
-To select the tested Ghostline release explicitly:
+After the `v0.3.2` release is published, select it explicitly:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.3.1 sh
+curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.3.2 sh
 ```
 
 Set `GHOSTLINE_INSTALL_DIR` on the `sh` process to choose a different directory. To update, rerun the installer. It replaces the three executables; keep your wallet profiles and channel state in their own directories. The checksum checks the archive against the release's checksum file; it is not an independent publisher signature.
@@ -57,7 +57,7 @@ Install Rust through `rustup`, Git, a C/C++ toolchain, Clang with libclang, CMak
 ```sh
 git clone https://github.com/AduAkorful/ghostline.git
 cd ghostline
-git checkout v0.3.1
+git checkout v0.3.2
 cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api
 mkdir -p "$HOME/.local/bin"
 install -m 0755 target/release/ghostline target/release/ghostline-mcp target/release/ghostline-paid-api "$HOME/.local/bin/"

@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "ghostline-core",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-contract-tests"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ghostline-core",
  "ghostline-sdk",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "blake2",
  "ootle_byte_type",
@@ -1483,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-mcp"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ghostline-core",
  "ghostline-net",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-net"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ghostline-core",
  "ghostline-sdk",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-paid-api"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axum",
  "clap",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-paywall"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ghostline-core",
  "ghostline-policy",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-policy"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "ghostline-sdk"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ghostline-core",
  "ootle-network",

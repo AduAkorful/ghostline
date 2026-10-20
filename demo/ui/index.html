@@ -40,8 +40,8 @@
           <h1 id="hero-title">Many calls.<br /><span>One settlement.</span></h1>
           <p class="hero-lede">Ghostline lets an AI agent pay a service request by request. The chain sees a channel open, then one settlement of the accepted total.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#evidence">Inspect the verified run <span aria-hidden="true">↓</span></a>
-            <a class="text-link" href="#start">Run it with the CLI <span aria-hidden="true">↗</span></a>
+            <a class="button button-primary" href="#judge-path">For judges: choose a path <span aria-hidden="true">↓</span></a>
+            <a class="text-link" href="#evidence">Inspect finalized proof <span aria-hidden="true">↗</span></a>
           </div>
           <p class="hero-note"><strong>Static showcase · no backend.</strong> The site never connects to a wallet or handles credentials. Run Ghostline locally with your own wallet only when you choose to.</p>
         </div>
@@ -75,6 +75,36 @@
           <p class="art-footnote">Schematic flow. Latest recorded proof: 20 paid calls and one settlement. Motion is illustrative, not a live transaction feed.</p>
         </div>
         <div class="hero-index" aria-hidden="true"><span>01 — 08</span><span>SCROLL TO FOLLOW THE TRACE ↓</span></div>
+      </section>
+
+      <section class="judge-path" id="judge-path" aria-labelledby="judge-path-title">
+        <div class="shell">
+          <div class="judge-path-heading">
+            <div><p class="eyebrow">START HERE · JUDGES</p><h2 id="judge-path-title">See proof.<br /><span>Then try it.</span></h2></div>
+            <p>Ghostline is not a hosted wallet demo. Pick the level you want: inspect the finalized transactions now, run the no-funds local flow, or make your own Esmeralda testnet run.</p>
+          </div>
+          <div class="judge-options">
+            <article class="judge-option judge-option-proof">
+              <p class="judge-option-index">01 <span>NO SETUP</span></p>
+              <h3>Inspect the chain proof</h3>
+              <p>Open the recorded channel and settlement transactions in Tari’s explorer. The accompanying service ledger shows the 20 paid calls; the chain confirms finality.</p>
+              <a href="#evidence">Open the evidence <span aria-hidden="true">↓</span></a>
+            </article>
+            <article class="judge-option">
+              <p class="judge-option-index">02 <span>LOCAL · NO FUNDS</span></p>
+              <h3>Try the safe smoke run</h3>
+              <p>Build the CLI and reference API, make three local paid requests with temporary keys, and see the flow work without a wallet or transaction.</p>
+              <a href="#start">Find the local command <span aria-hidden="true">↓</span></a>
+            </article>
+            <article class="judge-option">
+              <p class="judge-option-index">03 <span>ESMERALDA · YOUR WALLET</span></p>
+              <h3>Run the guided testnet flow</h3>
+              <p>Use the guided runner to check your wallet, set up a local service, make paid calls, and settle once. You still need your own test funds and confirm both transactions.</p>
+              <a href="docs/quickstart.html#guided-demo">Open the guided Esmeralda steps <span aria-hidden="true">↗</span></a>
+            </article>
+          </div>
+          <p class="judge-path-note">The motion graphics are illustrative. They are not a live transaction feed; use the linked explorer records for on-chain evidence.</p>
+        </div>
       </section>
 
       <section class="story-section" id="story" aria-labelledby="story-title">
@@ -193,7 +223,7 @@ ghostline indexer result --url &lt;indexer-url&gt; --transaction-id &lt;tx-id&gt
               <div class="command-card"><div class="command-head"><span>EXPIRED OUTPUT ONLY · DRY-RUN FIRST</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel refund --file /private/channel.json --dry-run
 # Confirm expiry and output state before intentional submission:
 ghostline channel refund --file /private/channel.json --submit</code></pre></div>
-              <p class="chapter-aside">A spent output cannot be refunded. The channel-file helper uses a fixed 100,000 µT fee cap.</p>
+              <p class="chapter-aside">A spent output cannot be refunded. The channel-file helper uses a reviewed fee cap.</p>
             </article>
           </div>
         </div>
@@ -282,7 +312,7 @@ bash scripts/quickstart-smoke.sh</code></pre></div>
           <p class="install-note">This builds the reference CLI and API, uses temporary test keys, pays three local requests, then removes its temporary files. It does not contact a wallet, use Esmeralda, or submit a transaction. The first build may take a few minutes.</p>
           <p class="install-platform"><span>LINUX · x86-64 · glibc</span><span>NO ROOT REQUIRED</span></p>
           <div class="command-card install-command"><div class="command-head"><span>INSTALL THE CLI, API &amp; MCP SERVER</span><button class="copy-command" type="button">Copy</button></div><pre><code>curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh</code></pre></div>
-          <p class="install-note">Installs the published v0.3.1 CLI, API, and MCP server to <code>~/.local/bin</code> and verifies the release checksum. It does not set up or fund a wallet. The fixed two-output settlement rule is included in this release.</p>
+          <p class="install-note">After the v0.3.2 tag is published, this installs the CLI, API, and MCP server to <code>~/.local/bin</code> and verifies the release checksum. It does not set up or fund a wallet. The fixed two-output settlement rule and guided-run fee caps are included in that release.</p>
           <div class="start-links"><a href="docs/install.html"><span><small>01 / DETAILS</small><strong>Installation guide</strong></span><b aria-hidden="true">↗</b></a><a href="docs/quickstart.html"><span><small>02 / CLI</small><strong>Esmeralda quickstart</strong></span><b aria-hidden="true">↗</b></a><a href="docs/interfaces.html"><span><small>03 / MCP + API</small><strong>Interfaces and tools</strong></span><b aria-hidden="true">↗</b></a><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer"><span><small>04 / SOURCE</small><strong>Browse the code</strong></span><b aria-hidden="true">↗</b></a></div>
         </div>
       </section>

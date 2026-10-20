@@ -4,6 +4,35 @@ Run a local paid API, open an Esmeralda channel, pay through the CLI or MCP, and
 
 Wallet and network identifiers must come from your deployment and wallet. This is an operator setup guide with placeholders, not a hosted demo or a preconfigured wallet.
 
+## Guided Esmeralda demo
+
+After publishing and installing Ghostline `v0.3.2` (which adds `channel settle --max-fee`), use the guided runner instead of assembling the commands below by hand. It verifies the documented template is active at its Esmeralda address (indexers may no longer retain the original publish transaction result), creates fresh local payer and service keys, starts the sample API on loopback, asks before opening and settling, then prints the finalized transaction links. It does not host a signer or receive wallet credentials.
+
+The runner needs a working Esmeralda wallet daemon and test funds. It requires Ootle walletd `0.47.0` or newer: the official `0.46.1` daemon fails to decode current Esmeralda component/resource substates during transaction submission. Tari now publishes `0.47.0` as a pre-release with binaries, so judges do not need to build walletd from source. Download the binary and matching `.sha256` asset for your OS/architecture from the [official Ootle v0.47.0 release](https://github.com/tari-project/tari-ootle/releases/tag/v0.47.0). For Linux x86_64, the exact asset we checksum-verified is [`tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64`](https://github.com/tari-project/tari-ootle/releases/download/v0.47.0/tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64); download the adjacent `.sha256` file and run `sha256sum -c` before using it. The successful end-to-end run was performed with a development build of walletd 0.47.0; the official asset was checksum-verified and its Esmeralda account JSON-RPC tested. The runner checks wallet version and network before any transaction, and refuses older daemons.
+
+Use a **fresh, test-only wallet profile**. The runner needs walletd's local unauthenticated JSON-RPC, so keep it bound to loopback and do not point it at a wallet containing real funds. Example Linux x86_64 launch after downloading and verifying the binary:
+
+```sh
+chmod +x ./tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64
+./tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64 \
+  --network esmeralda \
+  --authentication none \
+  --listen-on 127.0.0.1:5100 \
+  --base-path "$HOME/.local/share/ghostline/esmeralda-demo-wallet"
+```
+
+Create and fund the default account in that wallet with Esmeralda test tokens before running the demo. Do not reuse a profile whose channel funding outputs have already been spent. The runner prompts for your wallet's view-only claim key with hidden terminal input; never enter a seed phrase or paste a secret into a browser or shared terminal. The sample service is local and you act as both payer and service operator. The simplest setup uses one wallet account for the deposit and settlement fees; that makes the funding and fee activity linkable. You can select a separate funded fee account if you already have one.
+
+Download the script from the Ghostline repository, inspect it, then run it:
+
+```sh
+curl -fsSLo ghostline-esmeralda-demo.sh https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/ghostline-esmeralda-demo.sh
+less ghostline-esmeralda-demo.sh
+bash ghostline-esmeralda-demo.sh
+```
+
+It defaults to 3 calls at 10 µT each and a 100,000 µT channel deposit. You can change those values in its prompts. Review both fee dry-runs; unused fee-cap amounts may not be refunded. Each transaction needs a separate confirmation, and settlement consumes the channel output. State is kept in an owner-only directory because it contains the deposit mask; remove it after saving your explorer links and no longer needing the local call record. The current deployment profile comes from [the recorded Ghostline Esmeralda evidence](../demo/ui/evidence.json); the script checks the active template substate at the documented address and stops if the address is missing or resolves to a different template. Esmeralda may reset, so a failed profile check means stop and obtain a freshly verified deployment profile.
+
 Ghostline is early development, unaudited, and testnet only. Do not use real funds.
 
 ## Prerequisites
@@ -217,7 +246,7 @@ ghostline settle-due \
   --fee-account-name <service-fee-wallet-account-name>
 ```
 
-Review `required_fees` and confirm the channel is still unspent. The service fee account needs enough funds for the selected cap. Use the same command to submit after removing `--dry-run`; keep `--submit` and the reviewed cap. The channel-file shortcut `ghostline channel settle` has a fixed maximum fee of 100000 µT, so use it only if that cap is acceptable for your deployment.
+Review `required_fees` and confirm the channel is still unspent. The service fee account needs enough funds for the selected cap. Use the same command to submit after removing `--dry-run`; keep `--submit` and the reviewed `--max-fee` cap. The default is 100000 µT, but choose a lower reviewed cap when it covers the dry-run requirement.
 
 ```sh
 ghostline indexer result \
