@@ -15,6 +15,7 @@ export {
   SignedVoucher,
   computeChallenge,
   publicKeyFromSecret,
+  scalarFromWide,
   signVoucher,
   verifyVoucher,
   voucherToBytes,

@@ -1,25 +1,25 @@
-# Ghostline contest demo video
+# Ghostline contest video capture plan
 
-Capture a single real Esmeralda run after the fixed-shape template is published. Target length: 2:30. Keep the terminal and explorer side by side; use a fresh one-shot channel and never show key files, wallet RPC credentials, masks, or voucher bodies.
+This is a recording script, not a video asset. Target length: 90–120 seconds, 1080p, captions or a short voiceover. Record after the v0.4.0 release is published and use one newly verified Esmeralda run. Keep the terminal and explorer visible together; never show seed words, wallet credentials, secret key files, deposit masks, or voucher bodies.
 
-## Capture sequence and narration
+## Capture sequence
 
 | Time | Show | Narration |
 |---|---|---|
-| 0:00–0:15 | Title card, then Ghostline landing page | “Ghostline is a private pay-per-call rail for AI agents on Tari Ootle: the service sees each request, while the chain sees a channel and one close.” |
-| 0:15–0:35 | Installed CLI, `ghostline --help`, and the payer/service key setup with secrets hidden | “The payer and service use fresh keys for this one-settlement channel. Policy limits spend and can require a human approval.” |
-| 0:35–1:10 | Open a pre-funded channel, then the 402 quote; make 20 paid `/fortune` requests | “The agent checks the quote's channel and recipient, signs cumulative vouchers, and receives 20 responses. Those calls and prices remain in the service's records.” |
-| 1:10–1:35 | Service ledger shows 20 accepted calls and the cumulative total; no voucher or key values | “The service accepted twenty calls. The ledger is local evidence for the service's accounting; the chain does not prove the call count.” |
-| 1:35–2:05 | Settle once; wait for Finalized Commit; open that transaction in Tari Explorer | “The latest voucher closes the channel in one settlement. The transaction exposes fees, timing, branch, metadata, and commitments, while its claim-free fields do not show the deposit or exact output amounts.” |
-| 2:05–2:20 | Show the two output commitments/shape and the fixed-shape note | “This version always emits two outputs and leaves one micro-Tari as payer change, so output count no longer reveals whether the deposit was fully spent.” |
-| 2:20–2:30 | End card with GitHub, evidence page, and testnet warning | “Ghostline is unaudited and testnet-only. The service still sees the calls; funding and timing may still link activity.” |
+| 0:00–0:10 | Landing page and browser demo CTA | “Ghostline is an agent payment rail on Tari Ootle: many signed off-chain vouchers, one channel close.” |
+| 0:10–0:25 | Browser simulation: make five quote-and-pay clicks | “This zero-install page runs the real TypeScript voucher signing and verification locally. These clicks do not submit a transaction.” |
+| 0:25–0:40 | Browser evidence panel and open the separate transaction link | “The link is a separate finalized Esmeralda run. It is evidence of the tested transaction fields, not a result of the simulation.” |
+| 0:40–1:00 | Terminal: `ghostline demo --show-chain-evidence` | “The prebuilt CLI runs the HTTP 402 quote, signs cumulative vouchers, verifies paid responses, and exits without a wallet or chain transaction.” |
+| 1:00–1:25 | Show a fresh verified Esmeralda transaction and its two output commitments | “In a real channel run, the chain confirms the close. The tested fields hide the deposit and exact output amounts; fees, timing, branch, metadata, and commitments remain visible.” |
+| 1:25–1:40 | Service ledger and privacy limits | “The service sees calls, prices, vouchers, and totals. Its ledger is not chain proof of the call count.” |
+| 1:40–1:55 | End card: repo, release, MIT, testnet-only | “Ghostline is unaudited and testnet-only. Funding and timing can still link activity.” |
 
-## Evidence shown in the video
+## Evidence to capture
 
-- Fresh channel-open transaction id and explorer URL.
-- Twenty successful paid HTTP responses and the service ledger's call count/accepted total.
-- Settlement transaction id, indexer `Finalized Commit`, and explorer URL.
-- Screenshot or split-screen comparison with a public transfer example, labelled as different transaction designs rather than a matched same-network experiment.
-- The exact binary version, source commit, template address/hash, and run date in the end card or video description.
+- CLI version, source commit, template hash, and date.
+- Five successful browser simulation calls and the explicit simulation disclosure.
+- A fresh channel-open and finalized settlement from a separately run Esmeralda flow, with matching explorer links.
+- The exact public fields that were inspected, without implying that fees or all transaction metadata are hidden.
+- A visible notice that the browser simulation and historical proof are separate.
 
-Do not splice the old 1,000-call run into the new settlement proof. It predates the amount-masked template and does not prove a 20-call fixed-shape settlement. Do not claim that the settlement proves call count or hides fees, timing, branch, funding links, or transaction metadata.
+Do not splice the old 1,000-call run into a newer transaction proof. Do not imply a live Sapient path exists until the full funding, open, settlement, and recovery lifecycle is implemented and tested. A public EVM transaction can be shown only as a clearly labelled illustration, not as a matched experiment.

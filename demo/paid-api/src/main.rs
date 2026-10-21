@@ -65,6 +65,17 @@ enum Command {
         #[arg(long)]
         metrics: bool,
     },
+    /// Start the opt-in Sapient relay with an initially empty dynamic channel directory.
+    Relay {
+        /// Public bind address. Defaults to 0.0.0.0:$PORT (or 10000 when PORT is unset).
+        #[arg(long)]
+        bind: Option<SocketAddr>,
+        /// Directory for per-channel paywall ledgers. Must be on protected storage.
+        #[arg(long)]
+        channel_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = 10)]
+        price: u64,
+    },
     /// Hit a paid URL, signing a voucher on each 402 until `--calls` succeed.
     Call {
         #[arg(long)]
@@ -199,6 +210,51 @@ async fn run() -> Result<(), String> {
                 .await
                 .map_err(|e| e.to_string())?;
         }
+        Command::Relay {
+            bind,
+            channel_dir,
+            price,
+        } => {
+            if std::env::var("GHOSTLINE_DEMO_MODE").as_deref() != Ok("1") {
+                return Err("set GHOSTLINE_DEMO_MODE=1 to start the public relay".into());
+            }
+            let state_dir = std::env::var_os("GHOSTLINE_LEDGER_PATH")
+                .map(PathBuf::from)
+                .ok_or("set GHOSTLINE_LEDGER_PATH to the persistent relay state directory")?;
+            let expected_channel_dir = state_dir.join("channels");
+            let channel_dir = channel_dir.unwrap_or_else(|| expected_channel_dir.clone());
+            if channel_dir != expected_channel_dir {
+                return Err("--channel-dir must match GHOSTLINE_LEDGER_PATH/channels".into());
+            }
+            ensure_parent(&channel_dir.join("placeholder"))?;
+            std::fs::create_dir_all(&channel_dir).map_err(|e| e.to_string())?;
+            let directory = ghostline_paywall::ChannelDirectory::open(&channel_dir)
+                .map_err(|e| e.to_string())?;
+            let mut state =
+                AppState::with_directory(directory, price).map_err(|e| e.to_string())?;
+            state
+                .restore_relay_state(state_dir.join("relay-state.json"))
+                .await?;
+            let bind = match bind {
+                Some(bind) => bind,
+                None => {
+                    let port = std::env::var("PORT")
+                        .unwrap_or_else(|_| "10000".into())
+                        .parse::<u16>()
+                        .map_err(|_| "PORT must be a valid TCP port")?;
+                    SocketAddr::from(([0, 0, 0, 0], port))
+                }
+            };
+            let listener = tokio::net::TcpListener::bind(bind)
+                .await
+                .map_err(|e| e.to_string())?;
+            eprintln!("ghostline-paid-api relay listening on {bind}; network=Esmeralda");
+            axum::serve(listener, router(state.clone()))
+                .with_graceful_shutdown(shutdown_signal())
+                .await
+                .map_err(|e| e.to_string())?;
+            state.settle_pending_relay_channels().await;
+        }
         Command::Call {
             url,
             session,
@@ -271,6 +327,33 @@ async fn run() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    result = tokio::signal::ctrl_c() => {
+                        if let Err(error) = result {
+                            tracing::error!(event = "shutdown_signal", error = %error);
+                        }
+                    }
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(error) => {
+                tracing::error!(event = "shutdown_signal", error = %error);
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(event = "shutdown_signal", error = %error);
+    }
 }
 
 fn confirm_human_approval(

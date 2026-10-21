@@ -150,6 +150,32 @@ impl ChannelStore {
         &self.snapshot.calls
     }
 
+    /// Serialize this channel's ledger checkpoint for an authenticated external recovery receipt.
+    /// The payload includes the latest voucher bearer credential; callers must encrypt it before
+    /// sending it outside the trusted service process.
+    pub fn recovery_snapshot(&self) -> Result<Vec<u8>, PaywallError> {
+        serde_json::to_vec(&self.snapshot)
+            .map_err(|_| PaywallError::Voucher(VoucherError::Malformed))
+    }
+
+    /// Restore a previously authenticated checkpoint into a private file.
+    pub fn restore_recovery_snapshot(
+        path: impl Into<PathBuf>,
+        bytes: &[u8],
+    ) -> Result<Self, PaywallError> {
+        let snapshot: ChannelSnapshot = serde_json::from_slice(bytes)
+            .map_err(|_| PaywallError::Voucher(VoucherError::Malformed))?;
+        let params = snapshot.params()?;
+        ServiceLedger::resume(params.clone(), snapshot.accepted)?;
+        PaymentSession::resume(params, snapshot.cumulative)?;
+        let store = Self {
+            path: path.into(),
+            snapshot,
+        };
+        store.flush()?;
+        Ok(store)
+    }
+
     /// Append one new charge. `price` is the delta from [`ServiceLedger::accept`] (a replay is `0` and is ignored).
     ///
     /// When the log is empty, a price at or below the current accepted total is stored as this call only.
@@ -353,6 +379,23 @@ impl ChannelDirectory {
         self.stores.is_empty()
     }
 
+    /// Register a newly opened channel in a running service directory.
+    pub fn insert(&mut self, store: ChannelStore) -> Result<[u8; CHANNEL_ID_LEN], PaywallError> {
+        let id = store.channel_id()?;
+        if self
+            .stores
+            .iter()
+            .any(|existing| existing.channel_id().ok().as_ref() == Some(&id))
+        {
+            return Err(PaywallError::Storage(format!(
+                "duplicate channel {}",
+                to_hex(&id)
+            )));
+        }
+        self.stores.push(store);
+        Ok(id)
+    }
+
     /// Number of ledgers with an accepted voucher; this is not chain settlement confirmation.
     pub fn ledgers_with_accepted_vouchers(&self) -> usize {
         self.stores
@@ -395,6 +438,18 @@ impl ChannelDirectory {
         let id = self.channel_for_quote(Some(channel_id_hex))?;
         let index = self.store_index(&id).ok_or(PaywallError::UnknownChannel)?;
         Ok(self.stores[index].path())
+    }
+
+    /// Export an authenticated service checkpoint for one channel. The serialized checkpoint
+    /// contains a bearer voucher and must be encrypted before it leaves this process.
+    pub fn recovery_snapshot(
+        &self,
+        channel_id: &[u8; CHANNEL_ID_LEN],
+    ) -> Result<Vec<u8>, PaywallError> {
+        let index = self
+            .store_index(channel_id)
+            .ok_or(PaywallError::UnknownChannel)?;
+        self.stores[index].recovery_snapshot()
     }
 
     pub fn accepted(&self, channel_id: &[u8; CHANNEL_ID_LEN]) -> Result<u64, PaywallError> {
@@ -568,6 +623,36 @@ mod tests {
     }
 
     #[test]
+    fn recovery_snapshot_restores_the_latest_voucher_and_call_ledger() {
+        let (params, ledger, voucher_hex) = signed_charge();
+        let source_path = unique_store_path("recovery-source");
+        let restored_path = unique_store_path("recovery-restored");
+        let mut store = ChannelStore::create(&source_path, params).unwrap();
+        store.commit_charge(&ledger, 10, &voucher_hex).unwrap();
+
+        let checkpoint = store.recovery_snapshot().unwrap();
+        let restored =
+            ChannelStore::restore_recovery_snapshot(&restored_path, &checkpoint).unwrap();
+
+        assert_eq!(restored.accepted(), 10);
+        assert_eq!(restored.latest_voucher_hex(), Some(voucher_hex.as_str()));
+        assert_eq!(restored.calls(), store.calls());
+        assert_eq!(ChannelStore::open(&restored_path).unwrap().accepted(), 10);
+        fs::remove_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::remove_dir_all(restored_path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn recovery_snapshot_rejects_totals_outside_channel_budget() {
+        let mut snapshot = ChannelSnapshot::from_params(&params(), 101, 0);
+        snapshot.accepted = 101;
+        let bytes = serde_json::to_vec(&snapshot).unwrap();
+        let path = unique_store_path("invalid-recovery");
+
+        assert!(ChannelStore::restore_recovery_snapshot(path, &bytes).is_err());
+    }
+
+    #[test]
     fn failed_charge_write_leaves_store_unchanged_and_can_retry() {
         let (params, ledger, voucher_hex) = signed_charge();
         let path = unique_store_path("failed-charge");
@@ -678,5 +763,26 @@ mod tests {
             10
         );
         assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
+    }
+
+    #[test]
+    fn directory_accepts_a_new_channel_after_startup_and_rejects_duplicates() {
+        let dir = unique_store_path("dynamic-directory").with_extension("");
+        fs::create_dir_all(&dir).unwrap();
+        let mut directory = ChannelDirectory::open(&dir).unwrap();
+        let params = params();
+        let store_path = dir.join("new-channel.json");
+        let store = ChannelStore::create(&store_path, params.clone()).unwrap();
+        assert_eq!(directory.insert(store).unwrap(), params.channel_id());
+        assert_eq!(directory.len(), 1);
+        assert_eq!(
+            directory.channel_for_quote(None).unwrap(),
+            params.channel_id()
+        );
+
+        let duplicate = ChannelStore::create(dir.join("duplicate.json"), params).unwrap();
+        assert!(directory.insert(duplicate).is_err());
+        assert_eq!(directory.len(), 1);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

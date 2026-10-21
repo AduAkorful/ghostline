@@ -478,6 +478,99 @@ fn native_refund_is_private_and_remains_unilateral_long_after_expiry() {
 }
 
 #[test]
+fn relay_refund_key_can_refund_after_expiry_without_replacing_payer_signature() {
+    let mut test = TemplateTest::new(
+        env!("CARGO_MANIFEST_DIR"),
+        ["templates/faucet", "../../contracts/channel"],
+    );
+    let (payer, payer_public) = create_key_pair_from_seed(101);
+    let (refund_authority, refund_public) = create_key_pair_from_seed(102);
+    let (service, service_public) = create_key_pair_from_seed(103);
+    let channel = Channel::open_with_refund_key(
+        ChannelSpec {
+            network_tag: 1,
+            payer: payer_public.to_byte_type(),
+            service: service_public.to_byte_type(),
+            deposit: DEPOSIT,
+            expiry_epoch: 10,
+            nonce: [46; NONCE_LEN],
+            channel_template: test.get_template_address(CHANNEL),
+        },
+        refund_public.to_byte_type(),
+    )
+    .unwrap();
+    let (resource, mask) = fund(&mut test, OutputAuthSpec::Conditions(channel.leaves_vec()));
+    let deposit = MaskAndValue {
+        value: DEPOSIT,
+        mask,
+    };
+    let refund_statement = refund(
+        &channel,
+        deposit.clone(),
+        refund_public.to_byte_type(),
+        OutputScan::localnet(resource),
+    )
+    .unwrap();
+
+    // Even though the relay holds the refund key, it cannot forge the payer's off-chain voucher.
+    let forged = SignedVoucher::sign(
+        &refund_authority,
+        channel.params(),
+        30,
+        channel.spec().service,
+    )
+    .unwrap();
+    let outputs = [
+        output(
+            resource,
+            forged.amount,
+            forged.mask.clone(),
+            SpendAuthorization::Key(forged.service_output_key),
+            forged.service_output_key,
+        ),
+        output(
+            resource,
+            DEPOSIT - forged.amount,
+            RistrettoSecretKey::random(&mut rand::rng()),
+            SpendAuthorization::Script(channel.params().payer_root),
+            channel.spec().payer,
+        ),
+    ];
+    let (settle_witness, _) = script_path_witness_with_data(
+        &channel.leaves_vec(),
+        channel.settle_leaf(),
+        forged.witness_data(),
+    )
+    .unwrap();
+    let forged_settle = no_claim_statement(deposit, settle_witness, &outputs, None);
+    let tx = Transaction::builder_localnet(Epoch(9))
+        .stealth_transfer(resource, forged_settle)
+        .finish()
+        .seal(&service);
+    let reason = format!("{:?}", test.execute_expect_failure(tx, vec![]));
+    assert!(reason.contains("invalid voucher signature"), "{reason}");
+
+    test.set_virtual_substate(
+        VirtualSubstateId::CurrentEpoch,
+        VirtualSubstate::CurrentEpoch(10),
+    );
+
+    reject(
+        &mut test,
+        resource,
+        refund_statement.clone(),
+        &payer,
+        "Access Denied",
+    );
+
+    let tx = Transaction::builder_localnet(Epoch(10_001))
+        .stealth_transfer(resource, refund_statement)
+        .finish()
+        .seal(&refund_authority);
+    test.execute_expect_success(tx, vec![]);
+}
+
+#[test]
 fn genuine_balance_covenant_still_requires_a_partition_claim() {
     let mut test = TemplateTest::new(
         env!("CARGO_MANIFEST_DIR"),

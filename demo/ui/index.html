@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#090b13" />
-    <meta name="description" content="Follow Ghostline's CLI journey from channel setup through many private calls to one verified settlement." />
-    <title>Ghostline — many calls, one settlement</title>
+    <meta name="description" content="Ghostline: ghost payments for AI agents on Tari Ootle. Many private requests, one masked settlement." />
+    <title>Ghostline — ghost payments for AI agents</title>
     <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
     <link rel="stylesheet" href="styles.css" />
     <script src="main.js" defer></script>
@@ -15,6 +15,7 @@
     <header class="topbar">
       <a class="wordmark" href="#top" aria-label="Ghostline home"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a>
       <nav aria-label="Main navigation">
+        <a href="play.html">Try the demo</a>
         <a href="#story">How it works</a>
         <a href="#evidence">Proof</a>
         <a href="#capabilities">CLI map</a>
@@ -23,6 +24,7 @@
         <details class="mobile-nav">
           <summary>Explore <span aria-hidden="true">+</span></summary>
           <div class="mobile-nav-panel">
+            <a href="play.html">Try the browser demo</a>
             <a href="#story">How it works</a>
             <a href="#evidence">Proof</a>
             <a href="#capabilities">CLI map</a>
@@ -36,14 +38,14 @@
     <main id="main">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> PRIVATE PAY-PER-CALL · TARI OOTLE</p>
-          <h1 id="hero-title">Many calls.<br /><span>One settlement.</span></h1>
-          <p class="hero-lede">Ghostline lets an AI agent pay a service request by request. The chain sees a channel open, then one settlement of the accepted total.</p>
+          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> AGENT PAYMENT PRIVACY · TARI OOTLE</p>
+          <h1 id="hero-title">Many whispers.<br /><span>One séance receipt.</span></h1>
+          <p class="hero-lede">An AI agent pays a service request by request. Signed vouchers stay off-chain; one masked settlement closes the channel on Tari Ootle.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#judge-path">Explore ways to try Ghostline <span aria-hidden="true">↓</span></a>
+            <a class="button button-primary" href="play.html">Summon a ghost payment <span aria-hidden="true">↗</span></a>
             <a class="text-link" href="#evidence">Inspect finalized proof <span aria-hidden="true">↗</span></a>
           </div>
-          <p class="hero-note"><strong>Static showcase · no backend.</strong> The site never connects to a wallet or handles credentials. Run Ghostline locally with your own wallet only when you choose to.</p>
+          <p class="hero-note"><strong>Start with a no-install browser simulation.</strong> You can also inspect recorded Esmeralda proof or run the CLI with your own wallet.</p>
         </div>
         <div class="hero-art" role="group" aria-label="Illustration of many off-chain calls collapsing into one on-chain settlement">
           <div class="art-stamp"><span>GHOSTLINE / TRANSACTION TRACE</span><span>NO. 001</span></div>
@@ -299,6 +301,7 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
           <div class="section-heading"><div><p class="eyebrow">THE PRIVACY BOUNDARY</p><h2 id="privacy-title">Quiet to observers.<br /><span>Visible to the service.</span></h2></div><p class="section-intro">Ghostline hides the spending pattern from third parties. It does not hide activity from the service receiving payment.</p></div>
           <div class="privacy-grid"><article><span class="privacy-index">01 / PAYER</span><h3>Your full view</h3><p>You know your calls, channel details, and the vouchers you sign. Your deposit mask stays in payer-controlled channel state during ordinary individual flows.</p></article><article><span class="privacy-index">02 / SERVICE</span><h3>Each request</h3><p>The service sees its requests, prices, and voucher stream as it serves them. It knows the declared deposit limit, but does not receive the payer's deposit mask in ordinary individual flows.</p></article><article><span class="privacy-index">03 / OBSERVER</span><h3>One close record</h3><p>In the tested claim-free close, observers do not see the deposit, exact service amount, or payer remainder. Fees, timing, branch, channel id, authorization data, output commitments, and output count remain visible.</p></article></div>
           <div class="key-boundary"><p class="eyebrow">KEY SEPARATION · REDUCES REUSE SIGNALS</p><p>Ghostline supports fresh payer and service authorization keys for each channel, plus an optional separate one-time service payout key. This can reduce correlation from reusing keys across channels or later spends. The authorization and payout keys are both public in the same settlement, so this does not unlink the payer and service within that transaction or hide funding and timing links.</p></div>
+          <div class="key-boundary"><p class="eyebrow">WHY TARI OOTLE</p><p>A transparent account-based payment path can leave a public transfer for every call, with its amount and recipient visible. Ootle’s native stealth UTXOs and confidential commitments let Ghostline keep the voucher stream off-chain and mask tested deposit and settlement values without a mixer or a separate zero-knowledge circuit. Other networks can offer privacy through different designs; this is the benefit of this Ootle flow, not a claim that Tari is the only private-payment option.</p></div>
           <p class="leak-note">Pooled settlement remains experimental: its coordinator sees all participating deposit openings, and the chain shows which channels were grouped. Funding patterns, timing, and who pays fees can also create correlations. Ghostline does not promise anonymity or unlinkable funding.</p>
         </div>
       </section>
@@ -312,13 +315,13 @@ bash scripts/quickstart-smoke.sh</code></pre></div>
           <p class="install-note">This builds the reference CLI and API, uses temporary test keys, pays three local requests, then removes its temporary files. It does not contact a wallet, use Esmeralda, or submit a transaction. The first build may take a few minutes.</p>
           <p class="install-platform"><span>LINUX · x86-64 · glibc</span><span>NO ROOT REQUIRED</span></p>
           <div class="command-card install-command"><div class="command-head"><span>INSTALL THE CLI, API &amp; MCP SERVER</span><button class="copy-command" type="button">Copy</button></div><pre><code>curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh</code></pre></div>
-          <p class="install-note"><a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2" target="_blank" rel="noopener noreferrer">Ghostline v0.3.2 is available now.</a> This installs the CLI, API, and MCP server to <code>~/.local/bin</code> and verifies the release checksum. It does not set up or fund a wallet. The fixed two-output settlement rule and guided-run fee caps are included.</p>
+          <p class="install-note"><a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0" target="_blank" rel="noopener noreferrer">Ghostline v0.4.0 release.</a> This installs the CLI, API, and MCP server to <code>~/.local/bin</code> and verifies the release checksum. Try <code>ghostline demo</code> for the local quote → voucher → paid-call run. It does not set up or fund a wallet.</p>
           <div class="start-links"><a href="docs/install.html"><span><small>01 / DETAILS</small><strong>Installation guide</strong></span><b aria-hidden="true">↗</b></a><a href="docs/quickstart.html"><span><small>02 / CLI</small><strong>Esmeralda quickstart</strong></span><b aria-hidden="true">↗</b></a><a href="docs/interfaces.html"><span><small>03 / MCP + API</small><strong>Interfaces and tools</strong></span><b aria-hidden="true">↗</b></a><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer"><span><small>04 / SOURCE</small><strong>Browse the code</strong></span><b aria-hidden="true">↗</b></a></div>
         </div>
       </section>
-      <section class="limits-section" aria-labelledby="limits-title"><div class="shell limits-inner"><div><p class="eyebrow">KNOW THE LIMITS</p><h2 id="limits-title">Early development.<br />Testnet only.</h2></div><ul><li>Ghostline is unaudited. Do not use real funds.</li><li>Fees are public and may exceed small-call totals.</li><li>The tested claim-free close hides deposit, exact service amount, and remainder; branch and output commitments remain visible.</li><li>Call counts are service records, not chain-attested receipts.</li></ul></div></section>
+      <section class="limits-section" aria-labelledby="limits-title"><div class="shell limits-inner"><div><p class="eyebrow">KNOW THE LIMITS</p><h2 id="limits-title">Early development.<br />Testnet only.</h2></div><ul><li>Ghostline is unaudited. Do not use real funds.</li><li>Fees are public and may exceed small-call totals.</li><li>The tested claim-free close hides deposit, exact service amount, and remainder; branch and output commitments remain visible.</li><li>Call counts are service records, not chain-attested receipts.</li><li>Ootle mainnet target: Nov 11, 2026. A mainnet release is planned, not live or guaranteed.</li></ul></div></section>
     </main>
-    <footer class="footer shell"><a class="wordmark" href="#top"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a><p>Private pay-per-call on Tari Ootle.</p><a href="#top" class="back-top">Back to top ↑</a></footer>
+    <footer class="footer shell"><a class="wordmark" href="#top"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a><p>Agent payment privacy on Tari Ootle · MIT licensed · Work started Oct 12, 2026 · <a href="https://github.com/AduAkorful/ghostline/commit/e4701ea48731d117f3eda1620f60c0c6a193edef">first commit</a></p><a href="#top" class="back-top">Back to top ↑</a></footer>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

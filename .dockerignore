@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+.codex
+target
+node_modules
+**/node_modules
+**/dist
+.env
+.env.*
+**/.env
+**/.env.*
+.localnet
+localnet
+secrets
+plans
+*.log

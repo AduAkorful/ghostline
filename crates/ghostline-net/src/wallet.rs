@@ -35,6 +35,7 @@ const WAIT_RESULT: &str = "transactions.wait_result";
 const STEALTH_TRANSFER: &str = "accounts.stealth_transfer";
 const GET_DEFAULT: &str = "accounts.get_default";
 const ACCOUNTS_GET: &str = "accounts.get";
+const ACCOUNTS_GET_BALANCES: &str = "accounts.get_balances";
 const ACCOUNTS_CREATE: &str = "accounts.create";
 const ASSOCIATE_STEALTH: &str = "accounts.associate_stealth_resource";
 const KEYS_LIST: &str = "keys.list";
@@ -537,6 +538,21 @@ impl WalletClient {
         self.rpc(
             ACCOUNTS_GET,
             serde_json::json!({ "name_or_address": account_name(name) }),
+        )
+        .await
+    }
+
+    /// `accounts.get_balances` (`tari-ootle` walletd 0.47.0) for one named account.
+    ///
+    /// The response is retained as JSON because walletd's `Amount` values are serialized as
+    /// decimal strings and may exceed JSON's exact integer range.
+    pub async fn account_balances(&self, name: &str, refresh: bool) -> Result<Value, NetError> {
+        self.rpc(
+            ACCOUNTS_GET_BALANCES,
+            serde_json::json!({
+                "account": account_name(name),
+                "refresh": refresh,
+            }),
         )
         .await
     }

@@ -1,12 +1,21 @@
 # Ghostline
 
-👻 **Ghost payments for AI agents:** many private API calls, one masked settlement on [Tari Ootle](https://ootle.tari.com).
+👻 **Ghost payments for AI agents:** many signed off-chain whispers, one sealed séance receipt on [Tari Ootle](https://ootle.tari.com).
 
 Ghostline lets an agent pay a service request by request while keeping the individual voucher stream off-chain. The payer funds a channel, signs cumulative vouchers, and the service settles the accepted amount once.
 
 > **Early development. Unaudited. Esmeralda testnet only. Do not use real funds.**
 
 ## Try Ghostline
+
+- **[Try the browser demo](https://ghostline-ui.vercel.app/play.html):** no install, wallet, or backend required. It simulates the real voucher signing and verification, then links to a separate recorded Esmeralda transaction.
+- **Run the prebuilt local demo** after installing Ghostline on Linux x86-64:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh && ghostline demo --show-chain-evidence
+  ```
+
+  This runs the real local HTTP 402 → voucher → paid-call path. It does not contact a wallet or submit a transaction.
 
 - **Install the CLI** on Linux x86-64:
 
@@ -15,11 +24,12 @@ Ghostline lets an agent pay a service request by request while keeping the indiv
   ```
 
 - **[Follow the CLI demo](docs/demo-runbook.md):** run the local quote → voucher → paid-call flow, then inspect the recorded Esmeralda close and its explorer links. The local flow is safe and repeatable; it does not submit a transaction.
-- **Guided live run:** install Ghostline [`v0.3.2`](https://github.com/AduAkorful/ghostline/releases/tag/v0.3.2), set up your local Esmeralda wallet and test funds, then use the [guided runner](docs/quickstart.md#guided-esmeralda-demo). It prepares a local service, asks before each transaction, and prints explorer links after finality.
+- **Guided live run:** after `v0.4.0` is published, install Ghostline, set up your local Esmeralda wallet and test funds, then use the [guided runner](docs/quickstart.md#guided-esmeralda-demo). It prepares a local service, asks before each transaction, and prints explorer links after finality.
 - **[Operator batch run](docs/demo-runbook.md):** configure an existing funded channel and paid API, then run `bash scripts/esmeralda-20-call-demo.sh` for 20 paid calls, one settlement, and an explorer link.
-- **[Open the motion demo](https://ghostline-ui.vercel.app/):** a visual explainer of the CLI flow, not a live wallet or transaction interface.
-- **Static by design:** the hosted page needs no backend, wallet credentials, environment variables, or transaction controls. Use the local smoke command for a safe hands-on try; use your own wallet only for an intentional Esmeralda run.
+- **[Explore Ghostline](https://ghostline-ui.vercel.app/):** the landing page explains the flow and links to the browser demo, CLI guide, and on-chain evidence.
 - **[Inspect verified Esmeralda evidence](demo/ui/evidence.json):** explorer links show the finalized template publish, channel open, and settlement; the local service ledger separately records 20 paid calls.
+
+Ghostline is MIT licensed. Work began on October 12, 2026, after the October 1 contest announcement ([first commit](https://github.com/AduAkorful/ghostline/commit/e4701ea48731d117f3eda1620f60c0c6a193edef)). Ootle's announced November 11 mainnet launch is a target for a future Ghostline template release; it is not live or guaranteed.
 
 ## How it works
 
@@ -39,7 +49,7 @@ The service sees every request and voucher, plus the channel's declared deposit 
 | Batch coordinator | No production coordinator exists. The opt-in SDK prototype receives all participants' deposit UTXO openings in one process and is not coordinator-private. |
 | Outside observer | The same public transaction fields and graph. Ghostline does not promise anonymity or unlinkable funding; public funding, timing, or reused keys can correlate activity. |
 
-Ootle's native stealth UTXOs and confidential commitments let Ghostline hide channel deposits and settlement values without putting every call on-chain. That is the advantage of this Ootle flow over a transparent account-based payment flow; other chains can provide similar privacy through different designs, so Ghostline does not claim Tari has exclusive privacy capabilities. See [Tari's privacy overview](https://ootle.tari.com/concepts/privacy/) and Ghostline's [privacy notes](docs/privacy.md).
+On a transparent account-based EVM payment path, each call can add another public transfer and reveal its amount and recipient. Ootle's native stealth UTXOs and confidential commitments let Ghostline batch many off-chain vouchers into a channel and hide tested deposit and settlement values without a mixer or a separate zero-knowledge circuit. Other chains can provide privacy through different designs; Ghostline does not claim this is unique to Tari. See [Tari's privacy overview](https://ootle.tari.com/concepts/privacy/) and Ghostline's [privacy notes](docs/privacy.md).
 
 ## Install
 
@@ -49,7 +59,7 @@ Install the CLI, MCP server, and reference API on glibc-based Linux x86-64 witho
 curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
 ```
 
-The installer downloads a [published release](https://github.com/AduAkorful/ghostline/releases), verifies its checksum, and installs to `~/.local/bin`. Start with the [installation guide](docs/install.md), then the [Esmeralda quickstart](docs/quickstart.md). A funded Ootle wallet and service configuration are required for live payments.
+The installer downloads a [published release](https://github.com/AduAkorful/ghostline/releases), verifies its checksum, and installs to `~/.local/bin`. Start with the [installation guide](docs/install.md), then the [Esmeralda quickstart](docs/quickstart.md). A funded Ootle wallet and service configuration are required for live payments. Other operating systems can use the browser demo or build from source.
 
 ## Project components
 

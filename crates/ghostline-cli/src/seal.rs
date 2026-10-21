@@ -15,11 +15,13 @@ use tari_template_lib::types::{
 };
 use tari_utilities::ByteArray;
 
+#[derive(Clone)]
 pub struct OpenSpec {
     pub network_tag: u8,
     pub deposit: u64,
     pub payer: RistrettoPublicKeyBytes,
     pub service: RistrettoPublicKeyBytes,
+    pub refund: Option<RistrettoPublicKeyBytes>,
     pub expiry_epoch: u64,
     pub nonce: [u8; NONCE_LEN],
     pub channel_template: Hash32,
@@ -45,7 +47,7 @@ pub struct RefundArgs<'a> {
 }
 
 pub fn channel(spec: OpenSpec) -> Result<Channel, String> {
-    Channel::open(ChannelSpec {
+    let channel_spec = ChannelSpec {
         network_tag: spec.network_tag,
         payer: spec.payer,
         service: spec.service,
@@ -53,7 +55,11 @@ pub fn channel(spec: OpenSpec) -> Result<Channel, String> {
         expiry_epoch: spec.expiry_epoch,
         nonce: spec.nonce,
         channel_template: spec.channel_template,
-    })
+    };
+    match spec.refund {
+        Some(refund_key) => Channel::open_with_refund_key(channel_spec, refund_key),
+        None => Channel::open(channel_spec),
+    }
     .map_err(|e| e.to_string())
 }
 

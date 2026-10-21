@@ -3,11 +3,11 @@
 use ghostline_core::{ChannelParams, NONCE_LEN};
 use tari_ootle_wallet_crypto::stealth::condition_root;
 use tari_template_lib::types::{
+    FunctionName, Hash32, TemplateAddress,
     bytes::Bytes,
     crypto::RistrettoPublicKeyBytes,
     rule,
     stealth::{BuiltinPredicate, SpendCondition, TemplateFunction},
-    FunctionName, Hash32, TemplateAddress,
 };
 
 use crate::SdkError;
@@ -41,6 +41,19 @@ pub struct Channel {
 
 impl Channel {
     pub fn open(spec: ChannelSpec) -> Result<Self, SdkError> {
+        let refund_key = spec.payer;
+        Self::open_with_refund_key(spec, refund_key)
+    }
+
+    /// Open a channel whose voucher signer and expiry-refund signer are different identities.
+    ///
+    /// A relay can hold `refund_key` and recover only after expiry, while the payer retains the
+    /// key that authorizes voucher amounts. The legacy `open` constructor keeps both roles on the
+    /// payer key.
+    pub fn open_with_refund_key(
+        spec: ChannelSpec,
+        refund_key: RistrettoPublicKeyBytes,
+    ) -> Result<Self, SdkError> {
         if spec.deposit == 0 {
             return Err(SdkError::ZeroDeposit);
         }
@@ -98,7 +111,7 @@ impl Channel {
         ]);
         let refund_leaf = conjunction([
             SpendCondition::builtin(BuiltinPredicate::AfterEpoch(spec.expiry_epoch)),
-            SpendCondition::access_rule(rule!(public_key(spec.payer))),
+            SpendCondition::access_rule(rule!(public_key(refund_key))),
         ]);
 
         Ok(Self {
@@ -220,6 +233,18 @@ mod tests {
     }
 
     #[test]
+    fn refund_authority_can_differ_from_voucher_payer() {
+        let spec = spec();
+        let legacy = Channel::open(spec.clone()).unwrap();
+        let refund_key = RistrettoPublicKeyBytes::from_bytes(&[3u8; 32]).unwrap();
+        let separated = Channel::open_with_refund_key(spec, refund_key).unwrap();
+
+        assert_eq!(legacy.params(), separated.params());
+        assert_eq!(legacy.settle_leaf(), separated.settle_leaf());
+        assert_ne!(legacy.refund_leaf(), separated.refund_leaf());
+    }
+
+    #[test]
     fn tree_has_two_leaves() {
         let channel = Channel::open(spec()).unwrap();
         assert_eq!(channel.leaves_vec().len(), 2);
@@ -233,9 +258,11 @@ mod tests {
         assert_eq!(channel.batched_leaves_vec().len(), 3);
         assert_eq!(channel.batch_settle_leaf().conditions().len(), 2);
         assert_ne!(channel.batch_settle_leaf(), channel.settle_leaf());
-        assert!(channel
-            .batched_leaves_vec()
-            .contains(channel.batched_individual_settle_leaf()));
+        assert!(
+            channel
+                .batched_leaves_vec()
+                .contains(channel.batched_individual_settle_leaf())
+        );
         assert!(!channel.batched_leaves_vec().contains(channel.settle_leaf()));
     }
 }

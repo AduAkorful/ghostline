@@ -1,0 +1,122 @@
+#!/bin/sh
+set -eu
+set +x
+
+: "${GHOSTLINE_WALLET_SEED_WORDS:?set the dedicated Esmeralda relay wallet seed in Render secrets}"
+: "${GHOSTLINE_WALLET_PASSWORD:?set a wallet database password in Render secrets}"
+: "${GHOSTLINE_CLAIM_SECRET:?set the relay wallet view_only_key index 0 in Render secrets}"
+: "${GHOSTLINE_TEMPLATE:?set the deployed Ghostline template address}"
+: "${GHOSTLINE_INDEXER_URL:?set the Esmeralda indexer URL}"
+: "${GHOSTLINE_DEMO_EXPIRY_EPOCHS:?set the demo channel lifetime in epochs}"
+: "${GHOSTLINE_DEMO_OPENER_ACCOUNT:?set the deterministic opener account name}"
+: "${GHOSTLINE_DEMO_FEE_ACCOUNT_NAME:?set the deterministic fee account name}"
+: "${GHOSTLINE_LEDGER_PATH:?set the private relay state directory}"
+
+export GHOSTLINE_DEMO_MODE=1
+export GHOSTLINE_NETWORK=esmeralda
+export GHOSTLINE_NETWORK_TAG="${GHOSTLINE_NETWORK_TAG:-38}"
+export GHOSTLINE_DEMO_DEPOSIT="${GHOSTLINE_DEMO_DEPOSIT:-51}"
+export GHOSTLINE_DEMO_OPENER_KEY_INDEX="${GHOSTLINE_DEMO_OPENER_KEY_INDEX:-1}"
+export GHOSTLINE_DEMO_FEE_KEY_INDEX="${GHOSTLINE_DEMO_FEE_KEY_INDEX:-2}"
+export PORT="${PORT:-10000}"
+
+wallet_bin="${TARI_WALLETD_BIN:-/usr/local/bin/tari_ootle_walletd}"
+cli_bin="${GHOSTLINE_CLI_BIN:-/usr/local/bin/ghostline}"
+api_bin="${GHOSTLINE_PAID_API_BIN:-/usr/local/bin/ghostline-paid-api}"
+wallet_base="${TARI_BASE_DIR:-/tmp/tari-wallet}"
+wallet_db="$wallet_base/esmeralda"
+mkdir -p "$wallet_base" "$GHOSTLINE_LEDGER_PATH"
+
+# `None` auth is limited to loopback inside this single container. Never expose this port.
+# The wallet password protects its local database; the relay connects only over loopback.
+if [ ! -d "$wallet_db" ]; then
+    # The seed phrase is passed as one argument because walletd exposes it only as a CLI option.
+    set -- --seed-words "$GHOSTLINE_WALLET_SEED_WORDS"
+else
+    set --
+fi
+"$wallet_bin" --network esmeralda --base-path "$wallet_base" \
+    --listen-on 127.0.0.1:5100 --authentication none \
+    --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
+wallet_pid=$!
+cleanup() {
+    kill -TERM "$wallet_pid" 2>/dev/null || true
+    wait "$wallet_pid" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+account_ready() {
+    "$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" \
+        --name "$1" >/dev/null 2>&1
+}
+account_address() {
+    "$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" \
+        --name "$1" | sed -n 's/^address=/account_address=/p'
+}
+account_create() {
+    if [ "${3:-}" = yes ]; then
+        "$cli_bin" wallet account-create --url "$GHOSTLINE_WALLET_URL" \
+            --name "$1" --key-index "$2" --is-default >/dev/null
+    else
+        "$cli_bin" wallet account-create --url "$GHOSTLINE_WALLET_URL" \
+            --name "$1" --key-index "$2" >/dev/null
+    fi
+}
+
+attempt=0
+while [ "$attempt" -lt 90 ]; do
+    if account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT"; then
+        break
+    fi
+    if account_create "$GHOSTLINE_DEMO_OPENER_ACCOUNT" "$GHOSTLINE_DEMO_OPENER_KEY_INDEX" yes; then
+        break
+    fi
+    if ! kill -0 "$wallet_pid" 2>/dev/null; then
+        echo 'wallet daemon exited before the opener account became available' >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+done
+account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT" || {
+    echo 'wallet daemon did not prepare the opener account' >&2
+    exit 1
+}
+
+attempt=0
+while [ "$attempt" -lt 90 ]; do
+    if account_ready "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME"; then
+        break
+    fi
+    if account_create "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" "$GHOSTLINE_DEMO_FEE_KEY_INDEX"; then
+        break
+    fi
+    if ! kill -0 "$wallet_pid" 2>/dev/null; then
+        echo 'wallet daemon exited before the fee account became available' >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+done
+account_ready "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" || {
+    echo 'wallet daemon did not prepare the fee account' >&2
+    exit 1
+}
+
+# Public receive address only; key IDs and private key material stay hidden.
+fee_address="$(account_address "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME")"
+if [ -z "$fee_address" ]; then
+    echo 'wallet account-get did not return a public fee-account address' >&2
+    exit 1
+fi
+printf '%s\n' "$fee_address"
+
+"$api_bin" relay --bind "0.0.0.0:$PORT" \
+    --channel-dir "$GHOSTLINE_LEDGER_PATH/channels" &
+api_pid=$!
+stop_children() {
+    kill -TERM "$api_pid" 2>/dev/null || true
+    kill -TERM "$wallet_pid" 2>/dev/null || true
+}
+trap stop_children INT TERM
+wait "$api_pid"

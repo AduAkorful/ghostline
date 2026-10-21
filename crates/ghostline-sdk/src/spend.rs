@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #[cfg(feature = "trusted-local-batch-prototype")]
-use ghostline_core::{sign_with_nonce, BATCH_BALANCE_DOMAIN};
+use ghostline_core::{BATCH_BALANCE_DOMAIN, sign_with_nonce};
 use ghostline_core::{SignedVoucher, VoucherError};
 use ootle_byte_type::ToByteType;
 use ootle_network::Network;
@@ -10,21 +10,21 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_wallet_crypto::{
+    MaskAndValue, OutputWitness, StealthCryptoApi, StealthInputWitness, StealthOutputWitness,
+    WalletCryptoError,
     balance_proof::generate_stealth_balance_proof_signature,
     pay_to::PayTo,
     stealth::{self, create_transfer_statement},
-    MaskAndValue, OutputWitness, StealthCryptoApi, StealthInputWitness, StealthOutputWitness,
-    WalletCryptoError,
 };
 #[cfg(feature = "trusted-local-batch-prototype")]
 use tari_template_lib::types::Hash32;
 use tari_template_lib::types::{
+    Amount, ResourceAddress,
     crypto::RistrettoPublicKeyBytes,
     stealth::{
         SpendAuthorization, SpendWitness, StealthInput, StealthInputsStatement,
         StealthTransferStatement,
     },
-    Amount, ResourceAddress,
 };
 use tari_utilities::ByteArray;
 
@@ -581,11 +581,11 @@ fn output_with_mask(
 mod tests {
     use super::*;
     use crate::{Channel, ChannelSpec};
-    use ghostline_core::{SignedVoucher, NONCE_LEN};
+    use ghostline_core::{NONCE_LEN, SignedVoucher};
     use ootle_byte_type::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-    use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
     use tari_template_lib::types::Hash32;
+    use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
 
     fn scan() -> OutputScan {
         OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS)

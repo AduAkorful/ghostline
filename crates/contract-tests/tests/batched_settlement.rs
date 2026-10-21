@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 
-mod support;
 #[path = "support/batch.rs"]
 mod batch_support;
+mod support;
 
+use batch_support::fund_many;
 use ghostline_core::{NONCE_LEN, SignedVoucher};
 use ghostline_sdk::{
     Channel, ChannelSpec, MaskAndValue, OutputScan, settle_batch, settle_batched_individually,
     unblind_output,
 };
 use ootle_byte_type::ToByteType;
-use batch_support::fund_many;
 use support::{CHANNEL, DEPOSIT};
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
@@ -171,11 +171,8 @@ fn two_channels_settle_to_one_pooled_confidential_output_and_rejects_tampering()
         .witness
         .as_script_path()
         .unwrap();
-    let (_, payout_key, entries): (
-        u32,
-        RistrettoPublicKeyBytes,
-        Vec<BatchWitnessEntry>,
-    ) = tari_bor::decode(data.as_ref()).unwrap();
+    let (_, payout_key, entries): (u32, RistrettoPublicKeyBytes, Vec<BatchWitnessEntry>) =
+        tari_bor::decode(data.as_ref()).unwrap();
     let tampered_data = tari_bor::encode(&(1u32, payout_key, entries)).unwrap();
     wrong_index.inputs_statement.inputs[0].witness = SpendWitness::script_path_with_data(
         leaf.clone(),

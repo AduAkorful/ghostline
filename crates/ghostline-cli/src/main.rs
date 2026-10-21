@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 mod channel_file;
+mod demo;
 mod seal;
 mod secrets;
 
@@ -39,6 +40,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run a bounded local quote → voucher → paid-call simulation (no wallet or chain access).
+    Demo {
+        /// Number of simulated paid calls (1–50).
+        #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..=50))]
+        calls: u32,
+        /// Print explorer links for the separate, recorded Esmeralda evidence.
+        #[arg(long)]
+        show_chain_evidence: bool,
+    },
     /// Print the 32-byte channel id for the given open parameters.
     ChannelId(ParamsArgs),
     /// One channel record for open, status, settle, and refund.
@@ -542,6 +552,9 @@ enum ChannelCommand {
         max_fee: u64,
         #[arg(long)]
         seal_key_id_file: Option<PathBuf>,
+        /// Optional public key that receives the expiry refund; defaults to the payer key.
+        #[arg(long)]
+        refund_output_hex: Option<String>,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
     },
@@ -709,6 +722,9 @@ struct OpenArgs {
     payer_hex: String,
     #[arg(long)]
     service_hex: String,
+    /// Optional public key for the expiry-refund branch. Defaults to the payer key.
+    #[arg(long)]
+    refund_hex: Option<String>,
     #[arg(long)]
     expiry_epoch: u64,
     #[arg(long)]
@@ -751,6 +767,11 @@ fn open_spec(args: &OpenArgs) -> Result<seal::OpenSpec, String> {
         deposit: args.deposit,
         payer: seal::parse_pk("payer", &args.payer_hex)?,
         service: seal::parse_pk("service", &args.service_hex)?,
+        refund: args
+            .refund_hex
+            .as_deref()
+            .map(|hex| seal::parse_pk("refund", hex))
+            .transpose()?,
         expiry_epoch: args.expiry_epoch,
         nonce: seal::parse_nonce(&args.nonce_hex)?,
         channel_template: seal::parse_hash("template", &args.template_hex)?,
@@ -795,6 +816,12 @@ fn record_channel_operation(operation: &'static str, outcome: &'static str) {
 
 async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
+        Command::Demo {
+            calls,
+            show_chain_evidence,
+        } => {
+            demo::run_demo(calls, show_chain_evidence).await?;
+        }
         Command::ChannelId(args) => {
             println!("{}", to_hex(&params(&args)?.channel_id()));
         }
@@ -1622,6 +1649,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 utxo_json,
                 deposit_mask_hex,
                 deposit_mask_from_channel_file: false,
+                refund_output_hex: None,
                 max_epoch,
                 resource_hex,
                 ootle_network,
@@ -1667,6 +1695,7 @@ fn open_args_from(file: &channel_file::ChannelFile) -> OpenArgs {
         deposit: file.deposit,
         payer_hex: file.payer_hex.clone(),
         service_hex: file.service_hex.clone(),
+        refund_hex: file.refund_hex.clone(),
         expiry_epoch: file.expiry_epoch,
         nonce_hex: file.nonce_hex.clone(),
         template_hex: file.template_hex.clone(),
@@ -1989,6 +2018,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 deposit: open.deposit,
                 payer_hex: open.payer_hex,
                 service_hex: open.service_hex,
+                refund_hex: open.refund_hex,
                 expiry_epoch: open.expiry_epoch,
                 nonce_hex: open.nonce_hex,
                 template_hex: open.template_hex,
@@ -2315,6 +2345,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             dry_run,
             max_fee,
             seal_key_id_file,
+            refund_output_hex,
             timeout_secs,
         } => {
             let record = channel_file::ChannelFile::load(&path)?;
@@ -2325,6 +2356,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 utxo_json: record.utxo_json.clone(),
                 deposit_mask_hex: record.deposit_mask_hex.clone(),
                 deposit_mask_from_channel_file: true,
+                refund_output_hex: refund_output_hex.or_else(|| record.refund_hex.clone()),
                 max_epoch: record.max_epoch,
                 resource_hex: None,
                 ootle_network: record.ootle_network.clone(),
@@ -2682,6 +2714,7 @@ struct RefundDueArgs {
     utxo_json: Option<PathBuf>,
     deposit_mask_hex: Option<String>,
     deposit_mask_from_channel_file: bool,
+    refund_output_hex: Option<String>,
     max_epoch: u64,
     resource_hex: Option<String>,
     ootle_network: String,
@@ -2755,7 +2788,11 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
     let unsigned = seal::unsigned_refund(
         &channel,
         funded(channel.params().deposit, &deposit_mask)?,
-        channel.spec().payer,
+        args.refund_output_hex
+            .as_deref()
+            .map(|hex| seal::parse_pk("refund output", hex))
+            .transpose()?
+            .unwrap_or(channel.spec().payer),
         resource,
         args.max_epoch,
         scan,
@@ -3479,6 +3516,7 @@ mod tests {
             deposit: 100,
             payer_hex: to_hex(payer_pk.as_bytes()),
             service_hex: to_hex(service_pk.as_bytes()),
+            refund_hex: None,
             expiry_epoch: 50,
             nonce_hex: to_hex(&[3u8; 32]),
             template_hex: to_hex(&[9u8; 32]),
@@ -3559,6 +3597,7 @@ mod seal_tests {
             deposit: 100,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
+            refund: None,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
@@ -3604,6 +3643,33 @@ mod seal_tests {
     }
 
     #[test]
+    fn channel_cli_refund_key_override_preserves_the_voucher_channel() {
+        let (_, payer_public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
+        let (_, refund_public) = create_key_pair_from_seed(17);
+        let base = seal::OpenSpec {
+            network_tag: 1,
+            deposit: 100,
+            payer: payer_public.to_byte_type(),
+            service: service_public.to_byte_type(),
+            refund: None,
+            expiry_epoch: 100,
+            nonce: [42u8; NONCE_LEN],
+            channel_template: Hash32::from_array([7u8; 32]),
+        };
+        let payer_refund = seal::channel(base.clone()).unwrap();
+        let relay_refund = seal::channel(seal::OpenSpec {
+            refund: Some(refund_public.to_byte_type()),
+            ..base
+        })
+        .unwrap();
+
+        assert_eq!(payer_refund.params(), relay_refund.params());
+        assert_eq!(payer_refund.settle_leaf(), relay_refund.settle_leaf());
+        assert_ne!(payer_refund.refund_leaf(), relay_refund.refund_leaf());
+    }
+
+    #[test]
     fn unblind_recovers_deposit_mask_from_open_output() {
         let (payer_secret, payer_public) = create_key_pair_from_seed(11);
         let (_, service_public) = create_key_pair_from_seed(13);
@@ -3612,6 +3678,7 @@ mod seal_tests {
             deposit: 100,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
+            refund: None,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
@@ -3649,6 +3716,7 @@ mod seal_tests {
                 deposit: 100,
                 payer: payer_public.to_byte_type(),
                 service: service_public.to_byte_type(),
+                refund: None,
                 expiry_epoch: u64::MAX,
                 nonce: [42u8; NONCE_LEN],
                 channel_template: Hash32::from_array([7u8; 32]),
@@ -3695,6 +3763,7 @@ mod seal_tests {
             deposit: 100,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
+            refund: None,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
@@ -3734,6 +3803,7 @@ mod seal_tests {
             deposit: 100,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
+            refund: None,
             expiry_epoch: 0,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),

@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@1.97.1
@@ -35,9 +35,59 @@ jobs:
       - name: Run strict Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run TypeScript tests
-        run: npm ci --prefix packages/ghostline && npm test --prefix packages/ghostline
+        run: npm ci --prefix packages/ghostline && npm run build:browser --prefix packages/ghostline && npm test --prefix packages/ghostline
       - name: Execute the local quickstart smoke test
         run: bash scripts/quickstart-smoke.sh
+      - name: Exercise the prebuilt-demo command without wallet configuration
+        run: cargo run --locked --quiet -p ghostline-cli -- demo --calls 3 --show-chain-evidence
+      - name: Verify installer checksum, clean install, and demo command
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api
+          fixture="$RUNNER_TEMP/ghostline-install-fixture"
+          mock_bin="$RUNNER_TEMP/ghostline-mock-bin"
+          install_dir="$RUNNER_TEMP/ghostline-installed-bin"
+          mkdir -p "$fixture/package" "$mock_bin"
+          for executable in ghostline ghostline-mcp ghostline-paid-api; do
+            install -m 0755 "target/debug/$executable" "$fixture/package/$executable"
+            strip --strip-debug "$fixture/package/$executable"
+          done
+          install -m 0644 LICENSE README.md "$fixture/package/"
+          archive=ghostline-x86_64-unknown-linux-gnu.tar.gz
+          tar -C "$fixture/package" -czf "$fixture/$archive" ghostline ghostline-mcp ghostline-paid-api LICENSE README.md
+          (cd "$fixture" && sha256sum "$archive" > SHA256SUMS)
+          cat > "$mock_bin/curl" <<'MOCK_CURL'
+          #!/bin/sh
+          set -eu
+          url=
+          output=
+          while [ "$#" -gt 0 ]; do
+            case "$1" in
+              -o) output=$2; shift 2 ;;
+              http://*|https://*) url=$1; shift ;;
+              *) shift ;;
+            esac
+          done
+          [ -n "$url" ] && [ -n "$output" ]
+          cp "$GHOSTLINE_INSTALL_FIXTURE/${url##*/}" "$output"
+          MOCK_CURL
+          chmod 0755 "$mock_bin/curl"
+          docker run --rm --network none \
+            -v "$fixture:/fixture:ro" \
+            -v "$mock_bin:/mock:ro" \
+            -v "$GITHUB_WORKSPACE:/repo:ro" \
+            ubuntu:24.04 bash -ec '
+              export HOME=/tmp/ghostline-clean-home
+              export GHOSTLINE_INSTALL_DIR=/tmp/ghostline-bin
+              export GHOSTLINE_INSTALL_FIXTURE=/fixture
+              export TMPDIR=/tmp/ghostline-demo-tmp
+              export PATH=/mock:$PATH
+              mkdir -p "$TMPDIR"
+              sh /repo/scripts/install-ghostline.sh
+              PATH="$GHOSTLINE_INSTALL_DIR:$PATH" timeout 10s ghostline demo --calls 3
+              test -z "$(find "$TMPDIR" -mindepth 1 -print -quit)"
+            '
       - name: Check the interactive Esmeralda runner syntax
         run: bash -n scripts/ghostline-esmeralda-demo.sh
 

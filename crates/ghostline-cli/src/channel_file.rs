@@ -13,6 +13,9 @@ pub struct ChannelFile {
     pub deposit: u64,
     pub payer_hex: String,
     pub service_hex: String,
+    /// Optional distinct key authorized to claim the expiry-refund branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refund_hex: Option<String>,
     pub expiry_epoch: u64,
     pub nonce_hex: String,
     pub template_hex: String,
@@ -492,6 +495,7 @@ mod tests {
             deposit: 100,
             payer_hex: "aa".into(),
             service_hex: "bb".into(),
+            refund_hex: None,
             expiry_epoch: 50,
             nonce_hex: "cc".into(),
             template_hex: "dd".into(),
@@ -524,6 +528,7 @@ mod tests {
             deposit: 100,
             payer_hex: "11".repeat(32),
             service_hex: "22".repeat(32),
+            refund_hex: None,
             expiry_epoch: 50,
             nonce_hex: "33".repeat(32),
             template_hex: "44".repeat(32),
@@ -600,6 +605,7 @@ mod tests {
             deposit: 100,
             payer_hex: "11".repeat(32),
             service_hex: "22".repeat(32),
+            refund_hex: None,
             expiry_epoch: 50,
             nonce_hex: "33".repeat(32),
             template_hex: "44".repeat(32),

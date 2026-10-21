@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: ghostline-paywall
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./deploy/Dockerfile
+    dockerContext: .
+    autoDeploy: false
+    healthCheckPath: /healthz
+    envVars:
+      - key: GHOSTLINE_NETWORK
+        value: esmeralda
+      - key: GHOSTLINE_DEMO_MODE
+        value: "1"
+      - key: GHOSTLINE_TEMPLATE
+        value: template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1
+      - key: GHOSTLINE_CORS_ORIGINS
+        value: https://ghostline-ui.vercel.app
+      - key: GHOSTLINE_LEDGER_PATH
+        value: /tmp/ghostline-ledger
+      - key: GHOSTLINE_WALLET_URL
+        value: http://127.0.0.1:5100
+      - key: GHOSTLINE_CLI_BIN
+        value: /usr/local/bin/ghostline
+      - key: GHOSTLINE_DEMO_DEPOSIT
+        value: "51"
+      - key: GHOSTLINE_DEMO_OPENER_ACCOUNT
+        value: ghostline-demo-opener
+      - key: GHOSTLINE_DEMO_OPENER_KEY_INDEX
+        value: "1"
+      - key: GHOSTLINE_DEMO_FEE_ACCOUNT_NAME
+        value: ghostline-demo-fees
+      - key: GHOSTLINE_DEMO_FEE_KEY_INDEX
+        value: "2"
+      - key: GHOSTLINE_DEMO_OPEN_MAX_FEE
+        value: "100000"
+      - key: GHOSTLINE_DEMO_SETTLE_MAX_FEE
+        value: "100000"
+      - key: GHOSTLINE_DEMO_REFUND_MAX_FEE
+        value: "100000"
+      - key: TARI_BASE_DIR
+        value: /tmp/tari-wallet
+      - key: GHOSTLINE_INDEXER_URL
+        sync: false
+      - key: GHOSTLINE_DEMO_EXPIRY_EPOCHS
+        sync: false
+      - key: GHOSTLINE_WALLET_SEED_WORDS
+        sync: false
+      - key: GHOSTLINE_WALLET_PASSWORD
+        sync: false
+      - key: GHOSTLINE_CLAIM_SECRET
+        sync: false
+      - key: GHOSTLINE_DEMO_STATE_KEY
+        sync: false

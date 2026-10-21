@@ -7,6 +7,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 - Channel deposit (stealth UTXO)
 - Payer signing key
 - Service sealing key
+- Browser session payer key in the planned Sapient flow
 - Wallet view key and account key (when the deposit is wallet-built)
 - Off-chain vouchers and the HTTP path they travel on
 - Policy limits (budget, per-call ceiling, vendor allowlist)
@@ -22,6 +23,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 | Public observer | Claim-free Esmeralda settlement and payer-refund transactions hid the deposit and plaintext values in transaction fields. Fees, condition branches, and other transaction metadata remain visible. |
 | Wallet daemon | If used for open/settle, it sees amounts, masks, and keys it holds |
 | Ootle validators | See the same public fields any observer sees, plus whatever the protocol leaks in proofs and fees |
+| Hosted demo relay (planned) | Would temporarily control a small Esmeralda test deposit and the wallet profile that opens the channel; this is testnet custody and creates a funding correlation the local-wallet flow does not have. |
 
 ## Goals we try to meet
 
@@ -50,11 +52,15 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 **Settle after expiry / refund before.** The condition tree is two leaves: settle (`BeforeEpoch` + service key + template `settle`) and refund (`AfterEpoch` + payer key). In-process tests cover the epoch cut. Live Esmeralda: a refund before `AfterEpoch` does not spend the channel UTXO (`OnlyFeeAccepted` / `AcceptFeeRejectRest`). A refund at/after expiry Finalized Commit (stealth transfer of the deposit; opener paid the public fee). A live settle at the expiry epoch is `OnlyFeeAccepted`: `BeforeEpoch` fails, the channel UTXO stays unspent, public fees are still taken. A wallet dry-run settle at that epoch can still print Accept; that is not a live spend.
 
+**Separate relay refund key (new SDK path, not yet used by the hosted demo).** `Channel::open_with_refund_key` leaves the voucher payer and settlement authorization unchanged, but puts the supplied key on the `AfterEpoch` refund branch. Contract-engine regression coverage confirms that the relay key cannot forge a voucher accepted by `settle`, the payer key cannot claim that refund leaf, and the refund key can claim after expiry. This limits the relay's ability to take the channel early; it does not remove custody, because the relay could withhold the remaining funds after expiry.
+
 **Wrong-channel voucher.** Vouchers are bound to `channel_id` (network tag, payer, deposit, payer root, nonce). A voucher for another channel must fail verification.
 
 **Settlement amount confidentiality.** The payer signs the service output's Pedersen commitment, and the template requires that exact commitment to be paid to the signed service key. The witness contains no amount or commitment opening, outputs use a one-unit minimum-value promise, and the template rejects revealed values or extra inputs. Fresh Esmeralda settlement and expiry-refund transactions finalized with empty covenant-claim lists and no plaintext amounts. Branch, opaque channel id, authorization data, timing, and fees remain visible; this does not hide activity from the service. The local contract now also enforces exactly two outputs and rejects a full-deposit voucher. Deploy and retest that change before treating output shape as private on Esmeralda.
 
 **Policy bypass.** If the agent can reach the payer secret, policy is advisory. The on-chain limit is the deposit. Human rules can gate every payment, calls at or above a configured µT threshold, or a vendor's first payment. The CLI asks for terminal confirmation and MCP requests client elicitation; the MCP host must actually present the prompt to a person. The low-level policy API trusts its caller's attestation boolean. Optional JSONL audit logging is append-only and fails closed on write errors, but it does not protect against an operator who can edit or replace the file.
+
+**Browser-session key exposure (planned live Sapient mode).** The proposed ephemeral payer key would sign vouchers from the active page. A page compromise during that session could authorize vouchers up to the channel's deposit limit. The small testnet deposit caps the loss; it does not make a compromised tab safe. The current static browser demo does not connect a wallet, open a channel, or keep a payer key in session storage.
 
 **Wallet-built deposit encrypted to the view key.** `accounts.stealth_transfer` with a wallet `destination_address` encrypts the output to the wallet view key, not the Ghostline payer key. Unblinding with the payer secret fails. Settlement needs the view-key mask (or a wallet that already holds it).
 

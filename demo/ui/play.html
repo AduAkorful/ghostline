@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b13" />
+    <meta name="description" content="Summon a ghost payment: simulate pay-per-call voucher signing in your browser and inspect a separate recorded Esmeralda transaction." />
+    <title>Summon a ghost payment — Ghostline</title>
+    <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
+    <link rel="stylesheet" href="play.css" />
+    <script type="module" src="play.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to the demo</a>
+    <header class="topbar">
+      <a class="wordmark" href="index.html" aria-label="Ghostline home"><img src="ghostline-mark.svg" alt="" width="32" height="32" /><span>ghost<span>line</span></span></a>
+      <nav aria-label="Main navigation"><a href="index.html#story">How it works</a><a href="index.html#evidence">Proof</a><a href="docs/quickstart.html">CLI guide</a><a class="nav-cta" href="index.html">Back to Ghostline</a></nav>
+    </header>
+    <main id="main">
+      <section class="intro shell">
+        <p class="eyebrow">GHOST PAYMENTS · SIMULATE OR RUN LIVE</p>
+        <h1>Whisper a toll.<br /><em>Close the séance.</em></h1>
+        <p class="lede">Try the flow instantly in simulation, or connect a Tari wallet to fund a small Esmeralda testnet channel and watch real calls settle on-chain.</p>
+        <p class="disclosure"><strong>Whisper = signed voucher.</strong> What is real: the voucher cryptography and the Esmeralda transaction link at the end. What is simulated: this browser session’s calls and séance receipt (settlement). The explorer link points to a separate recorded testnet run.</p>
+      </section>
+      <section class="live-setup shell" aria-labelledby="live-title">
+        <div><p class="eyebrow">OPTIONAL · REAL ESMERALDA TESTNET</p><h2 id="live-title">Run it with your wallet.</h2></div>
+        <p>Live mode privately funds a relay wallet, then the relay opens and settles the Ghostline channel. The relay controls the testnet deposit and expiry refund. Use only test funds. <a href="https://sapient.tari.mw" target="_blank" rel="noopener noreferrer">Install Sapient ↗</a></p>
+        <label for="relay-url">Relay URL</label>
+        <div class="actions"><input id="relay-url" type="url" inputmode="url" placeholder="https://your-ghostline-relay.onrender.com" autocomplete="url" /><button id="live-open" class="button button-secondary" type="button">Connect Sapient and open channel</button><button id="live-refund" class="button button-quiet" type="button" hidden>Check expiry and request refund</button><button id="live-stop" class="button button-quiet" type="button" hidden>Return to simulation</button></div>
+        <p id="live-note" class="fine-print">The static site has no wallet secrets. The configured private testnet deposit and Sapient transaction fee require your approval.</p>
+        <p class="fine-print"><a id="pending-funding-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Inspect pending Sapient funding transaction ↗</a></p>
+      </section>
+      <section class="demo shell" aria-labelledby="demo-title">
+        <div class="demo-head"><div><p class="eyebrow">FIVE CALLS · ONE RECORDED PROOF</p><h2 id="demo-title">A small guided run.</h2></div><button id="reset" class="button button-quiet" type="button">Reset</button></div>
+        <div class="panels">
+          <section class="panel service-panel" aria-labelledby="service-title">
+            <div class="panel-heading"><span class="panel-dot mint"></span><div><h3 id="service-title">What the service sees</h3><p id="service-subtitle">Simulated local paywall record · every call and price</p></div></div>
+            <div class="actions"><button id="pay" class="button button-primary" type="button">Ask and pay the toll · sign voucher</button></div>
+            <p id="quote" class="quote" role="status" aria-live="polite">Ask for a quote to receive a simulated HTTP 402.</p>
+            <ol id="calls" class="calls" aria-label="Accepted simulated calls"></ol>
+            <p class="total"><span>Accepted cumulative</span><strong id="total">0 µT</strong></p>
+          </section>
+          <section id="chain-panel" class="panel chain-panel" aria-labelledby="chain-title">
+            <div class="panel-heading"><span class="panel-dot lilac"></span><div><h3 id="chain-title">What the living can verify</h3><p>Recorded Esmeralda proof, separate from these clicks</p></div></div>
+            <div id="chain-empty" class="chain-empty"><span aria-hidden="true">◇</span><strong>No transaction was created by this demo.</strong><p>The browser simulation never connects to a wallet or sends a transaction.</p></div>
+            <div id="chain-result" class="chain-result" hidden><p class="result-label">RECORDED TESTNET SETTLEMENT · FINALIZED</p><p id="record-summary"></p><a id="explorer-link" class="button button-secondary" target="_blank" rel="noopener noreferrer">Inspect the recorded Esmeralda transaction ↗</a><p class="fine-print">This is historical evidence from a different run, not the result of the simulated clicks. The service ledger records the call count; the chain confirms transaction finality and the tested fields.</p></div>
+            <button id="settle" class="button button-primary settle-button" type="button" disabled>Recorded séance receipt · settlement</button>
+          </section>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite">Ready. Your browser will create temporary signing keys when you start.</p>
+      </section>
+      <section class="limits shell"><p class="eyebrow">READ THE BOUNDARY</p><p>The service sees each request, price, and voucher. Outside observers can still see transaction existence, fees, timing, branch, metadata, and commitments. The recorded Esmeralda settlement hid the deposit and exact output amounts in the inspected public fields. This demo does not prove the call count on-chain.</p><a href="index.html#privacy">Full privacy limits ↗</a></section>
+    </main>
+    <footer class="footer shell"><a href="index.html">Ghostline</a><span>MIT licensed · Esmeralda testnet evidence · unaudited software</span><a href="https://github.com/AduAkorful/ghostline">Source ↗</a></footer>
+  </body>
+</html>
