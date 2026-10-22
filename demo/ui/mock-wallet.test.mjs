@@ -42,7 +42,7 @@ class Element {
   }
 }
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, fastTime = false } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, fastTime = false, pending } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -50,8 +50,9 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
   const walletCalls = [];
   const windowListeners = new Map();
   let fundingTxId = "funding-test-tx";
-  let payerPublicKey;
+  let payerPublicKey = pending?.payerPublicKey;
   let opened;
+  if (pending) local.set("ghostline-live-pending", JSON.stringify(pending));
   let paidCalls = 0;
   const originalDateNow = Date.now;
   let virtualNow = originalDateNow();
@@ -179,7 +180,13 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
       assert.fail("Timed out waiting for mock UI flow to finish");
     },
     restoreClock() { Date.now = originalDateNow; },
-    payerSecret: () => session.get("ghostline-live-payer-secret"),
+    payerSecret: () => {
+      try {
+        return JSON.parse(local.get("ghostline-live-pending") || "null")?.payerSecretHex || session.get("ghostline-live-payer-secret");
+      } catch {
+        return session.get("ghostline-live-payer-secret");
+      }
+    },
     paidCalls: () => paidCalls,
   };
 }
@@ -215,7 +222,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   assert.equal(h.calls.every((call) => call.url.startsWith(`${RELAY}/`)), true);
 
   const secretHex = h.payerSecret();
-  assert.ok(secretHex?.length === 64, "voucher signing key is kept in sessionStorage");
+  assert.ok(secretHex?.length === 64, "voucher signing key is kept in this browser");
   for (const call of h.calls) {
     assert.equal(call.body.includes(secretHex), false, "voucher signing key never appears in request bodies");
     assert.equal([...call.headers.values()].some((value) => value.includes(secretHex)), false, "voucher signing key never appears in request headers");
@@ -223,7 +230,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   const fundingRequest = h.walletCalls.find((call) => call.method === "tari_createTransactionRequest");
   assert.equal(fundingRequest.params.kind, "sendPrivately");
   assert.equal(fundingRequest.params.amount, "51");
-  assert.equal(fundingRequest.params.memo, "Ghostline:session-test", "encrypted recipient memo binds the funding output to the relay session");
+  assert.match(fundingRequest.params.memo, /^G2:session-test[0-9a-f]{64}:otl_esm_1mockwallet$/i, "encrypted recipient memo binds session, payer, and refund address");
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/session")).length, 1);
 
   await h.elements.get("live-stop").click();
@@ -337,6 +344,8 @@ test("a funded deposit can be privately returned after channel opening fails", a
   await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.equal(h.elements.get("refund-pending-funding").hidden, false);
   assert.ok(h.local.has("ghostline-live-pending"), "pending funding survives a new tab on this origin");
+  const saved = JSON.parse(h.local.get("ghostline-live-pending"));
+  assert.equal(saved.payerSecretHex?.length, 64, "voucher signing key is stored with the pending transfer");
   await h.elements.get("refund-pending-funding").click();
   const refundCall = h.calls.find((call) => call.url.includes("/demo/refund-funding"));
   assert.ok(refundCall);
@@ -349,13 +358,55 @@ test("a funded deposit can be privately returned after channel opening fails", a
 });
 
 test("a pending funding record from another tab is offered for recovery without contacting Sapient", async () => {
-  const h = makeHarness({ wallet: false });
-  h.local.set("ghostline-live-pending", JSON.stringify({ sessionId: "session-test", fundingTxId: "funding-test-tx" }));
+  const h = makeHarness({
+    wallet: false,
+    pending: { sessionId: "session-test", fundingTxId: "funding-test-tx", payerPublicKey: "aa".repeat(32), payerSecretHex: "bb".repeat(32) },
+  });
   await h.load();
   assert.equal(h.elements.get("refund-pending-funding").hidden, false);
+  assert.equal(h.elements.get("abandon-pending-funding").hidden, false);
   assert.equal(h.walletCalls.length, 0);
   await h.elements.get("refund-pending-funding").click();
   await h.waitFor(() => h.elements.get("refund-pending-funding").hidden);
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/refund-funding")).length, 1);
+  assert.equal(h.elements.get("abandon-pending-funding").hidden, true);
+});
+
+test("a new tab can retry a saved funded transfer using the locally stored voucher key", async () => {
+  const payerSecret = new Uint8Array(32).fill(3);
+  const pending = {
+    sessionId: "session-test",
+    fundingTxId: "funding-test-tx",
+    payerPublicKey: hex(publicKeyFromSecret(payerSecret)),
+    payerSecretHex: hex(payerSecret),
+  };
+  const h = makeHarness({ pending });
+  await h.load();
+  assert.equal(h.elements.get("abandon-pending-funding").hidden, false);
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false, "retry must not request a second transfer");
+  assert.equal(h.local.has("ghostline-live-pending"), false);
+});
+
+test("a new tab without the voucher key can abandon the saved transfer and start over", async () => {
+  const h = makeHarness({
+    pending: { sessionId: "session-test", fundingTxId: "funding-test-tx" },
+  });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /voucher-signing key is unavailable/);
+  assert.equal(h.elements.get("abandon-pending-funding").hidden, false);
+  h.elements.get("abandon-pending-funding").click();
+  assert.match(h.elements.get("abandon-pending-funding").textContent, /Click again/);
+  h.elements.get("abandon-pending-funding").click();
+  assert.equal(h.local.has("ghostline-live-pending"), false);
+  assert.equal(h.elements.get("abandon-pending-funding").hidden, true);
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), true);
 });
 

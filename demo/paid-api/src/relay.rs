@@ -301,14 +301,9 @@ async fn refund_funding_inner(
         return Err("a private refund was already submitted for this deposit; its transaction id is being recovered, so no second refund will be sent".into());
     }
 
-    let session = state
-        .relay_registry
-        .session(&request.session_id)
-        .await
-        .ok_or("funding recovery session is unavailable; contact the relay operator")?;
-
     let config = RelayConfig::load()?;
-    let received = verify_relay_funding(&config, funding_tx, &request.session_id).await?;
+    let (session, received) =
+        load_funding_session(state, &config, funding_tx, &request.session_id).await?;
     if received != config.deposit {
         return Err("the finalized transaction does not contain the exact demo deposit; the relay will not move its funds".into());
     }
@@ -727,17 +722,6 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
         return Ok(response);
     }
     let config = RelayConfig::load()?;
-    let session = state
-        .relay_registry
-        .session(&request.session_id)
-        .await
-        .ok_or("unknown or expired relay session")?;
-    if unix_now().saturating_sub(session.created_at) > 600 {
-        return Err("relay session expired; start again and use a fresh wallet transfer".into());
-    }
-    let payer = RistrettoPublicKeyBytes::from_hex(session.payer_public_key.trim())
-        .map_err(|error| format!("invalid payer public key: {error}"))?;
-    let refund_address = session.refund_address;
     if state.relay_registry.has_funding(&funding_id).await {
         return Err("this Sapient funding transaction was already used".into());
     }
@@ -747,7 +731,11 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
                 .into(),
         );
     }
-    verify_relay_funding(&config, funding_tx, &request.session_id).await?;
+    let (session, _) =
+        load_funding_session(state, &config, funding_tx, &request.session_id).await?;
+    let payer = RistrettoPublicKeyBytes::from_hex(session.payer_public_key.trim())
+        .map_err(|error| format!("invalid payer public key: {error}"))?;
+    let refund_address = session.refund_address;
 
     let current_epoch = run_cli(&config, &["indexer", "epoch", "--url", &config.indexer_url])
         .await?
@@ -1115,11 +1103,115 @@ async fn transaction_status(
     }
 }
 
+const MISSING_SESSION_HINT: &str = "the relay no longer has this pre-funding session (usually after a host restart), and this older deposit memo cannot rebuild the payer key or refund address. Do not send another deposit. Return the funds from this page if the relay still has the session; otherwise abandon the saved transfer locally or contact the operator";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FundingBinding {
+    session_id: String,
+    payer_public_key: Option<String>,
+    refund_address: Option<String>,
+}
+
+struct VerifiedFunding {
+    amount: u64,
+    binding: FundingBinding,
+}
+
+#[derive(Debug)]
+struct RecoveredFundingOutput {
+    recovered: ghostline_sdk::MaskAndValue,
+    binding: FundingBinding,
+}
+
+fn parse_funding_memo_message(message: &str) -> Option<FundingBinding> {
+    if let Some(rest) = message.strip_prefix("G2:") {
+        let session_id = rest.get(..64)?.to_ascii_lowercase();
+        let payer_public_key = rest.get(64..128)?.to_ascii_lowercase();
+        if rest.as_bytes().get(128) != Some(&b':') {
+            return None;
+        }
+        let refund_address = rest.get(129..)?.to_owned();
+        if session_id.len() != 64
+            || payer_public_key.len() != 64
+            || !session_id.chars().all(|c| c.is_ascii_hexdigit())
+            || !payer_public_key.chars().all(|c| c.is_ascii_hexdigit())
+            || !refund_address.starts_with("otl_esm_1")
+        {
+            return None;
+        }
+        return Some(FundingBinding {
+            session_id,
+            payer_public_key: Some(payer_public_key),
+            refund_address: Some(refund_address),
+        });
+    }
+    message.strip_prefix("Ghostline:").and_then(|session_id| {
+        (!session_id.is_empty()).then(|| FundingBinding {
+            session_id: session_id.to_owned(),
+            payer_public_key: None,
+            refund_address: None,
+        })
+    })
+}
+
+#[cfg(test)]
+fn funding_memo_for_binding(
+    session_id: &str,
+    payer_public_key: &str,
+    refund_address: &str,
+) -> Result<String, String> {
+    let memo = format!("G2:{session_id}{payer_public_key}:{refund_address}");
+    if memo.len() > tari_ootle_wallet_crypto::memo::Memo::MAX_BYTES_LENGTH {
+        return Err("funding memo exceeds the stealth encrypted-data limit".into());
+    }
+    Ok(memo)
+}
+
+async fn load_funding_session(
+    state: &AppState,
+    config: &RelayConfig,
+    funding_tx: TransactionId,
+    session_id: &str,
+) -> Result<(RelaySession, u64), String> {
+    let verified = verify_relay_funding(config, funding_tx, session_id).await?;
+    if let Some(session) = state.relay_registry.session(session_id).await {
+        if let Some(payer) = verified.binding.payer_public_key.as_deref()
+            && payer != session.payer_public_key.trim().to_ascii_lowercase()
+        {
+            return Err("funding memo payer does not match the relay session".into());
+        }
+        if let Some(refund) = verified.binding.refund_address.as_deref()
+            && refund != session.refund_address
+        {
+            return Err("funding memo refund address does not match the relay session".into());
+        }
+        return Ok((session, verified.amount));
+    }
+    let payer = verified
+        .binding
+        .payer_public_key
+        .ok_or_else(|| MISSING_SESSION_HINT.to_owned())?;
+    let refund = verified
+        .binding
+        .refund_address
+        .ok_or_else(|| MISSING_SESSION_HINT.to_owned())?;
+    let session = RelaySession {
+        payer_public_key: payer,
+        refund_address: refund,
+        created_at: unix_now(),
+    };
+    state
+        .relay_registry
+        .create_session(session_id.to_owned(), session.clone())
+        .await?;
+    Ok((session, verified.amount))
+}
+
 async fn verify_relay_funding(
     config: &RelayConfig,
     funding_tx: TransactionId,
     session_id: &str,
-) -> Result<u64, String> {
+) -> Result<VerifiedFunding, String> {
     // Sapient submits this transaction through the user's wallet provider, not relay walletd.
     // walletd's transactions.wait_result / transactions.get only know transactions it submitted
     // itself, so use the network indexer for finality and its stored body for output validation.
@@ -1168,6 +1260,7 @@ async fn verify_relay_funding(
     let outputs = ghostline_net::stealth_utxos_from_wallet_tx(tx);
     let mut relay_values = Vec::new();
     let mut candidate_count = 0usize;
+    let mut binding = None;
     for output in outputs.iter().filter(|output| output.auth != "Script") {
         if output
             .resource
@@ -1178,7 +1271,10 @@ async fn verify_relay_funding(
         }
         candidate_count += 1;
         if let Ok(recovered) = unblind_wallet_output(output, config, session_id) {
-            relay_values.push(recovered.value);
+            relay_values.push(recovered.recovered.value);
+            if binding.is_none() {
+                binding = Some(recovered.binding);
+            }
         }
     }
     let owned_total = relay_values
@@ -1206,7 +1302,13 @@ async fn verify_relay_funding(
             config.deposit
         ));
     }
-    Ok(owned_total)
+    Ok(VerifiedFunding {
+        amount: owned_total,
+        binding: binding.ok_or_else(|| {
+            "Sapient funding is finalized, but the relay could not decrypt a session-binding memo"
+                .to_owned()
+        })?,
+    })
 }
 
 fn funding_output_total(values: &[u64], expected: u64) -> Result<u64, &'static str> {
@@ -1220,16 +1322,13 @@ fn funding_output_total(values: &[u64], expected: u64) -> Result<u64, &'static s
     Ok(total)
 }
 
-fn funding_memo_for_session(session_id: &str) -> String {
-    format!("Ghostline:{session_id}")
-}
-
 fn funding_memo_matches_session(
     memo: Option<&tari_ootle_wallet_crypto::memo::Memo>,
     session_id: &str,
 ) -> bool {
     memo.and_then(|memo| memo.as_memo_message())
-        .is_some_and(|message| message == funding_memo_for_session(session_id))
+        .and_then(parse_funding_memo_message)
+        .is_some_and(|binding| binding.session_id.eq_ignore_ascii_case(session_id))
 }
 
 async fn refund_inner(
@@ -1335,7 +1434,7 @@ fn unblind_wallet_output(
     output: &ghostline_net::WalletStealthUtxo,
     config: &RelayConfig,
     session_id: &str,
-) -> Result<ghostline_sdk::MaskAndValue, String> {
+) -> Result<RecoveredFundingOutput, String> {
     use ghostline_sdk::{OutputScan, unblind_output};
     use tari_crypto::ristretto::RistrettoPublicKey;
 
@@ -1377,7 +1476,12 @@ fn unblind_wallet_output(
     if !funding_memo_matches_session(decrypted.memo(), session_id) {
         return Err("funding output is not bound to this relay session".into());
     }
-    Ok(recovered)
+    let binding = decrypted
+        .memo()
+        .and_then(|memo| memo.as_memo_message())
+        .and_then(parse_funding_memo_message)
+        .ok_or_else(|| "funding output is not bound to this relay session".to_owned())?;
+    Ok(RecoveredFundingOutput { recovered, binding })
 }
 
 async fn create_wallet_key(config: &RelayConfig, path: &Path) -> Result<WalletKeyOutput, String> {
@@ -2041,6 +2145,20 @@ mod tests {
         assert!(funding_memo_matches_session(Some(&memo), "session-a"));
         assert!(!funding_memo_matches_session(Some(&memo), "session-b"));
         assert!(!funding_memo_matches_session(None, "session-a"));
+        let session = "ab".repeat(32);
+        let payer = "cd".repeat(32);
+        let v2 = funding_memo_for_binding(&session, &payer, "otl_esm_1refundaddr").unwrap();
+        let parsed = parse_funding_memo_message(&v2).unwrap();
+        assert_eq!(parsed.session_id, session);
+        assert_eq!(parsed.payer_public_key.as_deref(), Some(payer.as_str()));
+        assert_eq!(
+            parsed.refund_address.as_deref(),
+            Some("otl_esm_1refundaddr")
+        );
+        let v2_memo = tari_ootle_wallet_crypto::memo::Memo::new_message(v2).unwrap();
+        assert!(funding_memo_matches_session(Some(&v2_memo), &session));
+        assert!(!funding_memo_matches_session(Some(&v2_memo), "session-a"));
+        assert!(parse_funding_memo_message("Ghostline:").is_none());
     }
 
     #[test]
@@ -2130,6 +2248,7 @@ mod tests {
         assert_eq!(
             unblind_wallet_output(&output, &config, "session-a")
                 .unwrap()
+                .recovered
                 .value,
             51
         );
@@ -2138,6 +2257,72 @@ mod tests {
                 .unwrap_err()
                 .contains("not bound to this relay session")
         );
+    }
+
+    #[test]
+    fn relay_recovers_payer_and_refund_from_a_v2_funding_memo() {
+        use ghostline_sdk::{MaskAndValue, OutputScan};
+        use ootle_byte_type::ToByteType;
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+        use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
+
+        let (view_secret, view_public) = create_key_pair_from_seed(41);
+        let (sender_secret, sender_public) = create_key_pair_from_seed(43);
+        let (mask, _) = create_key_pair_from_seed(47);
+        let scan = OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS);
+        let session = "ab".repeat(32);
+        let payer = "cd".repeat(32);
+        let memo_text = funding_memo_for_binding(&session, &payer, "otl_esm_1refundaddr").unwrap();
+        let crypto = StealthCryptoApi::new();
+        let memo = Memo::new_message(memo_text).unwrap();
+        let encrypted = crypto
+            .encrypt_value_and_mask(51, &mask, &view_public, &sender_secret, Some(&memo))
+            .unwrap();
+        let commitment: PedersenCommitmentBytes =
+            MaskAndValue::new(51, mask).to_commitment().to_byte_type();
+        let tag = crypto.derive_stealth_output_tag(
+            scan.network,
+            &view_secret,
+            &sender_public,
+            &scan.resource,
+        );
+        let output = ghostline_net::WalletStealthUtxo {
+            commitment: to_hex(commitment.as_bytes()),
+            nonce: to_hex(sender_public.as_bytes()),
+            encrypted_hex: to_hex(encrypted.as_bytes()),
+            tag: i64::from(tag.value()),
+            auth: "Key".into(),
+            resource: Some(scan.resource.to_string()),
+            from_fee_instruction: false,
+        };
+        let config = RelayConfig {
+            cli_path: PathBuf::new(),
+            wallet_url: String::new(),
+            indexer_url: String::new(),
+            state_dir: PathBuf::new(),
+            claim_secret: to_hex(view_secret.as_bytes()),
+            recovery_key: [0u8; 32],
+            template_hex: String::new(),
+            network_tag: 38,
+            deposit: DEFAULT_DEPOSIT,
+            expiry_epochs: 10,
+            open_max_fee: 0,
+            settle_max_fee: 0,
+            refund_max_fee: 0,
+            opener_account: String::new(),
+            fee_account_name: String::new(),
+        };
+        let recovered = unblind_wallet_output(&output, &config, &session).unwrap();
+        assert_eq!(recovered.recovered.value, 51);
+        assert_eq!(
+            recovered.binding.payer_public_key.as_deref(),
+            Some(payer.as_str())
+        );
+        assert_eq!(
+            recovered.binding.refund_address.as_deref(),
+            Some("otl_esm_1refundaddr")
+        );
+        assert!(unblind_wallet_output(&output, &config, "session-a").is_err());
     }
 
     #[tokio::test]
