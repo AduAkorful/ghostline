@@ -89,7 +89,7 @@
             <article class="judge-option judge-option-proof">
               <p class="judge-option-index">01 <span>NO SETUP</span></p>
               <h3>Inspect the chain proof</h3>
-              <p>Open the recorded channel and settlement transactions in Tari’s explorer. The accompanying service ledger shows the 20 paid calls; the chain confirms finality.</p>
+              <p>Try the recorded channel and settlement transaction IDs in Tari’s explorer. The accompanying service ledger records 20 paid calls. These historical records may no longer be indexed by the public explorer.</p>
               <a href="#evidence">Open the evidence <span aria-hidden="true">↓</span></a>
             </article>
             <article class="judge-option">
@@ -105,7 +105,7 @@
               <a href="docs/quickstart.html#guided-demo">Open the guided Esmeralda steps <span aria-hidden="true">↗</span></a>
             </article>
           </div>
-          <p class="judge-path-note">The motion graphics are illustrative. They are not a live transaction feed; use the linked explorer records for on-chain evidence.</p>
+          <p class="judge-path-note">The motion graphics are illustrative. They are not a live transaction feed; the linked transaction IDs are historical and may no longer resolve in the public explorer.</p>
         </div>
       </section>
 
@@ -234,11 +234,15 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
 
       <section class="evidence-section" id="evidence" aria-labelledby="evidence-title">
         <div class="shell">
-          <div class="evidence-heading"><div><p class="eyebrow">THE RECEIPT HAS TWO SIDES</p><h2 id="evidence-title">Service log.<br /><span>Chain finality.</span></h2></div><p>This Esmeralda record covers 20 paid HTTP calls and one settlement using the newly published fixed-output template. The service ledger records calls; the explorer confirms on-chain finality.</p></div>
+          <div class="evidence-heading"><div><p class="eyebrow">THE RECEIPT HAS TWO SIDES</p><h2 id="evidence-title">Service log.<br /><span>Chain finality.</span></h2></div><p>This historical Esmeralda record covers 20 paid HTTP calls and one settlement using the fixed-output template. The service ledger records calls; the original run record reports on-chain finality.</p></div>
+          <aside class="evidence-availability" role="note">
+            <strong>Historical explorer records may be unavailable.</strong>
+            <span>During QA on 2026-10-22, Tari’s public explorer did not recognize the transaction IDs from this 2026-10-19 run. The IDs and recorded transaction fields remain available below and in the <a href="evidence.json">evidence data file</a>; this archive is not a fresh indexer response. The cause has not been confirmed.</span>
+          </aside>
           <div class="evidence-grid" id="evidence-grid" aria-live="polite">
             <article class="evidence-panel service-panel">
               <div class="panel-top"><span class="source-tag"><span aria-hidden="true">01 /</span> Service-side call record</span><span class="source-kind">OFF-CHAIN</span></div>
-              <p class="panel-description">Accepted by the reference HTTP paywall during the recorded run.</p>
+              <p class="panel-description">Recorded by the reference HTTP paywall during the historical run.</p>
               <div class="call-count"><strong id="call-count">—</strong><span>successful<br /><code>/fortune</code> calls</span></div>
               <div class="metric-row"><div><span>Price per call</span><strong id="unit-price">—</strong></div><div><span>Accepted total</span><strong id="accepted-total">—</strong></div></div>
               <div class="mini-receipt"><p><strong>One cumulative voucher</strong><br /><span>Each accepted call updates the off-chain total.</span></p><span class="receipt-status">RECORDED</span></div>
@@ -246,12 +250,12 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
             <div class="evidence-bridge" aria-hidden="true"><span>same run</span><b>⇢</b></div>
             <article class="evidence-panel chain-panel">
               <div class="panel-top"><span class="source-tag"><span aria-hidden="true">02 /</span> Esmeralda chain record</span><span class="source-kind">INDEXER / CHAIN</span></div>
-              <p class="panel-description">The indexer confirmed the channel open and spend. The service amount is hidden from public transaction fields. Template: <a id="template-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">—</code></a></p>
+              <p class="panel-description">The original run record reports a finalized channel open and spend. The service amount was hidden from the inspected public transaction fields. Template: <a id="template-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">—</code></a></p>
               <div class="chain-events">
                 <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened</strong><span class="finality">FINALIZED</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">—</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
                 <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Voucher settled</strong><span class="finality">FINALIZED</span></div><div class="tx-line"><a class="tx-link" id="settle-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View settlement transaction in Tari explorer"><code id="settle-tx">—</code></a><button class="copy-button" type="button" data-copy="settle-tx" aria-label="Copy settlement transaction ID">Copy ID</button></div></div></div>
               </div>
-              <p class="refund-proof"><span>SEPARATE EXPIRY REFUND · FINALIZED</span><span class="refund-links"><a id="refund-open-tx-link" target="_blank" rel="noopener noreferrer">Open ↗</a><a id="refund-tx-link" target="_blank" rel="noopener noreferrer">Payer refund ↗</a></span></p>
+              <p class="refund-proof"><span>SEPARATE EXPIRY REFUND · FINALIZED</span><span class="refund-links"><a id="refund-open-tx-link" target="_blank" rel="noopener noreferrer" aria-label="Open the channel used in the separate expiry refund test in Tari explorer">Open refund channel ↗</a><a id="refund-tx-link" target="_blank" rel="noopener noreferrer" aria-label="Open the payer expiry refund transaction in Tari explorer">Payer refund ↗</a></span></p>
               <p class="chapter-aside">The latest-template refund finalized and spent the channel output. Its public output amount is hidden; the recipient output was not locally unblinded to verify the amount received.</p>
               <div class="metric-row chain-metrics"><div><span>Service amount</span><strong id="settled-total">—</strong></div><div><span>Channel deposit</span><strong id="deposit-total">—</strong></div><div><span>Settlement fee</span><strong id="settlement-fee">—</strong><small class="fee-payer">Paid by service-side fee account</small></div></div>
               <p class="output-state">OUTPUT AFTER SETTLEMENT <strong id="output-status">—</strong></p>
@@ -268,7 +272,7 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
               <p class="eyebrow">GHOSTLINE · ESMERALDA</p>
               <h3>Calls settle once</h3>
               <p>The recorded claim-free settlement has no plaintext deposit, service amount, or payer remainder in public transaction fields.</p>
-              <a id="comparison-settlement-link" href="https://explorer.tari.mw/tx/1a3823bdbbef3b2f997afcaaed46e64b7a960cebe07df138d006184eba32ba15" target="_blank" rel="noopener noreferrer">Inspect Ghostline settlement ↗</a>
+              <a id="comparison-settlement-link" target="_blank" rel="noopener noreferrer">Inspect Ghostline settlement ↗</a>
             </article>
           </div>
           <p class="comparison-note">These are examples of different transaction designs, not matched payments on the same network. Other chains can also support private payment designs.</p>
@@ -276,7 +280,7 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
             <div><p class="eyebrow">EXPERIMENTAL · TRUSTED-LOCAL PROTOTYPE</p><h3 id="batch-proof-title">Two channels.<br /><span>One pooled close.</span></h3></div>
             <div class="batch-proof-copy"><p>On Esmeralda, two channels each recorded 20 paid calls locally, then finalized one pooled settlement with two channel inputs and three stealth outputs. The service amount was opened locally with its one-time payout key; it was not readable in the public transaction fields.</p><p><strong>This is not coordinator-private.</strong> The local builder received both deposit values and masks, and observers can see the channels were grouped in one transaction. It is a research prototype, not a hosted or recommended production flow.</p><a id="batch-tx-link" href="https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f" target="_blank" rel="noopener noreferrer">Inspect pooled settlement ↗</a></div>
           </article>
-          <p class="evidence-caveat">The explorer links open finalized Esmeralda transactions. The 20-call count and accepted total come from the local service ledger. The standard settlement transfer statement had zero covenant claims, no revealed channel amounts, and exactly two stealth outputs; separate fee instructions and fee amounts remain public, along with timing, branch, channel id, authorization data, and output commitments.</p>
+          <p class="evidence-caveat">The transaction IDs link to Tari’s public explorer, which did not recognize these historical records during QA on 2026-10-22. The 20-call count and accepted total come from the local service ledger. The recorded standard settlement transfer statement had zero covenant claims, no revealed channel amounts, and exactly two stealth outputs; separate fee instructions and fee amounts remain public, along with timing, branch, channel id, authorization data, and output commitments.</p>
           <p class="evidence-footnote" id="evidence-date"></p>
         </div>
       </section>

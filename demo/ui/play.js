@@ -379,6 +379,7 @@ async function connectAndOpenLive() {
     if (liveSetupCancelled) return;
     if (liveSetupCancelled) return;
     const relay = await relayJson("/demo/config");
+    byId("funding-requirement").textContent = `switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the faucet transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. The site checks the available balance when the wallet allows it.`;
     let pending;
     try { pending = JSON.parse(sessionStorage.getItem(LIVE_PENDING_KEY) || "null"); } catch { pending = undefined; }
     if (!pending?.fundingTxId) {
@@ -393,15 +394,20 @@ async function connectAndOpenLive() {
       if (typeof refundAddress !== "string" || !refundAddress.startsWith("otl_esm_1")) {
         throw new Error("Could not read an Esmeralda Sapient wallet address for private refunds.");
       }
-      const balances = await tariRequest("tari_getBalances");
+      let balances;
+      try {
+        balances = await tariRequest("tari_getBalances");
+      } catch {
+        // Some wallet accounts do not grant balance inspection; the wallet still checks funds on approval.
+      }
       const xtr = Array.isArray(balances) ? balances.find((balance) => balance.resourceAddress === XTR_RESOURCE) : undefined;
       const shownBalance = xtr ? BigInt(xtr.amount || "0") + BigInt(xtr.confidentialAmount || "0") : 0n;
-      if (caps.privateViewGranted === true && xtr && shownBalance < BigInt(relay.deposit)) {
-        byId("live-note").textContent = "The wallet shows too little spendable Esmeralda XTR for this private transfer. Fund it with test XTR using the wallet's faucet, then retry. Network fees are additional.";
-        throw new Error("Low Esmeralda XTR balance. Use the Sapient faucet, wait for the funding transaction, then retry.");
+      if ((xtr && shownBalance < BigInt(relay.deposit)) || (caps.privateViewGranted === true && !xtr)) {
+        byId("live-note").textContent = `Sapient reports less than the ${relay.deposit} µT channel deposit in spendable Esmeralda XTR. Use Sapient's built-in Esmeralda faucet, wait for the funding transaction to finalize, then reconnect. Wallet fees are additional.`;
+        throw new Error(`Insufficient spendable Esmeralda XTR for the ${relay.deposit} µT channel deposit. Use Sapient's built-in Esmeralda faucet, wait for finality, and retry; wallet fees are additional.`);
       }
       if (caps.privateViewGranted !== true || !xtr) {
-        byId("live-note").textContent = "This page cannot inspect the wallet's private XTR balance. Sapient will check spendable funds when you approve; if it rejects for insufficient funds, use the faucet and retry. Network fees are additional.";
+        byId("live-note").textContent = `This wallet does not expose a spendable XTR balance to the page. It will check funds when you approve. You need at least ${relay.deposit} µT plus the wallet fee; if Sapient reports insufficient funds, use its built-in Esmeralda faucet, wait for finality, and retry.`;
       }
       const channelKeys = createEphemeralChannelKeys(randomBytes, scalarFromWide, publicKeyFromSecret);
       payerSecret = channelKeys.payerSecret;
@@ -609,6 +615,7 @@ async function requestLiveRefund() {
     const link = byId("explorer-link");
     link.href = result.explorerUrl;
     link.textContent = "Inspect the private refund transfer ↗";
+    byId("recorded-tx-id").textContent = result.refundTransactionId;
     byId("chain-empty").hidden = true;
     byId("chain-result").hidden = false;
     byId("record-summary").textContent = `The relay refunded the unspent ${liveChannel.deposit} µT channel privately to the connected Sapient wallet. Refund transaction ${result.refundTransactionId}.`;
@@ -635,6 +642,7 @@ function showLiveEvidence(url, transactionId) {
   byId("record-summary").textContent = `Live run: ${liveCalls} paid calls · ${liveAccepted} µT cumulative · channel ${liveChannel.channelId} · settlement ${transactionId}.`;
   const link = byId("explorer-link");
   link.href = url;
+  byId("recorded-tx-id").textContent = transactionId;
   link.textContent = "Inspect this live Esmeralda settlement ↗";
   byId("chain-result").querySelector(".result-label").textContent = "LIVE TESTNET SETTLEMENT · FINALIZED";
   byId("chain-result").querySelector(".fine-print").textContent = "This run created these calls and this settlement. The service knows the requests, prices, and vouchers; observers can still see transaction metadata and fees. The on-chain record does not publish the off-chain call count.";
@@ -710,14 +718,16 @@ function showRecordedEvidence() {
   byId("record-summary").textContent = "This is a separate recorded transaction from an earlier Esmeralda run. The browser clicks did not create or submit it.";
   const link = byId("explorer-link");
   link.href = chain.settlementTransactionUrl;
+  byId("recorded-tx-id").textContent = chain.settlementTransactionId;
+  link.setAttribute("aria-label", `Try historical Esmeralda transaction ${chain.settlementTransactionId} in Tari explorer`);
   byId("chain-panel").classList.add("is-settling");
-  status("The browser simulation is closing. It is not submitting a transaction.");
-  window.setTimeout(() => {
-    byId("chain-panel").classList.remove("is-settling");
-    byId("chain-empty").hidden = true;
-    byId("chain-result").hidden = false;
-    status(`Separate recorded evidence: ${chain.settlementFinality}. The simulated run did not submit it.`);
-  }, 420);
+  byId("chain-empty").hidden = true;
+  byId("chain-result").hidden = false;
+  status(`Separate recorded evidence: ${chain.settlementFinality}. The simulated run did not submit it.`);
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    byId("chain-panel").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  }
+  window.setTimeout(() => byId("chain-panel").classList.remove("is-settling"), 420);
   byId("settle").disabled = true;
   byId("settle").textContent = "Recorded evidence shown";
 }
