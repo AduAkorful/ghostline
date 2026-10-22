@@ -52,7 +52,7 @@
           <section id="local-demo" class="guide-section">
             <p class="guide-label">PATH 1 / LOCAL DEMO · NO WALLET</p>
             <h2>Try the flow without setup.</h2>
-            <p>Install Ghostline v0.4.0 after its release is published, then run one command. It exercises the local HTTP 402 quote, real voucher signing and verification, and the paid-call flow. It does not connect to a wallet, use test funds, or create a blockchain transaction. The explorer links it prints are from a separate recorded Esmeralda run.</p>
+            <p>Install the current Ghostline v0.4.0 release, then run one command. It exercises the local HTTP 402 quote, real voucher signing and verification, and the paid-call flow. It does not connect to a wallet, use test funds, or create a blockchain transaction. The explorer links it prints are from a separate recorded Esmeralda run.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>AFTER INSTALLING GHOSTLINE v0.4.0</span><button class="guide-copy" type="button" data-copy="local-demo-command">Copy command</button></div>
               <pre><code id="local-demo-command">ghostline demo --show-chain-evidence</code></pre>
@@ -63,7 +63,7 @@
             <p class="guide-label">PATH 2 / GUIDED LIVE ESMERALDA RUN</p>
             <h2>Let the runner guide you.</h2>
             <p>The script checks the documented deployment profile, creates fresh local keys, starts the sample API on loopback, makes paid calls, and offers separate confirmations before channel open and settlement. Review both fee dry-runs; the open cap may not be refunded in full.</p>
-            <div class="guide-callout warning"><strong>Before you run it:</strong> Install <a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0" target="_blank" rel="noopener noreferrer">Ghostline v0.4.0</a> after it is published, start a compatible local Esmeralda wallet daemon, and fund an account with test tTARI. The runner asks for your wallet view-only key through hidden terminal input. The simplest run uses the same account to pay open and settlement fees, so funding and fee activity are linkable. The runner never asks for a seed phrase or sends secrets to this site.</div>
+            <div class="guide-callout warning"><strong>Before you run it:</strong> Install the current <a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0" target="_blank" rel="noopener noreferrer">Ghostline v0.4.0 release</a>, start a compatible local Esmeralda wallet daemon, and fund an account with test tTARI. The runner asks for your wallet view-only key through hidden terminal input. The simplest run uses the same account to pay open and settlement fees, so funding and fee activity are linkable. The runner never asks for a seed phrase or sends secrets to this site.</div>
             <div class="guide-command">
               <div class="guide-command-head"><span>DOWNLOAD · REVIEW · RUN LOCALLY</span><button class="guide-copy" type="button" data-copy="guided-demo-commands">Copy commands</button></div>
               <pre><code id="guided-demo-commands">curl -fsSLo ghostline-esmeralda-demo.sh https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/ghostline-esmeralda-demo.sh&#10;less ghostline-esmeralda-demo.sh&#10;bash ghostline-esmeralda-demo.sh</code></pre>

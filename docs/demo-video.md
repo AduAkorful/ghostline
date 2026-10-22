@@ -1,6 +1,6 @@
 # Ghostline contest video capture plan
 
-This is a recording script, not a video asset. Target length: 90–120 seconds, 1080p, captions or a short voiceover. Record after the v0.4.0 release is published and use one newly verified Esmeralda run. Keep the terminal and explorer visible together; never show seed words, wallet credentials, secret key files, deposit masks, or voucher bodies.
+This is a recording script, not a video asset. Target length: 90–120 seconds, 1080p, captions or a short voiceover. Use the current v0.4.0 release and one newly verified Esmeralda run. Keep the terminal and explorer visible together; never show seed words, wallet credentials, secret key files, deposit masks, or voucher bodies.
 
 ## Capture sequence
 

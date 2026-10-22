@@ -1,6 +1,6 @@
 # Install Ghostline
 
-The upcoming Ghostline `v0.4.0` release will be available from [GitHub Releases](https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0) after its tag is pushed. The Linux x86-64 download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
+The current Ghostline release is [`v0.4.0`](https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0). Its Linux x86-64 download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
 
 ## Download the executables
 
