@@ -1674,7 +1674,7 @@ impl RelayConfig {
             claim_secret: required("GHOSTLINE_CLAIM_SECRET")?,
             recovery_key: crate::recovery_key_from_hex(&required("GHOSTLINE_DEMO_STATE_KEY")?)
                 .map_err(|error| format!("invalid GHOSTLINE_DEMO_STATE_KEY: {error}"))?,
-            template_hex: required("GHOSTLINE_TEMPLATE")?,
+            template_hex: template_hex_from_env(&required("GHOSTLINE_TEMPLATE")?)?,
             network_tag: std::env::var("GHOSTLINE_NETWORK_TAG")
                 .unwrap_or_else(|_| "38".into())
                 .parse()
@@ -2004,6 +2004,23 @@ fn demo_mode() -> bool {
     std::env::var("GHOSTLINE_DEMO_MODE").is_ok_and(|value| value == "1")
 }
 
+fn template_hex_from_env(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    let hex = trimmed
+        .strip_prefix("template_")
+        .or_else(|| trimmed.strip_prefix("Template_"))
+        .unwrap_or(trimmed);
+    let bytes = from_hex(hex).map_err(|_| {
+        "GHOSTLINE_TEMPLATE must be 32-byte hex, optionally prefixed with template_".to_owned()
+    })?;
+    if bytes.len() != 32 {
+        return Err(
+            "GHOSTLINE_TEMPLATE must be 32-byte hex, optionally prefixed with template_".into(),
+        );
+    }
+    Ok(to_hex(&bytes))
+}
+
 fn validate_demo_deposit(deposit: u64) -> Result<(), &'static str> {
     if deposit == DEFAULT_DEPOSIT {
         Ok(())
@@ -2127,6 +2144,18 @@ mod tests {
             response.channel_id
         );
         assert!(registry.has_funding("funding").await);
+    }
+
+    #[test]
+    fn relay_normalizes_template_addresses_from_env() {
+        let hex = "61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1";
+        assert_eq!(template_hex_from_env(hex).unwrap(), hex);
+        assert_eq!(
+            template_hex_from_env(&format!("template_{hex}")).unwrap(),
+            hex
+        );
+        assert!(template_hex_from_env("template_test").is_err());
+        assert!(template_hex_from_env("").is_err());
     }
 
     #[test]

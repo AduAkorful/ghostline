@@ -365,6 +365,7 @@ test("a pending funding record from another tab is offered for recovery without 
   await h.load();
   assert.equal(h.elements.get("refund-pending-funding").hidden, false);
   assert.equal(h.elements.get("abandon-pending-funding").hidden, false);
+  assert.equal(h.elements.get("live-open").textContent, "Retry opening channel (no new charge)");
   assert.equal(h.walletCalls.length, 0);
   await h.elements.get("refund-pending-funding").click();
   await h.waitFor(() => h.elements.get("refund-pending-funding").hidden);

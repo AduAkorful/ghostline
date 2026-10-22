@@ -82,6 +82,9 @@ function showPendingFundingControls(pending) {
   showPendingFunding(pending.fundingTxId);
   byId("refund-pending-funding").hidden = false;
   byId("abandon-pending-funding").hidden = false;
+  if (!byId("live-open").disabled) {
+    byId("live-open").textContent = "Retry opening channel (no new charge)";
+  }
 }
 
 function clearPendingFunding() {
@@ -347,18 +350,28 @@ function configureLiveRelay() {
 }
 
 async function relayJson(path, options = {}) {
-  const method = (options.method || "GET").toUpperCase();
+  const { timeoutMs: timeoutOption, ...fetchOptions } = options;
+  const method = (fetchOptions.method || "GET").toUpperCase();
   const retryable = method === "GET" || ["/demo/open", "/demo/settle", "/demo/refund", "/demo/recover", "/demo/refund-funding"].some((prefix) => path.startsWith(prefix));
+  const timeoutMs = Number(timeoutOption) > 0 ? Number(timeoutOption) : 100_000;
   let response;
   for (let attempt = 0; ; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       response = await fetch(`${apiBase()}${path}`, {
-        ...options,
-        headers: { "content-type": "application/json", ...(options.headers || {}) },
+        ...fetchOptions,
+        signal: controller.signal,
+        headers: { "content-type": "application/json", ...(fetchOptions.headers || {}) },
       });
       if (response.status < 500 || !retryable || attempt > 0) break;
     } catch (error) {
+      if (error?.name === "AbortError") {
+        throw new Error(`The relay did not finish ${path} within ${Math.round(timeoutMs / 1000)} seconds. Retry; no extra wallet transfer was sent.`);
+      }
       if (!retryable || attempt > 0) throw error;
+    } finally {
+      window.clearTimeout(timeout);
     }
     status("The relay did not answer. Retrying this safe request once in 3 seconds; your wallet transfer will not be repeated.");
     await new Promise((resolve) => window.setTimeout(resolve, 3000));
@@ -802,9 +815,13 @@ async function refundPendingFunding() {
   const button = byId("refund-pending-funding");
   button.disabled = true;
   button.textContent = "Checking pending deposit…";
+  const progress = window.setTimeout(() => {
+    status("Still checking the pending deposit with the relay. This can take up to about 90 seconds; the page will report an error if it stalls.");
+  }, 8000);
   try {
     const result = await relayJson("/demo/refund-funding", {
       method: "POST",
+      timeoutMs: 100_000,
       body: JSON.stringify({ fundingTxId: pending.fundingTxId, sessionId: pending.sessionId }),
     });
     if (result.state === "pending") {
@@ -831,6 +848,7 @@ async function refundPendingFunding() {
     button.textContent = "Retry pending deposit refund";
     status(`Could not return the pending deposit: ${error instanceof Error ? error.message : String(error)}. The saved transaction remains available to retry.`);
   } finally {
+    window.clearTimeout(progress);
     button.disabled = false;
   }
 }

@@ -785,7 +785,7 @@ fn open_spec(args: &OpenArgs) -> Result<seal::OpenSpec, String> {
             .transpose()?,
         expiry_epoch: args.expiry_epoch,
         nonce: seal::parse_nonce(&args.nonce_hex)?,
-        channel_template: seal::parse_hash("template", &args.template_hex)?,
+        channel_template: seal::parse_template(&args.template_hex)?,
     })
 }
 

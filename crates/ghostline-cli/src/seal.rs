@@ -76,7 +76,17 @@ pub fn parse_pk(label: &str, hex: &str) -> Result<RistrettoPublicKeyBytes, Strin
 }
 
 pub fn parse_hash(label: &str, hex: &str) -> Result<Hash32, String> {
-    Hash32::from_hex(hex).map_err(|e| format!("{label}: {e}"))
+    Hash32::from_hex(hex.trim()).map_err(|e| format!("{label}: {e}"))
+}
+
+/// Accept raw 32-byte hex or an Ootle `template_<hex>` address.
+pub fn parse_template(value: &str) -> Result<Hash32, String> {
+    let trimmed = value.trim();
+    let hex = trimmed
+        .strip_prefix("template_")
+        .or_else(|| trimmed.strip_prefix("Template_"))
+        .unwrap_or(trimmed);
+    Hash32::from_hex(hex).map_err(|e| format!("template: {e}"))
 }
 
 pub fn parse_nonce(hex: &str) -> Result<[u8; NONCE_LEN], String> {
@@ -226,5 +236,19 @@ mod tests {
         let id = utxo_substate_id(STEALTH_TARI_RESOURCE_ADDRESS, &commitment).unwrap();
         let resource_key = STEALTH_TARI_RESOURCE_ADDRESS.as_object_key().to_string();
         assert_eq!(id, format!("utxo_{resource_key}_{commitment}"));
+    }
+
+    #[test]
+    fn template_address_accepts_raw_hex_and_template_prefix() {
+        let hex = "61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1";
+        let from_hex = parse_template(hex).unwrap();
+        let from_addr = parse_template(&format!("template_{hex}")).unwrap();
+        assert_eq!(from_hex, from_addr);
+        assert!(
+            parse_template("template_test")
+                .unwrap_err()
+                .starts_with("template:")
+        );
+        assert!(parse_hash("template", &format!("template_{hex}")).is_err());
     }
 }

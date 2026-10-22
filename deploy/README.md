@@ -68,7 +68,8 @@ wallet that holds valuable assets.
    Sapient wallet on Esmeralda and approve the clearly labelled 51 µT test
    transfer and wallet fee. The first live run is not available until the
    deployed contract/template address and indexer match the selected Esmeralda
-   deployment.
+   deployment. `GHOSTLINE_TEMPLATE` may be either raw 32-byte hex or an Ootle
+   `template_<hex>` address; the relay stores the hex form for `ghostline spec`.
 6. Add the Render `/healthz` URL to an uptime monitor at five-minute intervals
    to reduce idle spin-down, then verify the service remains healthy.
 
