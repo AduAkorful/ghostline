@@ -93,6 +93,14 @@ FAKE
 write_fake_api() {
     cat > "$tmp_root/paid-api" <<'FAKE'
 #!/bin/sh
+if [ -f "$GHOSTLINE_DEMO_READY_FILE" ]; then
+    printf 'ready-at-start\n' > "$FAKE_API_START_STATE"
+else
+    printf 'not-ready-at-start\n' > "$FAKE_API_START_STATE"
+fi
+while [ ! -f "$GHOSTLINE_DEMO_READY_FILE" ]; do
+    sleep 0.05
+done
 exit 0
 FAKE
     chmod +x "$tmp_root/paid-api"
@@ -117,11 +125,13 @@ export TARI_BASE_DIR="$tmp_root/wallet"
 export TARI_WALLETD_BIN="$tmp_root/walletd"
 export GHOSTLINE_CLI_BIN="$tmp_root/ghostline"
 export GHOSTLINE_PAID_API_BIN="$tmp_root/paid-api"
+export GHOSTLINE_DEMO_READY_FILE="$tmp_root/demo-ready"
 export GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS=0
 export FAKE_WALLETD_ARGS="$tmp_root/walletd-args"
 export FAKE_ACCOUNT_DIR="$tmp_root/accounts"
 export FAKE_ACCOUNT_CREATES="$tmp_root/account-creates"
 export FAKE_RECOVERY_ATTEMPTS="$tmp_root/recovery-attempts"
+export FAKE_API_START_STATE="$tmp_root/api-start-state"
 mkdir -p "$FAKE_ACCOUNT_DIR"
 export FAKE_WALLETD_MODE=running
 export FAKE_CREATE_MODE=recovering-once
@@ -144,8 +154,16 @@ if ! grep -Fq -- "--indexer-api-url $GHOSTLINE_WALLET_INDEXER_URLS" "$FAKE_WALLE
     echo "walletd did not receive the optional indexer URL list" >&2
     exit 1
 fi
-if ! grep -Fq 'waiting for account recovery to finish' "$tmp_root/recovery.stderr"; then
+if ! grep -Fq 'waiting for wallet seed recovery/RPC readiness' "$tmp_root/recovery.stderr"; then
     echo "expected a concise recovery-pending diagnostic" >&2
+    exit 1
+fi
+if ! grep -Fxq 'not-ready-at-start' "$FAKE_API_START_STATE"; then
+    echo "expected the HTTP server to start before wallet recovery completes" >&2
+    exit 1
+fi
+if [ ! -f "$GHOSTLINE_DEMO_READY_FILE" ]; then
+    echo "expected startup to mark the service ready after both accounts exist" >&2
     exit 1
 fi
 if [ "$(cat "$FAKE_RECOVERY_ATTEMPTS")" -lt 2 ]; then

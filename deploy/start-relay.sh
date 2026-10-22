@@ -51,8 +51,12 @@ api_bin="${GHOSTLINE_PAID_API_BIN:-/usr/local/bin/ghostline-paid-api}"
 wallet_base="${TARI_BASE_DIR:-/tmp/tari-wallet}"
 wallet_db="$wallet_base/esmeralda"
 wallet_seed_marker="$wallet_base/.ghostline-seed-initialized"
+ready_file="${GHOSTLINE_DEMO_READY_FILE:-$wallet_base/.ghostline-demo-ready}"
+export GHOSTLINE_DEMO_READY_FILE="$ready_file"
 wallet_indexers="${GHOSTLINE_WALLET_INDEXER_URLS:-}"
 mkdir -p "$wallet_base" "$GHOSTLINE_LEDGER_PATH"
+mkdir -p "$(dirname "$ready_file")"
+rm -f "$ready_file"
 
 # `None` auth is limited to loopback inside this single container. Never expose this port.
 # The wallet password protects its local database; the relay connects only over loopback.
@@ -86,11 +90,22 @@ else
     --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
 fi
 wallet_pid=$!
+api_pid=
 cleanup() {
+    if [ -n "$api_pid" ]; then
+        kill -TERM "$api_pid" 2>/dev/null || true
+        wait "$api_pid" 2>/dev/null || true
+    fi
     kill -TERM "$wallet_pid" 2>/dev/null || true
     wait "$wallet_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+# Bind the web port immediately so Render can detect the service while walletd
+# performs its seed recovery. /healthz remains 503 until setup writes ready_file.
+"$api_bin" relay --bind "0.0.0.0:$PORT" \
+    --channel-dir "$GHOSTLINE_LEDGER_PATH/channels" &
+api_pid=$!
 
 mark_seed_initialized() {
     [ -f "$wallet_seed_marker" ] && return 0
@@ -126,63 +141,54 @@ account_create_or_retry() {
     fi
     if grep -Fq 'the wallet is still recovering accounts from its seed' "$account_error_file"; then
         # This response proves walletd accepted the seed and opened this database.
-        # Preserve that fact, then keep this process alive while the seed scan finishes.
-        # Exiting here makes Render mark the deployment failed even though recovery is
-        # transient and the account can be created as soon as walletd finishes scanning.
         mark_seed_initialized
+    elif grep -Eiq 'could not connect|connection refused|timed out' "$account_error_file"; then
+        # walletd may still be bringing up its loopback RPC; do not mark the seed as
+        # initialized until walletd confirms that it accepted the seed.
+        :
+    else
+        echo 'wallet account creation failed for a non-retryable reason:' >&2
+        cat "$account_error_file" >&2
         rm -f "$account_error_file"
-        if [ "$recovery_pending_logged" != yes ]; then
-            echo 'wallet seed is initialized; waiting for account recovery to finish' >&2
-            recovery_pending_logged=yes
-        fi
-        sleep "$recovery_retry_delay"
-        return 1
+        return 2
     fi
     rm -f "$account_error_file"
+    if [ "$recovery_pending_logged" != yes ]; then
+        echo 'waiting for wallet seed recovery/RPC readiness' >&2
+        recovery_pending_logged=yes
+    fi
     return 1
 }
 
-attempt=0
-while [ "$attempt" -lt 90 ]; do
-    if account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT"; then
-        break
-    fi
-    if account_create_or_retry "$GHOSTLINE_DEMO_OPENER_ACCOUNT" "$GHOSTLINE_DEMO_OPENER_KEY_INDEX" yes; then
-        break
-    fi
-    if ! kill -0 "$wallet_pid" 2>/dev/null; then
-        echo 'wallet daemon exited before the opener account became available' >&2
-        exit 1
-    fi
-    attempt=$((attempt + 1))
-    sleep 2
-done
-account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT" || {
-    echo 'wallet daemon did not prepare the opener account' >&2
-    exit 1
+ensure_account() {
+    while :; do
+        if account_ready "$1"; then
+            return 0
+        fi
+        if account_create_or_retry "$1" "$2" "${3:-}"; then
+            return 0
+        else
+            create_status=$?
+        fi
+        if [ "$create_status" -ne 1 ]; then
+            return "$create_status"
+        fi
+        if ! kill -0 "$wallet_pid" 2>/dev/null; then
+            echo 'wallet daemon exited before a demo account became available' >&2
+            return 1
+        fi
+        if ! kill -0 "$api_pid" 2>/dev/null; then
+            echo 'paid API exited before wallet setup completed' >&2
+            return 1
+        fi
+        sleep "$recovery_retry_delay"
+    done
 }
 
+ensure_account "$GHOSTLINE_DEMO_OPENER_ACCOUNT" "$GHOSTLINE_DEMO_OPENER_KEY_INDEX" yes
 mark_seed_initialized
 
-attempt=0
-while [ "$attempt" -lt 90 ]; do
-    if account_ready "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME"; then
-        break
-    fi
-    if account_create_or_retry "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" "$GHOSTLINE_DEMO_FEE_KEY_INDEX"; then
-        break
-    fi
-    if ! kill -0 "$wallet_pid" 2>/dev/null; then
-        echo 'wallet daemon exited before the fee account became available' >&2
-        exit 1
-    fi
-    attempt=$((attempt + 1))
-    sleep 2
-done
-account_ready "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" || {
-    echo 'wallet daemon did not prepare the fee account' >&2
-    exit 1
-}
+ensure_account "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" "$GHOSTLINE_DEMO_FEE_KEY_INDEX"
 
 # Public receive address only; key IDs and private key material stay hidden.
 fee_address="$(account_address "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME")"
@@ -190,14 +196,12 @@ if [ -z "$fee_address" ]; then
     echo 'wallet account-get did not return a public fee-account address' >&2
     exit 1
 fi
-printf '%s\n' "$fee_address"
 
-"$api_bin" relay --bind "0.0.0.0:$PORT" \
-    --channel-dir "$GHOSTLINE_LEDGER_PATH/channels" &
-api_pid=$!
-stop_children() {
-    kill -TERM "$api_pid" 2>/dev/null || true
-    kill -TERM "$wallet_pid" 2>/dev/null || true
-}
-trap stop_children INT TERM
+# Atomically tell the HTTP health route that both named wallet accounts are ready.
+ready_file_tmp="$ready_file.tmp.$$"
+(umask 077 && : > "$ready_file_tmp")
+mv -f "$ready_file_tmp" "$ready_file"
+printf '%s\n' "$fee_address"
+echo 'wallet recovery and demo account setup complete'
+
 wait "$api_pid"

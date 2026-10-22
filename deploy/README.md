@@ -49,8 +49,11 @@ wallet that holds valuable assets.
    relay wallet. Each 51 µT user deposit covers five 10 µT calls and the
    required 1 µT change output; transaction fees are additional.
 4. Deploy and wait for `GET /healthz` to return `ok: true` and `walletReady:
-   true`. Copy the service's HTTPS URL. The Render wallet daemon listens only
-   on loopback inside this container; do not add a public port for it.
+   true`. The public API binds immediately while walletd recovers; `/healthz`
+   stays unready until both demo accounts exist and the wallet RPC responds.
+   Render allows up to 15 minutes for a new instance to pass health checks.
+   Copy the service's HTTPS URL. The Render wallet daemon listens only on
+   loopback inside this container; do not add a public port for it.
 5. In the Ghostline site's **Play** page, enter that HTTPS relay URL. Use a
    Sapient wallet on Esmeralda and approve the clearly labelled 51 µT test
    transfer and wallet fee. The first live run is not available until the

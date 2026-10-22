@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, OnceLock,
         atomic::{AtomicUsize, Ordering},
@@ -367,7 +367,7 @@ struct HealthResponse {
 async fn healthz() -> impl IntoResponse {
     static STARTED: OnceLock<Instant> = OnceLock::new();
     let started = STARTED.get_or_init(Instant::now);
-    let wallet_ready = wallet_daemon_reachable().await;
+    let wallet_ready = demo_setup_ready() && wallet_daemon_reachable().await;
     let status = if wallet_ready {
         StatusCode::OK
     } else {
@@ -385,6 +385,20 @@ async fn healthz() -> impl IntoResponse {
             uptime_secs: started.elapsed().as_secs(),
         }),
     )
+}
+
+fn demo_setup_ready() -> bool {
+    match std::env::var_os("GHOSTLINE_DEMO_READY_FILE") {
+        Some(marker) => setup_marker_exists(Some(Path::new(&marker))),
+        None => setup_marker_exists(None),
+    }
+}
+
+fn setup_marker_exists(marker: Option<&Path>) -> bool {
+    match marker {
+        Some(path) => path.is_file(),
+        None => true,
+    }
 }
 
 async fn wallet_daemon_reachable() -> bool {
@@ -839,6 +853,23 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+
+    #[test]
+    fn demo_health_waits_for_the_startup_ready_marker_when_configured() {
+        let marker = std::env::temp_dir().join(format!(
+            "ghostline-demo-ready-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert!(!setup_marker_exists(Some(&marker)));
+        std::fs::write(&marker, b"").unwrap();
+        assert!(setup_marker_exists(Some(&marker)));
+        std::fs::remove_file(marker).unwrap();
+        assert!(setup_marker_exists(None));
+    }
 
     #[tokio::test]
     async fn running_api_accepts_a_new_relay_channel() {
