@@ -367,6 +367,7 @@ async function waitFinalized(transactionId) {
 }
 
 async function connectAndOpenLive() {
+  let setupStage = "checking relay configuration";
   liveSetupCancelled = false;
   byId("live-open").disabled = true;
   byId("live-open").textContent = "Checking Sapient…";
@@ -374,27 +375,33 @@ async function connectAndOpenLive() {
   byId("live-stop").textContent = "Use simulated mode instead";
   try {
     const url = apiBase();
+    setupStage = "checking relay readiness";
     status("Checking that the Esmeralda relay and wallet are ready before opening Sapient.");
     await relayHealth(url);
     if (liveSetupCancelled) return;
-    if (liveSetupCancelled) return;
+    setupStage = "loading live demo settings";
     const relay = await relayJson("/demo/config");
-    byId("funding-requirement").textContent = `switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the faucet transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. The site checks the available balance when the wallet allows it.`;
+    byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
     let pending;
     try { pending = JSON.parse(sessionStorage.getItem(LIVE_PENDING_KEY) || "null"); } catch { pending = undefined; }
     if (!pending?.fundingTxId) {
+      setupStage = "checking the wallet network";
       const network = await tariRequest("tari_getNetwork");
       if (String(network).toLowerCase() !== "esmeralda") throw new Error(`Switch your Tari wallet to Esmeralda. Current network: ${network}`);
+      setupStage = "connecting Sapient account";
       await tariRequest("tari_requestAccounts");
+      setupStage = "checking Sapient capabilities";
       const caps = await tariRequest("tari_getCapabilities");
       if (!caps.privateSpend || !caps.transactionRequests || !caps.walletAddress) {
         throw new Error("This wallet account needs private send, transaction requests, and wallet-address support.");
       }
+      setupStage = "reading the refund address";
       const refundAddress = await tariRequest("tari_getWalletAddress");
       if (typeof refundAddress !== "string" || !refundAddress.startsWith("otl_esm_1")) {
         throw new Error("Could not read an Esmeralda Sapient wallet address for private refunds.");
       }
       let balances;
+      setupStage = "checking the testnet balance";
       try {
         balances = await tariRequest("tari_getBalances");
       } catch {
@@ -403,20 +410,23 @@ async function connectAndOpenLive() {
       const xtr = Array.isArray(balances) ? balances.find((balance) => balance.resourceAddress === XTR_RESOURCE) : undefined;
       const shownBalance = xtr ? BigInt(xtr.amount || "0") + BigInt(xtr.confidentialAmount || "0") : 0n;
       if ((xtr && shownBalance < BigInt(relay.deposit)) || (caps.privateViewGranted === true && !xtr)) {
-        byId("live-note").textContent = `Sapient reports less than the ${relay.deposit} µT channel deposit in spendable Esmeralda XTR. Use Sapient's built-in Esmeralda faucet, wait for the funding transaction to finalize, then reconnect. Wallet fees are additional.`;
-        throw new Error(`Insufficient spendable Esmeralda XTR for the ${relay.deposit} µT channel deposit. Use Sapient's built-in Esmeralda faucet, wait for finality, and retry; wallet fees are additional.`);
+        const reported = xtr ? `Sapient currently reports ${shownBalance} µT` : "Sapient did not return a spendable XTR balance";
+        byId("live-note").textContent = `${reported}; the live channel needs ${relay.deposit} µT plus a wallet fee. If you just funded this wallet, refresh Sapient's wallet view, wait for finality, then reload this page and retry.`;
+        throw new Error(`${reported}; ${relay.deposit} µT plus a wallet fee is required. Refresh Sapient after funding and retry.`);
       }
       if (caps.privateViewGranted !== true || !xtr) {
-        byId("live-note").textContent = `This wallet does not expose a spendable XTR balance to the page. It will check funds when you approve. You need at least ${relay.deposit} µT plus the wallet fee; if Sapient reports insufficient funds, use its built-in Esmeralda faucet, wait for finality, and retry.`;
+        byId("live-note").textContent = `This wallet does not expose a spendable XTR balance to the page. It will check funds when you approve. You need at least ${relay.deposit} µT plus the wallet fee; if Sapient reports insufficient funds, use its Esmeralda faucet, wait for finality, refresh Sapient, and retry.`;
       }
       const channelKeys = createEphemeralChannelKeys(randomBytes, scalarFromWide, publicKeyFromSecret);
       payerSecret = channelKeys.payerSecret;
       sessionStorage.setItem("ghostline-live-payer-secret", bytesToHex(payerSecret));
+      setupStage = "creating a relay session";
       const relaySession = await relayJson("/demo/session", {
         method: "POST",
         body: JSON.stringify({ payerPublicKey: bytesToHex(channelKeys.payerPublic), refundAddress }),
       });
       byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay and pay your wallet’s transaction fee. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled. This session expires in 10 minutes.`;
+      setupStage = "waiting for Sapient approval";
       const operation = await tariRequest("tari_createTransactionRequest", {
         kind: "sendPrivately",
         resourceAddress: XTR_RESOURCE,
@@ -445,11 +455,13 @@ async function connectAndOpenLive() {
       status("Retrying the relay open for your existing finalized funding transaction; no second wallet transfer will be requested.");
       showPendingFunding(pending.fundingTxId);
     }
+    setupStage = "waiting for funding finality";
     await waitFinalized(pending.fundingTxId);
     if (liveSetupCancelled) {
       status(`Funding transaction ${pending.fundingTxId} is finalized and saved in this tab. Continue live setup later to open its channel without paying again.`);
       return;
     }
+    setupStage = "opening the funded channel through the relay";
     const opened = await relayJson("/demo/open", {
       method: "POST",
       body: JSON.stringify({
@@ -465,6 +477,7 @@ async function connectAndOpenLive() {
       payerRoot: hexToBytes(opened.payerRoot),
       nonce: hexToBytes(opened.nonce),
     };
+    setupStage = "checking channel parameters in this browser";
     const computedId = bytesToHex(channelId(params));
     if (computedId.toLowerCase() !== opened.channelId.toLowerCase()) throw new Error("Relay channel parameters failed the browser-side channel-id check.");
     liveChannel = opened;
@@ -501,10 +514,11 @@ async function connectAndOpenLive() {
       status("No Tari wallet became available. Reload this page in the Chrome profile where Sapient is enabled, then retry.");
     } else {
       byId("live-open").textContent = "Retry live setup";
+      const detail = walletError(error);
       byId("live-note").textContent = pending
-        ? "The pending funding transaction stays saved in this tab. Retry live setup to continue without sending again."
-        : "Live setup could not start. The instant simulation is active; its separate recorded Esmeralda proof is real.";
-      status(`Live setup stopped: ${walletError(error)}.${pending ? " Your funding transaction is saved in this tab; retry the relay open without sending again." : " Showing the instant simulation; no channel was opened."}`);
+        ? `Live setup stopped while ${setupStage}: ${detail}. Your approved funding transaction remains saved in this tab; retrying will not request another transfer.`
+        : `Live setup stopped while ${setupStage}: ${detail}. No channel was opened; the instant simulation remains available.`;
+      status(`Live setup stopped while ${setupStage}: ${detail}.${pending ? " Your funding transaction is saved in this tab; retry without sending again." : " No channel was opened."}`);
     }
   } finally {
     byId("live-open").disabled = false;

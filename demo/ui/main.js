@@ -261,7 +261,8 @@ async function loadEvidence() {
   document.querySelector("#output-status").textContent = chain.channelOutputAfterSettlement;
   document.querySelector("#evidence-date").textContent = evidence.runDate ? `Run date: ${evidence.runDate}. Static evidence; not a live network read.` : "Run date not recorded in the published evidence.";
   document.querySelectorAll(".finality").forEach((element, index) => {
-    element.textContent = index === 0 ? chain.openFinality.toUpperCase() : chain.settlementFinality.toUpperCase();
+    const reportedFinality = index === 0 ? chain.openFinality : chain.settlementFinality;
+    element.textContent = `RUN LOG · ${reportedFinality.toUpperCase()}`;
   });
 }
 
