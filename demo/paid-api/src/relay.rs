@@ -48,7 +48,13 @@ pub struct RelayRegistry(
 struct RelayRegistryState {
     channels: HashMap<String, RelayRecord>,
     funding_ids: HashSet<String>,
+    #[serde(default)]
+    opening_funding: HashSet<String>,
     completed_funding: HashMap<String, OpenResponse>,
+    #[serde(default)]
+    funding_refunds: HashMap<String, String>,
+    #[serde(default)]
+    refunding_funding: HashSet<String>,
     sessions: HashMap<String, RelaySession>,
 }
 
@@ -153,6 +159,13 @@ pub struct RecoveryRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundingRefundRequest {
+    funding_tx_id: String,
+    session_id: String,
+}
+
+#[derive(Deserialize)]
 struct ChannelCliFile {
     service_hex: String,
     refund_hex: Option<String>,
@@ -222,6 +235,128 @@ pub async fn recover(
         })),
     )
         .into_response()
+}
+
+/// Return a finalized Sapient deposit when channel creation failed.
+/// The session id is a bearer capability; the destination remains the address bound at session creation.
+pub async fn refund_funding(
+    State(state): State<AppState>,
+    Json(request): Json<FundingRefundRequest>,
+) -> impl IntoResponse {
+    if !demo_mode() {
+        return (StatusCode::NOT_FOUND, "demo relay is disabled").into_response();
+    }
+    match refund_funding_inner(&state, request).await {
+        Ok((transaction_id, status)) => {
+            let body = serde_json::json!({
+                "state": if status == "Finalized" { "refunded" } else { "pending" },
+                "deposit": RelayConfig::load().map(|config| config.deposit).unwrap_or(DEFAULT_DEPOSIT),
+                "refundTransactionId": transaction_id,
+                "explorerUrl": format!("https://explorer.tari.mw/tx/{transaction_id}"),
+            });
+            let code = if status == "Finalized" {
+                StatusCode::OK
+            } else {
+                StatusCode::ACCEPTED
+            };
+            (code, Json(body)).into_response()
+        }
+        Err(error) => (StatusCode::UNPROCESSABLE_ENTITY, error).into_response(),
+    }
+}
+
+async fn refund_funding_inner(
+    state: &AppState,
+    request: FundingRefundRequest,
+) -> Result<(String, &'static str), String> {
+    // Serialize with channel opens so one funding transaction cannot be both opened and refunded.
+    let _guard = state.relay_registry.1.clone().lock_owned().await;
+    let funding_tx = TransactionId::from_hex(request.funding_tx_id.trim())
+        .map_err(|error| format!("invalid funding transaction id: {error}"))?;
+    let funding_id = funding_tx.to_string();
+    if state
+        .relay_registry
+        .completed_open(&funding_id)
+        .await
+        .is_some()
+    {
+        return Err("this funding transaction already opened a channel".into());
+    }
+    if state.relay_registry.is_opening(&funding_id).await {
+        return Err("this funding transaction is already being used to open a channel; do not request a refund".into());
+    }
+    if let Some(refund_tx) = state.relay_registry.funding_refund(&funding_id).await {
+        let id = TransactionId::from_hex(&refund_tx).map_err(|error| error.to_string())?;
+        let status = transaction_status(&RelayConfig::load()?, id).await?;
+        if status == "Finalized" {
+            state
+                .relay_registry
+                .remove_session(&request.session_id)
+                .await?;
+        }
+        return Ok((refund_tx, status));
+    }
+
+    if state.relay_registry.is_refunding_funding(&funding_id).await {
+        return Err("a private refund was already submitted for this deposit; its transaction id is being recovered, so no second refund will be sent".into());
+    }
+
+    let session = state
+        .relay_registry
+        .session(&request.session_id)
+        .await
+        .ok_or("funding recovery session is unavailable; contact the relay operator")?;
+
+    let config = RelayConfig::load()?;
+    let received = verify_relay_funding(&config, funding_tx, &request.session_id).await?;
+    if received != config.deposit {
+        return Err("the finalized transaction does not contain the exact demo deposit; the relay will not move its funds".into());
+    }
+    let wallet = connect_wallet(&config).await?;
+    let transfer = StealthTransferRequest {
+        owner_account: account_name(&config.opener_account),
+        fee_params: TransferFeeParams {
+            input_selection: UtxoInputSelection::PreferRevealed,
+        },
+        input_selection: UtxoInputSelection::PreferConfidential,
+        resource_address: STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
+        badge_usage: "None",
+        transfers: vec![StealthTransfer {
+            destination_address: session.refund_address,
+            blinded_output_amount: config.deposit,
+            revealed_output_amount: 0,
+            output_memo: None,
+            pay_to: serde_json::Value::String("StealthPublicKey".into()),
+            attach_sender_address: false,
+            pay_ref: None,
+        }],
+        max_fee: config.refund_max_fee,
+        dry_run: false,
+    };
+    // Persist an exclusive intent before submitting funds. A crash after submission must not
+    // cause a retry to issue a second refund from the relay's shared deposit pool.
+    state
+        .relay_registry
+        .mark_funding_refunding(&funding_id)
+        .await?;
+    let sent = wallet
+        .stealth_transfer(&transfer)
+        .await
+        .map_err(|error| error.to_string())?;
+    let refund_tx = sent.transaction_id.to_string();
+    state
+        .relay_registry
+        .mark_funding_refund(&funding_id, refund_tx.clone())
+        .await?;
+    let status = transaction_status(&config, sent.transaction_id).await?;
+    if status == "Finalized" {
+        state
+            .relay_registry
+            .remove_session(&request.session_id)
+            .await?;
+    }
+    warn_if_fee_float_low(&config).await;
+    Ok((refund_tx, status))
 }
 
 pub async fn restore_from_receipt(state: &AppState, receipt: &str) -> Result<OpenResponse, String> {
@@ -585,11 +720,10 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     // Serialize opens and replay the original response for the same funding transaction so
     // a retry cannot create a second channel or prompt the visitor to fund again.
     let _open_guard = state.relay_registry.1.clone().lock_owned().await;
-    if let Some(response) = state
-        .relay_registry
-        .completed_open(&request.funding_tx_id)
-        .await
-    {
+    let funding_tx = TransactionId::from_hex(request.funding_tx_id.trim())
+        .map_err(|error| format!("invalid funding transaction id: {error}"))?;
+    let funding_id = funding_tx.to_string();
+    if let Some(response) = state.relay_registry.completed_open(&funding_id).await {
         return Ok(response);
     }
     let config = RelayConfig::load()?;
@@ -604,16 +738,16 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     let payer = RistrettoPublicKeyBytes::from_hex(session.payer_public_key.trim())
         .map_err(|error| format!("invalid payer public key: {error}"))?;
     let refund_address = session.refund_address;
-    let funding_tx = TransactionId::from_hex(request.funding_tx_id.trim())
-        .map_err(|error| format!("invalid funding transaction id: {error}"))?;
-    if state
-        .relay_registry
-        .has_funding(&request.funding_tx_id)
-        .await
-    {
+    if state.relay_registry.has_funding(&funding_id).await {
         return Err("this Sapient funding transaction was already used".into());
     }
-    verify_relay_funding(&config, funding_tx).await?;
+    if state.relay_registry.is_refunding_funding(&funding_id).await {
+        return Err(
+            "this Sapient funding transaction is being refunded; it cannot also open a channel"
+                .into(),
+        );
+    }
+    verify_relay_funding(&config, funding_tx, &request.session_id).await?;
 
     let current_epoch = run_cli(&config, &["indexer", "epoch", "--url", &config.indexer_url])
         .await?
@@ -739,6 +873,10 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     ];
     let init_args = open_args.iter().map(String::as_str).collect::<Vec<_>>();
     run_cli(&config, &init_args).await?;
+    // Persist the spend intent before the money-moving CLI call. If the process exits after
+    // submission but before recording its channel, refund must fail closed rather than spend
+    // another visitor's relay balance to compensate.
+    state.relay_registry.mark_opening(&funding_id).await?;
     let output = run_cli(
         &config,
         &[
@@ -812,14 +950,14 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
         expiry_epoch,
         service_public_key: file.service_hex,
         service_output_public_key: service_output.public_key_hex,
-        funding_transaction_id: request.funding_tx_id.clone(),
+        funding_transaction_id: funding_id.clone(),
         open_transaction_id: open_tx_id,
         custody: "Custodial testnet relay: the relay receives the deposit and controls the expiry-refund key.".into(),
         recovery_receipt: None,
     };
     state
         .relay_registry
-        .mark_funding(&request.funding_tx_id, response.clone())
+        .mark_funding(&funding_id, response.clone())
         .await?;
     state
         .relay_registry
@@ -980,7 +1118,8 @@ async fn transaction_status(
 async fn verify_relay_funding(
     config: &RelayConfig,
     funding_tx: TransactionId,
-) -> Result<(), String> {
+    session_id: &str,
+) -> Result<u64, String> {
     // Sapient submits this transaction through the user's wallet provider, not relay walletd.
     // walletd's transactions.wait_result / transactions.get only know transactions it submitted
     // itself, so use the network indexer for finality and its stored body for output validation.
@@ -1028,7 +1167,8 @@ async fn verify_relay_funding(
         .ok_or("indexer funding transaction response omitted its transaction body")?;
     let outputs = ghostline_net::stealth_utxos_from_wallet_tx(tx);
     let mut relay_values = Vec::new();
-    for output in outputs.iter().filter(|output| output.auth == "Key") {
+    let mut candidate_count = 0usize;
+    for output in outputs.iter().filter(|output| output.auth != "Script") {
         if output
             .resource
             .as_deref()
@@ -1036,17 +1176,60 @@ async fn verify_relay_funding(
         {
             continue;
         }
-        if let Ok(recovered) = unblind_wallet_output(output, config) {
+        candidate_count += 1;
+        if let Ok(recovered) = unblind_wallet_output(output, config, session_id) {
             relay_values.push(recovered.value);
         }
     }
-    if relay_values.as_slice() != [config.deposit] {
+    let owned_total = relay_values
+        .iter()
+        .try_fold(0u64, |total, value| total.checked_add(*value))
+        .ok_or_else(|| {
+            "relay-owned Sapient funding outputs overflow the supported amount range".to_owned()
+        })?;
+    if funding_output_total(&relay_values, config.deposit).is_err() {
+        tracing::warn!(
+            event = "sapient_funding_output_mismatch",
+            funding_tx_id = %funding_tx,
+            transaction_output_count = outputs.len(),
+            candidate_output_count = candidate_count,
+            relay_owned_output_count = relay_values.len(),
+            relay_owned_total_micro_xtr = owned_total,
+            expected_micro_xtr = config.deposit,
+            "finalized Sapient transfer did not credit the exact configured deposit to the relay"
+        );
         return Err(format!(
-            "funding transaction must contain exactly one relay-owned private output of {} µT",
+            "Sapient funding is finalized, but the relay identified {} of {} candidate private outputs ({} µT total); expected {} µT. Check that GHOSTLINE_CLAIM_SECRET is the relay wallet's index-0 view_only_key and that the Sapient recipient is the relay funding address.",
+            relay_values.len(),
+            candidate_count,
+            owned_total,
             config.deposit
         ));
     }
-    Ok(())
+    Ok(owned_total)
+}
+
+fn funding_output_total(values: &[u64], expected: u64) -> Result<u64, &'static str> {
+    let total = values
+        .iter()
+        .try_fold(0u64, |sum, value| sum.checked_add(*value))
+        .ok_or("relay-owned funding output total overflow")?;
+    if values.is_empty() || total != expected {
+        return Err("relay-owned funding outputs do not equal the configured deposit");
+    }
+    Ok(total)
+}
+
+fn funding_memo_for_session(session_id: &str) -> String {
+    format!("Ghostline:{session_id}")
+}
+
+fn funding_memo_matches_session(
+    memo: Option<&tari_ootle_wallet_crypto::memo::Memo>,
+    session_id: &str,
+) -> bool {
+    memo.and_then(|memo| memo.as_memo_message())
+        .is_some_and(|message| message == funding_memo_for_session(session_id))
 }
 
 async fn refund_inner(
@@ -1151,6 +1334,7 @@ async fn refund_inner(
 fn unblind_wallet_output(
     output: &ghostline_net::WalletStealthUtxo,
     config: &RelayConfig,
+    session_id: &str,
 ) -> Result<ghostline_sdk::MaskAndValue, String> {
     use ghostline_sdk::{OutputScan, unblind_output};
 
@@ -1169,13 +1353,24 @@ fn unblind_wallet_output(
         minimum_value_promise: 0,
         viewable_balance_proof: None,
     };
-    unblind_output(
+    let recovered = unblind_output(
         &utxo,
         UtxoTag::new(output.tag as u32),
         &secret,
         OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS),
     )
-    .map_err(|error| format!("funding output is not addressed to the relay: {error}"))
+    .map_err(|error| format!("funding output is not addressed to the relay: {error}"))?;
+    let decrypted = tari_ootle_wallet_crypto::encrypted_data::decrypt_data(
+        &secret,
+        &utxo.commitment,
+        &utxo.encrypted_data,
+        false,
+    )
+    .map_err(|error| format!("could not decrypt Sapient funding memo: {error}"))?;
+    if !funding_memo_matches_session(decrypted.memo(), session_id) {
+        return Err("funding output is not bound to this relay session".into());
+    }
+    Ok(recovered)
 }
 
 async fn create_wallet_key(config: &RelayConfig, path: &Path) -> Result<WalletKeyOutput, String> {
@@ -1413,9 +1608,11 @@ impl RelayRegistry {
         );
         {
             let mut state = registry.0.lock().await;
-            state
-                .sessions
-                .retain(|_, session| unix_now().saturating_sub(session.created_at) <= 600);
+            // Keep session-to-refund-address bindings for seven days so a finalized transfer
+            // can still be returned after a delayed retry or a relay restart.
+            state.sessions.retain(|_, session| {
+                unix_now().saturating_sub(session.created_at) <= 7 * 24 * 60 * 60
+            });
             registry.persist_locked(&state)?;
         }
         Ok(registry)
@@ -1556,9 +1753,56 @@ impl RelayRegistry {
         self.0.lock().await.funding_ids.contains(tx)
     }
 
+    async fn is_opening(&self, tx: &str) -> bool {
+        self.0.lock().await.opening_funding.contains(tx)
+    }
+
+    async fn mark_opening(&self, tx: &str) -> Result<(), String> {
+        let mut state = self.0.lock().await;
+        if state.funding_refunds.contains_key(tx) || state.refunding_funding.contains(tx) {
+            return Err(
+                "this funding transaction is being refunded or has already been refunded".into(),
+            );
+        }
+        state.opening_funding.insert(tx.to_owned());
+        self.persist_locked(&state)
+    }
+
+    async fn funding_refund(&self, tx: &str) -> Option<String> {
+        self.0.lock().await.funding_refunds.get(tx).cloned()
+    }
+
+    async fn is_refunding_funding(&self, tx: &str) -> bool {
+        self.0.lock().await.refunding_funding.contains(tx)
+    }
+
+    async fn mark_funding_refunding(&self, tx: &str) -> Result<(), String> {
+        let mut state = self.0.lock().await;
+        if state.opening_funding.contains(tx)
+            || state.completed_funding.contains_key(tx)
+            || state.funding_refunds.contains_key(tx)
+        {
+            return Err("cannot refund funding already used to open a channel".into());
+        }
+        state.refunding_funding.insert(tx.to_owned());
+        self.persist_locked(&state)
+    }
+
+    async fn mark_funding_refund(&self, tx: &str, refund_tx: String) -> Result<(), String> {
+        let mut state = self.0.lock().await;
+        if state.opening_funding.contains(tx) || state.completed_funding.contains_key(tx) {
+            return Err("cannot refund funding already used to open a channel".into());
+        }
+        state.funding_ids.insert(tx.to_owned());
+        state.refunding_funding.remove(tx);
+        state.funding_refunds.insert(tx.to_owned(), refund_tx);
+        self.persist_locked(&state)
+    }
+
     async fn mark_funding(&self, tx: &str, response: OpenResponse) -> Result<(), String> {
         let mut state = self.0.lock().await;
         state.funding_ids.insert(tx.to_owned());
+        state.opening_funding.remove(tx);
         state.completed_funding.insert(tx.to_owned(), response);
         self.persist_locked(&state)
     }
@@ -1567,7 +1811,7 @@ impl RelayRegistry {
         let mut state = self.0.lock().await;
         state
             .sessions
-            .retain(|_, session| unix_now().saturating_sub(session.created_at) <= 600);
+            .retain(|_, session| unix_now().saturating_sub(session.created_at) <= 7 * 24 * 60 * 60);
         state.sessions.insert(id, session);
         self.persist_locked(&state)
     }
@@ -1716,6 +1960,78 @@ mod tests {
             response.channel_id
         );
         assert!(registry.has_funding("funding").await);
+    }
+
+    #[test]
+    fn funding_output_validation_accepts_split_outputs_but_requires_exact_total() {
+        assert_eq!(funding_output_total(&[20, 31], 51), Ok(51));
+        assert!(funding_output_total(&[], 51).is_err());
+        assert!(funding_output_total(&[50], 51).is_err());
+        assert!(funding_output_total(&[51, 1], 51).is_err());
+        assert!(funding_output_total(&[u64::MAX, 1], 51).is_err());
+    }
+
+    #[test]
+    fn funding_memo_binds_a_transfer_to_one_session() {
+        let memo =
+            tari_ootle_wallet_crypto::memo::Memo::new_message("Ghostline:session-a").unwrap();
+        assert!(funding_memo_matches_session(Some(&memo), "session-a"));
+        assert!(!funding_memo_matches_session(Some(&memo), "session-b"));
+        assert!(!funding_memo_matches_session(None, "session-a"));
+    }
+
+    #[tokio::test]
+    async fn funding_refund_idempotency_state_survives_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "ghostline-refund-recovery-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state_path = root.join("relay-state.json");
+        let registry = RelayRegistry::open(state_path.clone()).await.unwrap();
+        registry
+            .mark_funding_refund("funding", "refund-tx".into())
+            .await
+            .unwrap();
+        let restored = RelayRegistry::open(state_path.clone()).await.unwrap();
+        assert_eq!(
+            restored.funding_refund("funding").await.as_deref(),
+            Some("refund-tx")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn pending_funding_refund_intent_survives_restart_and_blocks_open() {
+        let root = std::env::temp_dir().join(format!(
+            "ghostline-refund-intent-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state_path = root.join("relay-state.json");
+        let registry = RelayRegistry::open(state_path.clone()).await.unwrap();
+        registry.mark_funding_refunding("funding").await.unwrap();
+
+        let restored = RelayRegistry::open(state_path.clone()).await.unwrap();
+        assert!(restored.is_refunding_funding("funding").await);
+        assert!(restored.mark_opening("funding").await.is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn opening_intent_blocks_refund_before_on_chain_open_finishes() {
+        let registry = RelayRegistry::default();
+        registry.mark_opening("funding").await.unwrap();
+        assert!(registry.is_opening("funding").await);
+        assert!(
+            registry
+                .mark_funding_refund("funding", "refund-tx".into())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

@@ -1546,6 +1546,7 @@ dependencies = [
  "serde_json",
  "tari_crypto",
  "tari_ootle_common_types",
+ "tari_ootle_wallet_crypto",
  "tari_template_lib",
  "tari_utilities",
  "tokio",

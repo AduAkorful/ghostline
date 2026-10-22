@@ -42,7 +42,7 @@ class Element {
   }
 }
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, fastTime = false } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, fastTime = false } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -102,6 +102,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
       return json({ sessionId: "session-test", fundingAddress: "otl_esm_1relay", deposit: 51, price: 10 }, 201);
     }
     if (url.pathname === "/demo/open") {
+      if (failOpen) return json("relay cannot verify the receiver output", 422);
       const payerRoot = new Uint8Array(32).fill(7);
       const nonce = new Uint8Array(32).fill(8);
       const serviceSecret = new Uint8Array(32).fill(9);
@@ -121,6 +122,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
       return json({ fortune: `Mock paid response ${paidCalls}` }, 200, { "ghostline-recovery": `opaque-recovery-${paidCalls}` });
     }
     if (url.pathname === "/demo/settle") return json({ state: "Finalized", settlementTransactionId: "settle-test-tx", explorerUrl: "https://explorer.tari.mw/tx/settle-test-tx", recoveryReceipt: "opaque-recovery-final" });
+    if (url.pathname === "/demo/refund-funding") return json({ state: "refunded", deposit: 51, refundTransactionId: "funding-refund-tx", explorerUrl: "https://explorer.tari.mw/tx/funding-refund-tx" });
     if (url.pathname === "/demo/status") return json({ state: "Finalized", settlementTransactionId: "settle-test-tx", explorerUrl: "https://explorer.tari.mw/tx/settle-test-tx" });
     throw new Error(`Unexpected relay request: ${options.method || "GET"} ${url.pathname}`);
   };
@@ -158,7 +160,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
   elements.set("relay-config-note", new Element("relay-config-note"));
 
   return {
-    calls, walletCalls, elements, session,
+    calls, walletCalls, elements, session, local,
     injectWallet() {
       if (!tari) throw new Error("No mock wallet was configured");
       window.tari = tari;
@@ -188,7 +190,7 @@ test("waits for Sapient's late provider initialization event", async () => {
   const opening = h.elements.get("live-open").click();
   setTimeout(() => h.injectWallet(), 0);
   await opening;
-  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+      await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.match(h.elements.get("status").textContent, /Channel finalized/);
   assert.ok(h.walletCalls.some((call) => call.method === "tari_getNetwork"));
 });
@@ -197,7 +199,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   const h = makeHarness();
   await h.load();
   await h.elements.get("live-open").click();
-  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.match(h.elements.get("status").textContent, /Channel finalized/);
   assert.equal(h.walletCalls.find((c) => c.method === "tari_createTransactionRequest").params.amount, "51");
 
@@ -221,6 +223,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   const fundingRequest = h.walletCalls.find((call) => call.method === "tari_createTransactionRequest");
   assert.equal(fundingRequest.params.kind, "sendPrivately");
   assert.equal(fundingRequest.params.amount, "51");
+  assert.equal(fundingRequest.params.memo, "Ghostline:session-test", "encrypted recipient memo binds the funding output to the relay session");
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/session")).length, 1);
 
   await h.elements.get("live-stop").click();
@@ -235,7 +238,7 @@ test("relay health failure leaves the user in a usable simulated mode without ca
   const h = makeHarness({ failHealth: true });
   await h.load();
   await h.elements.get("live-open").click();
-  await h.waitFor(() => h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.match(h.elements.get("status").textContent, /HTTP 404/);
   assert.equal(h.walletCalls.length, 0);
   assert.equal(h.elements.get("pay").disabled, false);
@@ -245,7 +248,7 @@ test("wrong network falls back without requesting funds", async () => {
   const h = makeHarness({ walletOverrides: { tari_getNetwork: "localnet" } });
   await h.load();
   await h.elements.get("live-open").click();
-  await h.waitFor(() => h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.match(h.elements.get("status").textContent, /Switch your Tari wallet to Esmeralda/);
   assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
   assert.equal(h.elements.get("pay").disabled, false);
@@ -257,14 +260,14 @@ test("missing extension, rejected approval, unsupported methods, chain errors, a
     { name: "rejected approval", options: { walletOverrides: { tari_getNetwork: rpcError(4001, "User rejected") } }, message: /Wallet approval was cancelled/ },
     { name: "unsupported wallet method", options: { walletOverrides: { tari_getCapabilities: rpcError(4200, "Unsupported") } }, message: /does not support a required feature/ },
     { name: "chain rejection", options: { walletOverrides: { tari_getCapabilities: rpcError(-32603, "Ootle rejected wallet request") } }, message: /Ootle rejected wallet request/ },
-    { name: "low balance", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "0" }] } }, message: /Low Esmeralda XTR balance/ },
+      { name: "low balance", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "0" }] } }, message: /51 µT plus a wallet fee is required/ },
   ];
   for (const scenario of cases) {
     await t.test(scenario.name, async () => {
       const h = makeHarness(scenario.options);
       await h.load();
       await h.elements.get("live-open").click();
-      await h.waitFor(() => h.elements.get("status").textContent.startsWith("Live setup stopped:") || scenario.message.test(h.elements.get("status").textContent));
+      await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped") || scenario.message.test(h.elements.get("status").textContent));
       assert.match(h.elements.get("status").textContent, scenario.message);
       if (scenario.name === "missing extension") {
         assert.equal(h.elements.get("live-open").textContent, "Retry Sapient connection");
@@ -295,7 +298,7 @@ test("disconnected wallet is asked to reconnect and the request is retried", asy
   } });
   await h.load();
   await h.elements.get("live-open").click();
-  await h.waitFor(() => h.walletCalls.some((call) => call.method === "tari_createTransactionRequest") || h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+  await h.waitFor(() => h.walletCalls.some((call) => call.method === "tari_createTransactionRequest") || h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.equal(capabilityCalls, 2);
   assert.equal(h.walletCalls.filter((call) => call.method === "tari_requestAccounts").length, 2);
 });
@@ -305,7 +308,7 @@ test("cold relay retries to the deadline and then leaves simulated mode usable",
   try {
     await h.load();
     await h.elements.get("live-open").click();
-    await h.waitFor(() => h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+    await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
     assert.match(h.elements.get("status").textContent, /within 75 seconds/);
     assert.equal(h.elements.get("pay").disabled, false);
     assert.equal(h.walletCalls.length, 0);
@@ -317,13 +320,42 @@ test("a funding transaction that stays pending is reported without opening a cha
   try {
     await h.load();
     await h.elements.get("live-open").click();
-    await h.waitFor(() => h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+    await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
     assert.match(h.elements.get("status").textContent, /still pending/);
-    assert.ok(h.session.has("ghostline-live-pending"), "the funding transaction id is retained for a safe retry");
+    assert.ok(h.local.has("ghostline-live-pending") || h.session.has("ghostline-live-pending"), "the funding transaction id is retained for a safe retry");
     assert.equal(h.elements.get("pending-funding-link").href, "https://explorer.tari.mw/tx/funding-test-tx");
     assert.equal(h.elements.get("pending-funding-link").hidden, false);
     assert.equal(h.calls.some((call) => call.url.includes("/demo/open")), false);
     assert.equal(h.elements.get("pay").disabled, false);
   } finally { h.restoreClock(); }
+});
+
+test("a funded deposit can be privately returned after channel opening fails", async () => {
+  const h = makeHarness({ failOpen: true });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.equal(h.elements.get("refund-pending-funding").hidden, false);
+  assert.ok(h.local.has("ghostline-live-pending"), "pending funding survives a new tab on this origin");
+  await h.elements.get("refund-pending-funding").click();
+  const refundCall = h.calls.find((call) => call.url.includes("/demo/refund-funding"));
+  assert.ok(refundCall);
+  assert.deepEqual(JSON.parse(refundCall.body), { fundingTxId: "funding-test-tx", sessionId: "session-test" });
+  await h.waitFor(() => h.elements.get("refund-pending-funding").hidden);
+  assert.equal(h.elements.get("refund-pending-funding").hidden, true);
+  assert.equal(h.local.has("ghostline-live-pending"), false);
+  assert.equal(h.elements.get("explorer-link").href, "https://explorer.tari.mw/tx/funding-refund-tx");
+  assert.match(h.elements.get("record-summary").textContent, /returned the un-opened 51 µT deposit privately/);
+});
+
+test("a pending funding record from another tab is offered for recovery without contacting Sapient", async () => {
+  const h = makeHarness({ wallet: false });
+  h.local.set("ghostline-live-pending", JSON.stringify({ sessionId: "session-test", fundingTxId: "funding-test-tx" }));
+  await h.load();
+  assert.equal(h.elements.get("refund-pending-funding").hidden, false);
+  assert.equal(h.walletCalls.length, 0);
+  await h.elements.get("refund-pending-funding").click();
+  await h.waitFor(() => h.elements.get("refund-pending-funding").hidden);
+  assert.equal(h.calls.filter((call) => call.url.includes("/demo/refund-funding")).length, 1);
 });
 

@@ -275,6 +275,10 @@ fn router_inner(state: AppState, expose_metrics: bool, rate_limit: bool) -> Rout
         .route("/demo/open", axum::routing::post(relay::open))
         .route("/demo/session", axum::routing::post(relay::create_session))
         .route("/demo/recover", axum::routing::post(relay::recover))
+        .route(
+            "/demo/refund-funding",
+            axum::routing::post(relay::refund_funding),
+        )
         .route("/demo/settle", axum::routing::post(relay::settle))
         .route("/demo/refund", axum::routing::post(relay::refund))
         .route("/demo/config", get(relay::config))

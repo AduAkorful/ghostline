@@ -25,6 +25,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tari_crypto = "0.24.0"
+tari_ootle_wallet_crypto = "0.46.0"
 tari_template_lib = "0.34.0"
 tari_utilities = "0.10"
 tokio = { version = "1.53", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }

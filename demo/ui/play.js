@@ -29,6 +29,34 @@ const TARI_PROVIDER_READY_EVENT = "tari#initialized";
 const TARI_PROVIDER_TIMEOUT_MS = 5_000;
 const configuredRelayUrl = String(window.GHOSTLINE_CONFIG?.relayUrl || "").trim();
 
+function readPendingFunding() {
+  try {
+    const persisted = localStorage.getItem(LIVE_PENDING_KEY);
+    const tabScoped = sessionStorage.getItem(LIVE_PENDING_KEY);
+    const value = JSON.parse(persisted || tabScoped || "null");
+    if (value?.fundingTxId && value?.sessionId) {
+      localStorage.setItem(LIVE_PENDING_KEY, JSON.stringify(value));
+      sessionStorage.removeItem(LIVE_PENDING_KEY);
+      return value;
+    }
+  } catch { /* Storage may be unavailable in a restricted browser context. */ }
+  return undefined;
+}
+
+function savePendingFunding(value) {
+  try {
+    localStorage.setItem(LIVE_PENDING_KEY, JSON.stringify(value));
+    sessionStorage.removeItem(LIVE_PENDING_KEY);
+  } catch {
+    sessionStorage.setItem(LIVE_PENDING_KEY, JSON.stringify(value));
+  }
+}
+
+function clearPendingFunding() {
+  try { localStorage.removeItem(LIVE_PENDING_KEY); } catch { /* Storage may be restricted. */ }
+  try { sessionStorage.removeItem(LIVE_PENDING_KEY); } catch { /* Storage may be restricted. */ }
+}
+
 const status = (message) => { byId("status").textContent = message; };
 
 function randomBytes(length) {
@@ -58,6 +86,7 @@ function saveLiveChannel() {
 function showPendingFunding(transactionId) {
   const link = byId("pending-funding-link");
   link.href = `https://explorer.tari.mw/tx/${encodeURIComponent(transactionId)}`;
+  link.textContent = "Inspect pending Sapient funding transaction ↗";
   link.hidden = false;
 }
 
@@ -287,7 +316,7 @@ function configureLiveRelay() {
 
 async function relayJson(path, options = {}) {
   const method = (options.method || "GET").toUpperCase();
-  const retryable = method === "GET" || ["/demo/open", "/demo/settle", "/demo/refund", "/demo/recover"].some((prefix) => path.startsWith(prefix));
+  const retryable = method === "GET" || ["/demo/open", "/demo/settle", "/demo/refund", "/demo/recover", "/demo/refund-funding"].some((prefix) => path.startsWith(prefix));
   let response;
   for (let attempt = 0; ; attempt += 1) {
     try {
@@ -382,8 +411,7 @@ async function connectAndOpenLive() {
     setupStage = "loading live demo settings";
     const relay = await relayJson("/demo/config");
     byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
-    let pending;
-    try { pending = JSON.parse(sessionStorage.getItem(LIVE_PENDING_KEY) || "null"); } catch { pending = undefined; }
+    let pending = readPendingFunding();
     if (!pending?.fundingTxId) {
       setupStage = "checking the wallet network";
       const network = await tariRequest("tari_getNetwork");
@@ -443,15 +471,17 @@ async function connectAndOpenLive() {
         fundingTxId: funding.transactionId,
         payerPublicKey: bytesToHex(channelKeys.payerPublic),
       };
-      sessionStorage.setItem(LIVE_PENDING_KEY, JSON.stringify(pending));
+      savePendingFunding(pending);
       showPendingFunding(funding.transactionId);
+      byId("refund-pending-funding").hidden = false;
       if (liveSetupCancelled) {
         status("The approved funding transaction is saved in this tab. Continue live setup later to open its channel without sending again.");
         return;
       }
     } else {
       payerSecret = Uint8Array.from((sessionStorage.getItem("ghostline-live-payer-secret") || "").match(/../g) || [], (byte) => Number.parseInt(byte, 16));
-      if (payerSecret.length !== 32) throw new Error("This tab lost its local voucher key. Keep the pending transfer id and contact the relay before retrying.");
+      byId("refund-pending-funding").hidden = false;
+      if (payerSecret.length !== 32) throw new Error("This browser has a funded transfer saved, but its local voucher-signing key is unavailable in this tab. Return the pending deposit to Sapient here, or reopen the original tab to continue.");
       byId("live-open").textContent = "Retrying relay open…";
       status("Retrying the relay open for your existing finalized funding transaction; no second wallet transfer will be requested.");
       showPendingFunding(pending.fundingTxId);
@@ -470,7 +500,8 @@ async function connectAndOpenLive() {
         sessionId: pending.sessionId,
       }),
     });
-    sessionStorage.removeItem(LIVE_PENDING_KEY);
+    clearPendingFunding();
+    byId("refund-pending-funding").hidden = true;
     params = {
       networkTag: opened.networkTag,
       payer: hexToBytes(pending.payerPublicKey),
@@ -499,10 +530,11 @@ async function connectAndOpenLive() {
     refreshControls();
     status("Channel finalized. Each click now sends a real signed voucher to the relay.");
   } catch (error) {
-    const pending = sessionStorage.getItem(LIVE_PENDING_KEY);
+    const pending = readPendingFunding();
     const cancelled = Number(error?.code) === 4001;
     byId("live-stop").hidden = false;
     byId("live-stop").textContent = "Continue with simulation";
+    if (pending) byId("refund-pending-funding").hidden = false;
     if (cancelled) {
       byId("live-stop").hidden = true;
       byId("live-open").textContent = "Connect Sapient and open channel";
@@ -517,7 +549,7 @@ async function connectAndOpenLive() {
       byId("live-open").textContent = "Retry live setup";
       const detail = walletError(error);
       byId("live-note").textContent = pending
-        ? `Live setup stopped while ${setupStage}: ${detail}. Your approved funding transaction remains saved in this tab; retrying will not request another transfer.`
+      ? `Live setup stopped while ${setupStage}: ${detail}. Your approved funding transaction is saved in this browser; retrying will not request another transfer. You can return the pending deposit to Sapient if channel opening cannot be completed.`
         : `Live setup stopped while ${setupStage}: ${detail}. No channel was opened; the instant simulation remains available.`;
       status(`Live setup stopped while ${setupStage}: ${detail}.${pending ? " Your funding transaction is saved in this tab; retry without sending again." : " No channel was opened."}`);
     }
@@ -722,6 +754,49 @@ function returnToSimulation() {
   byId("demo-title").scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
+async function refundPendingFunding() {
+  const pending = readPendingFunding();
+  if (!pending) {
+    byId("refund-pending-funding").hidden = true;
+    status("There is no pending funded transfer to return in this browser.");
+    return;
+  }
+  const button = byId("refund-pending-funding");
+  button.disabled = true;
+  button.textContent = "Checking pending deposit…";
+  try {
+    const result = await relayJson("/demo/refund-funding", {
+      method: "POST",
+      body: JSON.stringify({ fundingTxId: pending.fundingTxId, sessionId: pending.sessionId }),
+    });
+    if (result.state === "pending") {
+      showPendingFunding(result.refundTransactionId);
+      byId("pending-funding-link").textContent = "Inspect pending private refund transaction ↗";
+      status(`The private refund is pending. Keep this page open and retry; transaction ${result.refundTransactionId}.`);
+      button.textContent = "Check pending deposit refund";
+      button.disabled = false;
+      return;
+    }
+    clearPendingFunding();
+    button.hidden = true;
+    const link = byId("explorer-link");
+    link.href = result.explorerUrl;
+    link.textContent = "Inspect pending-deposit refund ↗";
+    byId("recorded-tx-id").textContent = result.refundTransactionId;
+    byId("record-summary").textContent = `The relay returned the un-opened ${result.deposit} µT deposit privately to the Sapient address bound to this session.`;
+    byId("chain-result").querySelector(".result-label").textContent = "LIVE TESTNET REFUND · FINALIZED";
+    byId("chain-result").querySelector(".fine-print").textContent = "The relay indexer reports this private refund as finalized. Check Sapient for the returned testnet funds.";
+    byId("chain-empty").hidden = true;
+    byId("chain-result").hidden = false;
+    status("The pending deposit was privately returned to the Sapient wallet. Check the wallet after finality.");
+  } catch (error) {
+    button.textContent = "Retry pending deposit refund";
+    status(`Could not return the pending deposit: ${error instanceof Error ? error.message : String(error)}. The saved transaction remains available to retry.`);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function showRecordedEvidence() {
   if (!evidence || settlementShown) {
     if (settlementShown) return;
@@ -779,10 +854,15 @@ byId("run-simulation").addEventListener("click", runRemainingSimulation);
 });
 byId("reset").addEventListener("click", reset);
 byId("live-open").addEventListener("click", () => void connectAndOpenLive());
+byId("refund-pending-funding").addEventListener("click", () => void refundPendingFunding());
 byId("live-refund").addEventListener("click", () => void requestLiveRefund());
 byId("live-stop").addEventListener("click", returnToSimulation);
 
 configureLiveRelay();
+if (readPendingFunding()) {
+  byId("refund-pending-funding").hidden = false;
+  status("A previously approved funding transfer is saved in this browser. Retry channel opening or return the deposit to Sapient; the wallet will not be charged again.");
+}
 begin();
 refreshControls();
 void restoreLiveChannel();
