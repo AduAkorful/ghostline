@@ -135,30 +135,26 @@ mark_seed_initialized() {
     mv -f "$marker_tmp" "$wallet_seed_marker"
 }
 
-account_ready() {
-    "$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" \
-        --name "$1" >/dev/null 2>&1
-}
 account_address() {
     "$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" \
         --name "$1" | sed -n 's/^address=/account_address=/p'
 }
-account_create() {
+account_ensure() {
     if [ "${3:-}" = yes ]; then
-        "$cli_bin" wallet account-create --url "$GHOSTLINE_WALLET_URL" \
+        "$cli_bin" wallet account-ensure --url "$GHOSTLINE_WALLET_URL" \
             --name "$1" --key-index "$2" --is-default >/dev/null
     else
-        "$cli_bin" wallet account-create --url "$GHOSTLINE_WALLET_URL" \
+        "$cli_bin" wallet account-ensure --url "$GHOSTLINE_WALLET_URL" \
             --name "$1" --key-index "$2" >/dev/null
     fi
 }
 
 recovery_pending_logged=no
 account_retry_reason=
-account_create_or_retry() {
+account_ensure_or_retry() {
     account_retry_reason=rpc_transport
-    account_error_file="$wallet_base/.ghostline-account-create-error.$$"
-    if account_create "$@" 2>"$account_error_file"; then
+    account_error_file="$wallet_base/.ghostline-account-ensure-error.$$"
+    if account_ensure "$@" 2>"$account_error_file"; then
         rm -f "$account_error_file"
         return 0
     fi
@@ -171,7 +167,7 @@ account_create_or_retry() {
         # initialized until walletd confirms that it accepted the seed.
         :
     else
-        echo 'wallet account creation failed for a non-retryable reason:' >&2
+        echo 'wallet account setup failed for a non-retryable reason:' >&2
         cat "$account_error_file" >&2
         rm -f "$account_error_file"
         return 2
@@ -199,10 +195,7 @@ ensure_account() {
     recovery_restarts=0
     restart_delay="$recovery_restart_delay"
     while :; do
-        if account_ready "$1"; then
-            return 0
-        fi
-        if account_create_or_retry "$1" "$2" "${3:-}"; then
+        if account_ensure_or_retry "$1" "$2" "${3:-}"; then
             return 0
         else
             create_status=$?

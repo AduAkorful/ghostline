@@ -648,6 +648,17 @@ enum WalletCommand {
         #[arg(long)]
         is_default: bool,
     },
+    /// Create or reuse a deterministic account after seed recovery, keeping its address and funds.
+    AccountEnsure {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        key_index: u64,
+        #[arg(long)]
+        is_default: bool,
+    },
     /// Print a wallet account and its `owner_key_id` (`accounts.get`).
     AccountGet {
         #[arg(long, default_value = "http://127.0.0.1:5100")]
@@ -1168,6 +1179,35 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let wallet = connect_wallet(&url).await?;
                 let got = wallet.account_get(&name).await.map_err(|e| e.to_string())?;
                 print_wallet_account(&got);
+            }
+            WalletCommand::AccountEnsure {
+                url,
+                name,
+                key_index,
+                is_default,
+            } => {
+                let wallet = connect_wallet(&url).await?;
+                let account = wallet
+                    .account_ensure(&name, key_index, is_default)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                wallet
+                    .ensure_derived_key(ghostline_net::ACCOUNT_KEY_BRANCH, key_index)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                wallet
+                    .ensure_derived_key(ghostline_net::VIEW_ONLY_KEY_BRANCH, key_index)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let resource =
+                    tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS.to_string();
+                wallet
+                    .associate_stealth_resource(&name, &resource)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                print_wallet_account(&account);
+                println!("derived_keys={key_index}");
+                println!("associated_resource={resource}");
             }
         },
         Command::Keygen { out, role } => {
@@ -3327,6 +3367,151 @@ fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct AccountRpcState {
+        name: String,
+        owner_index: u64,
+        is_default: bool,
+        name_collision: bool,
+        methods: Vec<String>,
+    }
+
+    async fn account_rpc_fixture(
+        owner_index: u64,
+        name_collision: bool,
+    ) -> (
+        WalletClient,
+        std::sync::Arc<std::sync::Mutex<AccountRpcState>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use axum::{Json, Router, routing::post};
+        use std::sync::{Arc, Mutex};
+
+        let state = Arc::new(Mutex::new(AccountRpcState {
+            name: "recovered-account-2".into(),
+            owner_index,
+            is_default: false,
+            name_collision,
+            methods: Vec::new(),
+        }));
+        let rpc_state = Arc::clone(&state);
+        let app = Router::new().route("/json_rpc", post(move |Json(request): Json<serde_json::Value>| {
+            let state = Arc::clone(&rpc_state);
+            async move {
+                let mut state = state.lock().unwrap();
+                let method = request["method"].as_str().unwrap();
+                state.methods.push(method.to_owned());
+                let params = &request["params"];
+                let account = |state: &AccountRpcState| serde_json::json!({
+                    "account": {
+                        "name": state.name,
+                        "component_address": "component_recovered",
+                        "owner_key_id": ghostline_net::derived_account_key_id(state.owner_index),
+                        "is_default": state.is_default,
+                    },
+                    "address": "otl_esm_recovered",
+                    "created": false,
+                });
+                let result = match method {
+                    "accounts.create_or_get" => {
+                        assert!(params["account"].is_null());
+                        assert_eq!(params["key_index"], 2);
+                        account(&state)
+                    }
+                    "accounts.rename" => {
+                        assert_eq!(params["account"]["ComponentAddress"], "component_recovered");
+                        if state.name_collision {
+                            return Json(serde_json::json!({"jsonrpc":"2.0", "id":1, "error":{
+                                "code": -32603, "message":"account name already exists"
+                            }}));
+                        }
+                        state.name = params["new_name"].as_str().unwrap().to_owned();
+                        serde_json::json!({})
+                    }
+                    "accounts.set_default" => {
+                        assert_eq!(params["account"]["Name"], state.name);
+                        state.is_default = true;
+                        serde_json::json!({})
+                    }
+                    "accounts.get" => {
+                        assert_eq!(params["name_or_address"]["Name"], state.name);
+                        account(&state)
+                    }
+                    other => panic!("unexpected wallet RPC {other}"),
+                };
+                Json(serde_json::json!({"jsonrpc":"2.0", "id":1, "result":result}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (
+            WalletClient::connect(format!("http://{address}")).unwrap(),
+            state,
+            task,
+        )
+    }
+
+    #[tokio::test]
+    async fn recovered_wallet_account_is_reused_by_index_and_renamed_without_recreation() {
+        let (wallet, state, task) = account_rpc_fixture(2, false).await;
+        let account = wallet
+            .account_ensure("relay-opener", 2, true)
+            .await
+            .unwrap();
+        assert_eq!(account.account.name.as_deref(), Some("relay-opener"));
+        assert_eq!(
+            account.account.component_address_display(),
+            "component_recovered"
+        );
+        assert!(account.account.is_default);
+        wallet
+            .account_ensure("relay-opener", 2, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.lock().unwrap().methods,
+            [
+                "accounts.create_or_get",
+                "accounts.rename",
+                "accounts.set_default",
+                "accounts.get",
+                "accounts.create_or_get",
+                "accounts.set_default",
+                "accounts.get",
+            ]
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn recovered_wallet_account_with_wrong_owner_key_is_not_renamed() {
+        let (wallet, state, task) = account_rpc_fixture(3, false).await;
+        let error = wallet
+            .account_ensure("relay-opener", 2, true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("requested account key index 2"));
+        assert_eq!(state.lock().unwrap().methods, ["accounts.create_or_get"]);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn recovered_wallet_account_name_collision_stops_before_selecting_another_account() {
+        let (wallet, state, task) = account_rpc_fixture(2, true).await;
+        let error = wallet
+            .account_ensure("relay-opener", 2, true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("account name already exists"));
+        assert_eq!(
+            state.lock().unwrap().methods,
+            ["accounts.create_or_get", "accounts.rename"]
+        );
+        task.abort();
+    }
 
     #[test]
     fn channel_settle_accepts_reviewed_fee_cap() {

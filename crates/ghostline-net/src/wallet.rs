@@ -37,6 +37,9 @@ const GET_DEFAULT: &str = "accounts.get_default";
 const ACCOUNTS_GET: &str = "accounts.get";
 const ACCOUNTS_GET_BALANCES: &str = "accounts.get_balances";
 const ACCOUNTS_CREATE: &str = "accounts.create";
+const ACCOUNTS_CREATE_OR_GET: &str = "accounts.create_or_get";
+const ACCOUNTS_RENAME: &str = "accounts.rename";
+const ACCOUNTS_SET_DEFAULT: &str = "accounts.set_default";
 const ASSOCIATE_STEALTH: &str = "accounts.associate_stealth_resource";
 const KEYS_LIST: &str = "keys.list";
 const KEYS_CREATE: &str = "keys.create";
@@ -562,6 +565,68 @@ impl WalletClient {
         request: &AccountsCreateRequest,
     ) -> Result<AccountWithAddress, NetError> {
         self.rpc(ACCOUNTS_CREATE, request).await
+    }
+
+    /// Reuse an account restored by seed recovery at `index`, preserving its address.
+    ///
+    /// walletd 0.47.0 resolves `accounts.create_or_get` by key index only when `account`
+    /// is null. Passing the desired name instead would recreate the duplicate-owner bug.
+    /// The rename updates wallet-local metadata; it does not submit a transaction.
+    pub async fn account_ensure(
+        &self,
+        name: &str,
+        index: u64,
+        is_default: bool,
+    ) -> Result<AccountWithAddress, NetError> {
+        let resolved: AccountWithAddress = self
+            .rpc(
+                ACCOUNTS_CREATE_OR_GET,
+                serde_json::json!({
+                    "account": null,
+                    "key_index": index,
+                    "is_default": is_default,
+                }),
+            )
+            .await?;
+        let expected_key = derived_account_key_id(index);
+        if resolved.account.owner_key_id.as_ref() != Some(&expected_key) {
+            return Err(NetError::Decode {
+                path: ACCOUNTS_CREATE_OR_GET.into(),
+                details: format!(
+                    "resolved account does not use the requested account key index {index}"
+                ),
+            });
+        }
+        if resolved.account.name.as_deref() != Some(name) {
+            let _: Value = self
+                .rpc(
+                    ACCOUNTS_RENAME,
+                    serde_json::json!({
+                        "account": { "ComponentAddress": resolved.account.component_address },
+                        "new_name": name,
+                    }),
+                )
+                .await?;
+        }
+        if is_default {
+            let _: Value = self
+                .rpc(
+                    ACCOUNTS_SET_DEFAULT,
+                    serde_json::json!({ "account": account_name(name) }),
+                )
+                .await?;
+        }
+        let named = self.account_get(name).await?;
+        if named.account.component_address != resolved.account.component_address
+            || named.account.owner_key_id.as_ref() != Some(&expected_key)
+        {
+            return Err(NetError::Decode {
+                path: ACCOUNTS_GET.into(),
+                details: "named account identity differs from the account resolved by key index"
+                    .into(),
+            });
+        }
+        Ok(named)
     }
 
     /// `keys.list` — `[[KeyId, public_key_hex, is_active], …]` (live Esmeralda 0.45 daemon).

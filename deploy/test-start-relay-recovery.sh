@@ -8,6 +8,7 @@ trap 'rm -rf "$tmp_root"' EXIT
 write_fake_cli() {
     cat > "$tmp_root/ghostline" <<'FAKE'
 #!/bin/sh
+operation=$2
 case "$2" in
     account-get)
         name=
@@ -23,7 +24,7 @@ case "$2" in
         fi
         exit 1
         ;;
-    account-create)
+    account-create|account-ensure)
         name=
         key_index=0
         while [ "$#" -gt 0 ]; do
@@ -34,6 +35,17 @@ case "$2" in
             esac
         done
         case "${FAKE_CREATE_MODE:-recovering-once}" in
+            recovered-relay-indexes)
+                # Render's seed recovery now restores the relay's own indexes 2/3.
+                # Recreating them fails regardless of their recovered display names.
+                if [ "$operation" = account-create ]; then
+                    echo "Store error: UNIQUE constraint failed: accounts.owner_public_key" >&2
+                    exit 1
+                fi
+                printf '%s %s\n' "$name" "$key_index" >> "$FAKE_ACCOUNT_CREATES"
+                : > "$FAKE_ACCOUNT_DIR/$name"
+                exit 0
+                ;;
             recovering)
                 echo "wallet daemon RPC accounts.create failed: Invalid request: the wallet is still recovering accounts from its seed" >&2
                 exit 1
@@ -276,6 +288,21 @@ if ! grep -Fxq 'relay-opener 2' "$FAKE_ACCOUNT_CREATES"; then
 fi
 if ! grep -Fxq 'relay-fees 3' "$FAKE_ACCOUNT_CREATES"; then
     echo "expected fee account to use unused key index 3" >&2
+    exit 1
+fi
+
+# A new deployment restores the relay's own funded accounts under recovered names.
+# It must reuse the same keys, rather than moving to yet another unfunded index.
+rm -rf "$TARI_BASE_DIR" "$FAKE_ACCOUNT_DIR"
+mkdir -p "$FAKE_ACCOUNT_DIR"
+export FAKE_CREATE_MODE=recovered-relay-indexes
+set +e
+bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/relay-indexes.stdout" 2>"$tmp_root/relay-indexes.stderr"
+relay_indexes_status=$?
+set -e
+if [ "$relay_indexes_status" -ne 0 ]; then
+    echo "expected startup to reuse relay keys already restored under recovered account names" >&2
+    cat "$tmp_root/relay-indexes.stderr" >&2
     exit 1
 fi
 

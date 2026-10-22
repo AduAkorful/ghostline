@@ -48,6 +48,13 @@ wallet that holds valuable assets.
    These are derived accounts (indices 3 and 2 respectively) in the dedicated
    relay wallet. Each 51 µT user deposit covers five 10 µT calls and the
    required 1 µT change output; transaction fees are additional.
+   Startup uses `ghostline wallet account-ensure --name <name> --key-index
+   <index>` to reuse those same accounts after seed recovery, including when
+   walletd restores them under `recovered-account-*` names. It verifies the
+   owner key and changes only the local display name. If another account
+   already has the desired name, setup stops for operator review. Keep the
+   configured key indexes stable across deployments so the receive addresses
+   and fee balances remain the same.
 4. Deploy and wait for `GET /healthz` to return `ok: true` and `walletReady:
    true`. The public API binds immediately while walletd recovers; `/healthz`
    stays unready until both demo accounts exist and the wallet RPC responds.
