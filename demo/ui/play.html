@@ -9,6 +9,7 @@
     <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
     <link rel="stylesheet" href="play.css" />
     <script src="relay-config.js"></script>
+    <script src="https://universe.tari.mw/tari-connector.js" defer></script>
     <script type="module" src="play.js"></script>
   </head>
   <body>
@@ -26,10 +27,10 @@
       </section>
       <section class="live-setup shell" aria-labelledby="live-title">
         <div><p class="eyebrow">OPTIONAL · REAL ESMERALDA TESTNET</p><h2 id="live-title">Run it with your wallet.</h2></div>
-        <p>Live mode privately funds a relay wallet, then the relay opens and settles the Ghostline channel. The relay controls the testnet deposit and expiry refund. Use only test funds. <a href="https://sapient.tari.mw" target="_blank" rel="noopener noreferrer">Install Sapient ↗</a></p>
+        <p>Live mode needs Sapient in this browser profile (or Tari Universe). After installing or enabling Sapient, reload this page before connecting. It privately funds a relay wallet, then the relay opens and settles the Ghostline channel. The relay controls the testnet deposit and expiry refund. Use only test funds. <a href="https://sapient.tari.mw" target="_blank" rel="noopener noreferrer">Install Sapient ↗</a></p>
         <div class="actions"><button id="live-open" class="button button-secondary" type="button">Connect Sapient and open channel</button><button id="live-refund" class="button button-quiet" type="button" hidden>Check expiry and request refund</button><button id="live-stop" class="button button-quiet" type="button" hidden>Return to simulation</button></div>
         <p id="relay-config-note" class="fine-print" role="status">Checking live relay configuration…</p>
-        <p id="live-note" class="fine-print">The static site has no wallet secrets. The configured private testnet deposit and Sapient transaction fee require your approval.</p>
+        <p id="live-note" class="fine-print" role="status" aria-live="polite">The static site has no wallet secrets. Live mode requires Sapient and your approval for the 51 µT private testnet transfer and wallet fee.</p>
         <p class="fine-print"><a id="pending-funding-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Inspect pending Sapient funding transaction ↗</a></p>
       </section>
       <section class="demo shell" aria-labelledby="demo-title">

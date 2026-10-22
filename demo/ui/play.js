@@ -21,11 +21,12 @@ let liveAccepted = 0n;
 let liveRefundPending = false;
 let simulationMode = false;
 let liveSetupCancelled = false;
-let tariConnectorPromise;
 
 const XTR_RESOURCE = `resource_${"01".repeat(32)}`;
 const LIVE_PENDING_KEY = "ghostline-live-pending";
 const LIVE_CHANNEL_KEY = "ghostline-live-channel";
+const TARI_PROVIDER_READY_EVENT = "tari#initialized";
+const TARI_PROVIDER_TIMEOUT_MS = 5_000;
 const configuredRelayUrl = String(window.GHOSTLINE_CONFIG?.relayUrl || "").trim();
 
 const status = (message) => { byId("status").textContent = message; };
@@ -38,22 +39,6 @@ function randomBytes(length) {
 
 function bytesToHex(bytes) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function loadTariConnector() {
-  if (tariConnectorPromise) return tariConnectorPromise;
-  tariConnectorPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://universe.tari.mw/tari-connector.js";
-    script.async = true;
-    script.onload = resolve;
-    script.onerror = () => {
-      tariConnectorPromise = undefined;
-      reject(new Error("Could not load Tari's Sapient connector. The instant simulation remains available."));
-    };
-    document.head.append(script);
-  });
-  return tariConnectorPromise;
 }
 
 function hexToBytes(hex) {
@@ -198,17 +183,42 @@ function payToll() {
   }
 }
 
+function waitForTariProvider() {
+  if (window.tari?.request) return Promise.resolve(window.tari);
+  status("Waiting for Sapient in this browser profile…");
+
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const cleanup = () => {
+      window.removeEventListener(TARI_PROVIDER_READY_EVENT, onReady);
+      window.clearTimeout(timeout);
+    };
+    const onReady = () => {
+      if (!window.tari?.request) return;
+      cleanup();
+      resolve(window.tari);
+    };
+
+    // Sapient may inject its provider after this module has started. Register
+    // first, then check again to avoid missing the ready event between checks.
+    window.addEventListener(TARI_PROVIDER_READY_EVENT, onReady);
+    onReady();
+    timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("No Tari wallet became available in this browser. Open this page in Chrome with Sapient enabled, or use Tari Universe."));
+    }, TARI_PROVIDER_TIMEOUT_MS);
+    onReady();
+  });
+}
+
 async function tariRequest(method, params) {
-  for (let attempt = 0; !window.tari?.request && attempt < 10; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 50));
-  }
-  if (!window.tari?.request) throw new Error("No Tari wallet was found. Install Sapient or open this page in Tari Universe.");
+  const tari = await waitForTariProvider();
   try {
-    return await window.tari.request({ method, ...(params ? { params } : {}) });
+    return await tari.request({ method, ...(params ? { params } : {}) });
   } catch (error) {
     if (Number(error?.code) === 4100 && method !== "tari_requestAccounts") {
-      await window.tari.request({ method: "tari_requestAccounts" });
-      return window.tari.request({ method, ...(params ? { params } : {}) });
+      await tari.request({ method: "tari_requestAccounts" });
+      return tari.request({ method, ...(params ? { params } : {}) });
     }
     throw error;
   }
@@ -221,6 +231,10 @@ function walletError(error) {
   if (code === 4200) return "This wallet account does not support a required feature. Check its Sapient capabilities and use the simulated demo meanwhile.";
   if (code === -32603) return error?.message || "The Tari network rejected the request.";
   return error instanceof Error ? error.message : String(error);
+}
+
+function isSapientUnavailable(error) {
+  return /No Tari wallet (was found|became available)|Could not load Tari's Sapient connector/i.test(walletError(error));
 }
 
 function apiBase() {
@@ -330,6 +344,7 @@ async function waitFinalized(transactionId) {
 async function connectAndOpenLive() {
   liveSetupCancelled = false;
   byId("live-open").disabled = true;
+  byId("live-open").textContent = "Checking Sapient…";
   byId("live-stop").hidden = false;
   byId("live-stop").textContent = "Use simulated mode instead";
   try {
@@ -337,7 +352,6 @@ async function connectAndOpenLive() {
     status("Checking that the Esmeralda relay and wallet are ready before opening Sapient.");
     await relayHealth(url);
     if (liveSetupCancelled) return;
-    await loadTariConnector();
     if (liveSetupCancelled) return;
     const relay = await relayJson("/demo/config");
     let pending;
@@ -446,8 +460,16 @@ async function connectAndOpenLive() {
     byId("live-stop").textContent = "Continue with simulation";
     if (cancelled) {
       byId("live-stop").hidden = true;
+      byId("live-open").textContent = "Connect Sapient and open channel";
+      byId("live-note").textContent = "Wallet approval was cancelled. No funding transaction was submitted; you can retry whenever you're ready.";
       status(walletError(error));
+    } else if (!pending && isSapientUnavailable(error)) {
+      byId("live-open").textContent = "Retry Sapient connection";
+      byId("live-stop").textContent = "Start instant simulation";
+      byId("live-note").textContent = "Sapient wasn't detected in this tab. Reload this page in the Chrome profile where Sapient is enabled, or open it in Tari Universe, then retry. No wallet transfer was requested.";
+      status("No Tari wallet became available. Reload this page in the Chrome profile where Sapient is enabled, then retry.");
     } else {
+      byId("live-open").textContent = "Retry live setup";
       byId("live-note").textContent = pending
         ? "The pending funding transaction stays saved in this tab. Retry live setup to continue without sending again."
         : "Live setup could not start. The instant simulation is active; its separate recorded Esmeralda proof is real.";
@@ -455,6 +477,9 @@ async function connectAndOpenLive() {
     }
   } finally {
     byId("live-open").disabled = false;
+    if (byId("live-open").textContent === "Checking Sapient…") {
+      byId("live-open").textContent = "Connect Sapient and open channel";
+    }
   }
 }
 
@@ -614,7 +639,10 @@ function returnToSimulation() {
     liveSetupCancelled = true;
     byId("live-stop").hidden = true;
     simulationMode = false;
-    status("The instant browser simulation is ready. No live channel was opened.");
+    byId("service-subtitle").textContent = "Instant browser simulation · no wallet or testnet funds needed";
+    reset();
+    status("Simulation ready. Use “Ask and pay the toll” below; this will not contact Sapient or send a transaction.");
+    byId("demo-title").scrollIntoView?.({ behavior: "smooth", block: "start" });
     return;
   }
   simulationMode = !simulationMode;
@@ -643,6 +671,7 @@ function returnToSimulation() {
     status("Back in the live session. Its channel and local voucher key remain saved.");
   }
   refreshControls();
+  byId("demo-title").scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
 function showRecordedEvidence() {

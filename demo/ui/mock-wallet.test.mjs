@@ -22,6 +22,7 @@ class Element {
     this.children = [];
     this.listeners = new Map();
     this.classes = new Set();
+    this.scrolledIntoView = false;
     this.classList = {
       add: (name) => this.classes.add(name),
       remove: (name) => this.classes.delete(name),
@@ -32,6 +33,7 @@ class Element {
   append(...items) { this.children.push(...items); }
   prepend(item) { this.children.unshift(item); }
   replaceChildren(...items) { this.children = items; }
+  scrollIntoView() { this.scrolledIntoView = true; }
   querySelector(selector) {
     if (selector === ".result-label" || selector === ".fine-print") {
       return this.childrenBySelector?.get(selector) || (this.childrenBySelector ||= new Map()).set(selector, new Element(selector)).get(selector);
@@ -40,12 +42,13 @@ class Element {
   }
 }
 
-function makeHarness({ wallet = true, walletOverrides = {}, failHealth = false, coldHealth = false, fastTime = false } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, fastTime = false } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
   const calls = [];
   const walletCalls = [];
+  const windowListeners = new Map();
   let fundingTxId = "funding-test-tx";
   let payerPublicKey;
   let opened;
@@ -123,8 +126,17 @@ function makeHarness({ wallet = true, walletOverrides = {}, failHealth = false, 
   };
 
   const window = {
-    ...(tari ? { tari } : {}),
+    ...(tari && injectWalletOnLoad ? { tari } : {}),
     GHOSTLINE_CONFIG: { relayUrl: RELAY },
+    addEventListener(type, callback) {
+      const listeners = windowListeners.get(type) || new Set();
+      listeners.add(callback);
+      windowListeners.set(type, listeners);
+    },
+    removeEventListener(type, callback) { windowListeners.get(type)?.delete(callback); },
+    dispatchEvent(event) {
+      for (const callback of [...(windowListeners.get(event.type) || [])]) callback(event);
+    },
     setTimeout: fastTime ? ((callback, delay = 0) => setTimeout(() => { virtualNow += Number(delay); callback?.(); }, 0)) : setTimeout,
     clearTimeout,
   };
@@ -147,12 +159,17 @@ function makeHarness({ wallet = true, walletOverrides = {}, failHealth = false, 
 
   return {
     calls, walletCalls, elements, session,
+    injectWallet() {
+      if (!tari) throw new Error("No mock wallet was configured");
+      window.tari = tari;
+      window.dispatchEvent({ type: "tari#initialized" });
+    },
     async load() {
       await import(new URL(`play.js?mock=${Math.random()}`, ROOT));
       await new Promise((resolve) => setImmediate(resolve));
     },
     async waitFor(predicate) {
-      const deadline = originalDateNow() + 5_000;
+      const deadline = originalDateNow() + 7_500;
       while (originalDateNow() < deadline) {
         if (predicate()) return;
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -164,6 +181,17 @@ function makeHarness({ wallet = true, walletOverrides = {}, failHealth = false, 
     paidCalls: () => paidCalls,
   };
 }
+
+test("waits for Sapient's late provider initialization event", async () => {
+  const h = makeHarness({ injectWalletOnLoad: false });
+  await h.load();
+  const opening = h.elements.get("live-open").click();
+  setTimeout(() => h.injectWallet(), 0);
+  await opening;
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.startsWith("Live setup stopped:"));
+  assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.ok(h.walletCalls.some((call) => call.method === "tari_getNetwork"));
+});
 
 test("mock wallet completes connect → private funding → 5 vouchers → finalized settlement without leaking the signing key", async () => {
   const h = makeHarness();
@@ -194,6 +222,13 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   assert.equal(fundingRequest.params.kind, "sendPrivately");
   assert.equal(fundingRequest.params.amount, "51");
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/session")).length, 1);
+
+  await h.elements.get("live-stop").click();
+  assert.match(h.elements.get("service-subtitle").textContent, /Separate browser simulation/);
+  assert.equal(h.elements.get("live-stop").textContent, "Return to live session");
+  assert.equal(h.elements.get("demo-title").scrolledIntoView, true);
+  await h.elements.get("pay").click();
+  assert.equal(h.elements.get("calls").children.length, 1, "continuing with simulation switches from live vouchers to usable mock calls");
 });
 
 test("relay health failure leaves the user in a usable simulated mode without calling the wallet", async () => {
@@ -218,7 +253,7 @@ test("wrong network falls back without requesting funds", async () => {
 
 test("missing extension, rejected approval, unsupported methods, chain errors, and low balance keep simulation usable", async (t) => {
   const cases = [
-    { name: "missing extension", options: { wallet: false }, message: /No Tari wallet was found/ },
+    { name: "missing extension", options: { wallet: false }, message: /No Tari wallet became available/ },
     { name: "rejected approval", options: { walletOverrides: { tari_getNetwork: rpcError(4001, "User rejected") } }, message: /Wallet approval was cancelled/ },
     { name: "unsupported wallet method", options: { walletOverrides: { tari_getCapabilities: rpcError(4200, "Unsupported") } }, message: /does not support a required feature/ },
     { name: "chain rejection", options: { walletOverrides: { tari_getCapabilities: rpcError(-32603, "Ootle rejected wallet request") } }, message: /Ootle rejected wallet request/ },
@@ -231,6 +266,18 @@ test("missing extension, rejected approval, unsupported methods, chain errors, a
       await h.elements.get("live-open").click();
       await h.waitFor(() => h.elements.get("status").textContent.startsWith("Live setup stopped:") || scenario.message.test(h.elements.get("status").textContent));
       assert.match(h.elements.get("status").textContent, scenario.message);
+      if (scenario.name === "missing extension") {
+        assert.equal(h.elements.get("live-open").textContent, "Retry Sapient connection");
+        assert.equal(h.elements.get("live-stop").textContent, "Start instant simulation");
+        assert.match(h.elements.get("live-note").textContent, /Chrome profile where Sapient is enabled.*No wallet transfer was requested/);
+        await h.elements.get("live-stop").click();
+        assert.equal(h.elements.get("live-stop").hidden, true);
+        assert.match(h.elements.get("service-subtitle").textContent, /Instant browser simulation/);
+        assert.match(h.elements.get("status").textContent, /will not contact Sapient or send a transaction/);
+        assert.equal(h.elements.get("pay").disabled, false);
+        await h.elements.get("pay").click();
+        assert.equal(h.elements.get("calls").children.length, 1, "the simulation button leads to a usable mock call");
+      }
       assert.equal(h.elements.get("pay").disabled, false);
       assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
     });
