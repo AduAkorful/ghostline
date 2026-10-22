@@ -44,6 +44,7 @@ const ASSOCIATE_STEALTH: &str = "accounts.associate_stealth_resource";
 const KEYS_LIST: &str = "keys.list";
 const KEYS_CREATE: &str = "keys.create";
 const TRANSACTIONS_GET: &str = "transactions.get";
+const STEALTH_UTXOS_LIST: &str = "stealth_utxos.list";
 
 /// `keys.list` / `keys.create` branch for account spend keys (`tari_ootle_walletd` 0.45).
 pub const ACCOUNT_KEY_BRANCH: &str = "account";
@@ -703,6 +704,33 @@ impl WalletClient {
             serde_json::json!({ "transaction_id": transaction_id }),
         )
         .await
+    }
+
+    /// `stealth_utxos.list` — unspent and spent outputs the daemon has already unblinded.
+    ///
+    /// Live Esmeralda 0.47 returns `{ "utxos": [ { "status", "value", "memo": { "Message" }, ... } ] }`.
+    /// `value` may be a JSON number or a decimal string.
+    pub async fn stealth_utxos_list(
+        &self,
+        name: &str,
+        resource_address: &str,
+    ) -> Result<Vec<Value>, NetError> {
+        let resp: Value = self
+            .rpc(
+                STEALTH_UTXOS_LIST,
+                serde_json::json!({
+                    "account": account_name(name),
+                    "resource_address": resource_address,
+                }),
+            )
+            .await?;
+        resp.get("utxos")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| NetError::Decode {
+                path: STEALTH_UTXOS_LIST.into(),
+                details: "stealth_utxos.list missing utxos array".into(),
+            })
     }
 
     async fn rpc<T: Serialize, R: DeserializeOwned>(

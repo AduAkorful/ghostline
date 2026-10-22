@@ -438,11 +438,23 @@ async function waitWalletRequest(requestId) {
   throw new Error("Wallet approval timed out. Unlock Sapient if it is locked, then retry from this page.");
 }
 
-async function waitFinalized(transactionId) {
+function transactionLookupMissing(error) {
+  return /not found|HTTP 404/i.test(walletError(error));
+}
+
+async function waitFinalized(transactionId, { allowDroppedReceipt = false } = {}) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = await tariRequest("tari_getTransactionResult", { transactionId });
-    if (result?.Finalized || result?.result?.Finalized) return;
-    if (result?.Rejected || result?.result?.Rejected) throw new Error("The funding transaction was rejected by Ootle.");
+    try {
+      const result = await tariRequest("tari_getTransactionResult", { transactionId });
+      if (result?.Finalized || result?.result?.Finalized) return;
+      if (result?.Rejected || result?.result?.Rejected) throw new Error("The funding transaction was rejected by Ootle.");
+    } catch (error) {
+      if (allowDroppedReceipt && transactionLookupMissing(error)) {
+        status("The testnet indexer no longer has this funding receipt. Asking the relay to open from the saved deposit; no second transfer.");
+        return;
+      }
+      throw error;
+    }
     await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
   throw new Error(`Funding transaction ${transactionId} is still pending. Keep its id and retry after it finalizes.`);
@@ -465,6 +477,7 @@ async function connectAndOpenLive() {
     const relay = await relayJson("/demo/config");
     byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
     let pending = readPendingFunding();
+    const retrySavedFunding = Boolean(pending?.fundingTxId);
     if (!pending?.fundingTxId) {
       setupStage = "checking the wallet network";
       const network = await tariRequest("tari_getNetwork");
@@ -542,7 +555,7 @@ async function connectAndOpenLive() {
       showPendingFunding(pending.fundingTxId);
     }
     setupStage = "waiting for funding finality";
-    await waitFinalized(pending.fundingTxId);
+    await waitFinalized(pending.fundingTxId, { allowDroppedReceipt: retrySavedFunding });
     if (liveSetupCancelled) {
       status(`Funding transaction ${pending.fundingTxId} is finalized and saved in this browser. Continue live setup later to open its channel without paying again.`);
       return;

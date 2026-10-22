@@ -373,6 +373,30 @@ test("a pending funding record from another tab is offered for recovery without 
   assert.equal(h.elements.get("abandon-pending-funding").hidden, true);
 });
 
+test("a retry continues when the indexer has dropped the saved funding receipt", async () => {
+  const payerSecret = new Uint8Array(32).fill(3);
+  const pending = {
+    sessionId: "session-test",
+    fundingTxId: "funding-test-tx",
+    payerPublicKey: hex(publicKeyFromSecret(payerSecret)),
+    payerSecretHex: hex(payerSecret),
+  };
+  const h = makeHarness({
+    pending,
+    walletOverrides: {
+      tari_getTransactionResult: () => {
+        throw Object.assign(new Error('HTTP 404: {"error":"Transaction funding-test-tx not found"}'), { code: -32603 });
+      },
+    },
+  });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.equal(h.calls.some((call) => call.url.includes("/demo/open")), true);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
+});
+
 test("a new tab can retry a saved funded transfer using the locally stored voucher key", async () => {
   const payerSecret = new Uint8Array(32).fill(3);
   const pending = {

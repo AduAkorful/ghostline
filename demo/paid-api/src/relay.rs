@@ -1207,57 +1207,73 @@ async fn load_funding_session(
     Ok((session, verified.amount))
 }
 
-async fn verify_relay_funding(
-    config: &RelayConfig,
-    funding_tx: TransactionId,
+fn indexer_lookup_missing(error: &impl std::fmt::Display) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("not found") || text.contains("http 404")
+}
+
+fn json_microtari(value: &serde_json::Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str()?.parse::<u64>().ok())
+}
+
+fn listed_utxo_memo_message(utxo: &serde_json::Value) -> Option<&str> {
+    utxo.get("memo")
+        .and_then(|memo| memo.get("Message").or_else(|| memo.get("message")))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn listed_utxo_is_unspent(utxo: &serde_json::Value) -> bool {
+    utxo.get("status")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|status| status.eq_ignore_ascii_case("unspent"))
+}
+
+/// Match an already-unblinded opener UTXO that the wallet scanned, including when
+/// the public indexer has dropped the original Sapient transaction result.
+fn verify_funding_from_listed_utxos(
+    utxos: &[serde_json::Value],
+    deposit: u64,
     session_id: &str,
 ) -> Result<VerifiedFunding, String> {
-    // Sapient submits this transaction through the user's wallet provider, not relay walletd.
-    // walletd's transactions.wait_result / transactions.get only know transactions it submitted
-    // itself, so use the network indexer for finality and its stored body for output validation.
-    let indexer = IndexerClient::connect(&config.indexer_url).map_err(|e| e.to_string())?;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
-    loop {
-        match indexer.transaction_result(funding_tx).await {
-            Ok(result) => match indexer_result_status(&result) {
-                "Finalized" => break,
-                "Pending" => {}
-                "FinalizedAbort" | "Rejected" => {
-                    return Err("Sapient funding transaction was rejected by Ootle".into());
-                }
-                _ => {
-                    return Err("indexer returned an unrecognized Sapient funding result".into());
-                }
-            },
-            Err(error) if tokio::time::Instant::now() >= deadline => {
-                return Err(format!(
-                    "could not confirm Sapient funding finality through the Esmeralda indexer within 90 seconds: {error}"
-                ));
-            }
-            Err(_) => {}
+    let mut matches = Vec::new();
+    for utxo in utxos {
+        if !listed_utxo_is_unspent(utxo) {
+            continue;
         }
-        if tokio::time::Instant::now() >= deadline {
-            return Err("Sapient funding transaction is still pending after 90 seconds".into());
+        let Some(value) = json_microtari(utxo.get("value").unwrap_or(&serde_json::Value::Null))
+        else {
+            continue;
+        };
+        if value != deposit {
+            continue;
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let Some(message) = listed_utxo_memo_message(utxo) else {
+            continue;
+        };
+        let Some(binding) = parse_funding_memo_message(message) else {
+            continue;
+        };
+        if binding.session_id.eq_ignore_ascii_case(session_id) {
+            matches.push((value, binding));
+        }
     }
+    if matches.len() != 1 {
+        return Err(format!(
+            "The Esmeralda indexer no longer has this funding transaction. The relay found {} unspent opener deposit(s) of {deposit} µT bound to this session. Keep the saved transfer; do not send another deposit.",
+            matches.len()
+        ));
+    }
+    let (amount, binding) = matches.pop().expect("exactly one matching unspent deposit");
+    Ok(VerifiedFunding { amount, binding })
+}
 
-    let entry = indexer.transaction(funding_tx).await.map_err(|error| {
-        format!("cannot inspect finalized Sapient funding transaction in the indexer: {error}")
-    })?;
-    let indexed_id = entry
-        .pointer("/transaction/transaction_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or("indexer funding transaction response omitted its transaction id")?;
-    if !indexed_id.eq_ignore_ascii_case(&funding_tx.to_string()) {
-        return Err(
-            "indexer returned a different transaction while verifying Sapient funding".into(),
-        );
-    }
-    let tx = entry
-        .pointer("/transaction/transaction")
-        .ok_or("indexer funding transaction response omitted its transaction body")?;
-    let outputs = ghostline_net::stealth_utxos_from_wallet_tx(tx);
+fn verify_unblinded_funding_outputs(
+    outputs: &[ghostline_net::WalletStealthUtxo],
+    config: &RelayConfig,
+    session_id: &str,
+) -> Result<VerifiedFunding, String> {
     let mut relay_values = Vec::new();
     let mut candidate_count = 0usize;
     let mut binding = None;
@@ -1286,7 +1302,6 @@ async fn verify_relay_funding(
     if funding_output_total(&relay_values, config.deposit).is_err() {
         tracing::warn!(
             event = "sapient_funding_output_mismatch",
-            funding_tx_id = %funding_tx,
             transaction_output_count = outputs.len(),
             candidate_output_count = candidate_count,
             verified_output_count = relay_values.len(),
@@ -1309,6 +1324,90 @@ async fn verify_relay_funding(
                 .to_owned()
         })?,
     })
+}
+
+async fn verify_funding_from_opener_wallet(
+    config: &RelayConfig,
+    session_id: &str,
+) -> Result<VerifiedFunding, String> {
+    let wallet = connect_wallet(config).await?;
+    let listed = wallet
+        .stealth_utxos_list(
+            &config.opener_account,
+            &STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
+        )
+        .await
+        .map_err(|error| {
+            format!("indexer dropped the funding transaction, and listing opener stealth outputs failed: {error}")
+        })?;
+    verify_funding_from_listed_utxos(&listed, config.deposit, session_id)
+}
+
+async fn verify_relay_funding(
+    config: &RelayConfig,
+    funding_tx: TransactionId,
+    session_id: &str,
+) -> Result<VerifiedFunding, String> {
+    // Sapient submits this transaction through the user's wallet provider, not relay walletd.
+    // walletd's transactions.wait_result / transactions.get only know transactions it submitted
+    // itself, so use the network indexer for finality and its stored body for output validation.
+    // Esmeralda indexers can drop older transaction results while explorer still shows them;
+    // then match the already-scanned opener UTXO instead of asking for another deposit.
+    let indexer = IndexerClient::connect(&config.indexer_url).map_err(|e| e.to_string())?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        match indexer.transaction_result(funding_tx).await {
+            Ok(result) => match indexer_result_status(&result) {
+                "Finalized" => break,
+                "Pending" => {}
+                "FinalizedAbort" | "Rejected" => {
+                    return Err("Sapient funding transaction was rejected by Ootle".into());
+                }
+                _ => {
+                    return Err("indexer returned an unrecognized Sapient funding result".into());
+                }
+            },
+            Err(error) if indexer_lookup_missing(&error) => {
+                return verify_funding_from_opener_wallet(config, session_id).await;
+            }
+            Err(error) if tokio::time::Instant::now() >= deadline => {
+                return Err(format!(
+                    "could not confirm Sapient funding finality through the Esmeralda indexer within 90 seconds: {error}"
+                ));
+            }
+            Err(_) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Sapient funding transaction is still pending after 90 seconds".into());
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    let entry = match indexer.transaction(funding_tx).await {
+        Ok(entry) => entry,
+        Err(error) if indexer_lookup_missing(&error) => {
+            return verify_funding_from_opener_wallet(config, session_id).await;
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect finalized Sapient funding transaction in the indexer: {error}"
+            ));
+        }
+    };
+    let indexed_id = entry
+        .pointer("/transaction/transaction_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("indexer funding transaction response omitted its transaction id")?;
+    if !indexed_id.eq_ignore_ascii_case(&funding_tx.to_string()) {
+        return Err(
+            "indexer returned a different transaction while verifying Sapient funding".into(),
+        );
+    }
+    let tx = entry
+        .pointer("/transaction/transaction")
+        .ok_or("indexer funding transaction response omitted its transaction body")?;
+    let outputs = ghostline_net::stealth_utxos_from_wallet_tx(tx);
+    verify_unblinded_funding_outputs(&outputs, config, session_id)
 }
 
 fn funding_output_total(values: &[u64], expected: u64) -> Result<u64, &'static str> {
@@ -2188,6 +2287,48 @@ mod tests {
         assert!(funding_memo_matches_session(Some(&v2_memo), &session));
         assert!(!funding_memo_matches_session(Some(&v2_memo), "session-a"));
         assert!(parse_funding_memo_message("Ghostline:").is_none());
+    }
+
+    #[test]
+    fn indexer_404_is_treated_as_a_dropped_funding_receipt() {
+        assert!(indexer_lookup_missing(
+            &"indexer rejected transactions/abc/result: HTTP 404: {\"error\":\"Transaction abc not found\"}"
+        ));
+        assert!(!indexer_lookup_missing(
+            &"could not confirm Sapient funding finality through the Esmeralda indexer"
+        ));
+    }
+
+    #[test]
+    fn wallet_listed_unspent_deposit_matches_the_saved_session() {
+        let session = "ab".repeat(32);
+        let payer = "cd".repeat(32);
+        let memo = funding_memo_for_binding(&session, &payer, "otl_esm_1refundaddr").unwrap();
+        let utxos = vec![
+            serde_json::json!({
+                "status": "Spent",
+                "value": "51",
+                "memo": {"Message": memo},
+            }),
+            serde_json::json!({
+                "status": "Unspent",
+                "value": "51",
+                "memo": {"Message": memo},
+            }),
+            serde_json::json!({
+                "status": "Unspent",
+                "value": "51",
+                "memo": {"Message": "Ghostline:other-session"},
+            }),
+        ];
+        let verified = verify_funding_from_listed_utxos(&utxos, 51, &session).unwrap();
+        assert_eq!(verified.amount, 51);
+        assert_eq!(verified.binding.session_id, session);
+        assert_eq!(
+            verified.binding.payer_public_key.as_deref(),
+            Some(payer.as_str())
+        );
+        assert!(verify_funding_from_listed_utxos(&utxos[..1], 51, &session).is_err());
     }
 
     #[test]
