@@ -452,6 +452,7 @@ async function connectAndOpenLive() {
     } else {
       payerSecret = Uint8Array.from((sessionStorage.getItem("ghostline-live-payer-secret") || "").match(/../g) || [], (byte) => Number.parseInt(byte, 16));
       if (payerSecret.length !== 32) throw new Error("This tab lost its local voucher key. Keep the pending transfer id and contact the relay before retrying.");
+      byId("live-open").textContent = "Retrying relay open…";
       status("Retrying the relay open for your existing finalized funding transaction; no second wallet transfer will be requested.");
       showPendingFunding(pending.fundingTxId);
     }

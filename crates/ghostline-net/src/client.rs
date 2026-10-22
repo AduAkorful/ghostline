@@ -94,6 +94,15 @@ impl IndexerClient {
         self.send_json(self.http.get(url), &path).await
     }
 
+    /// `GET /transactions/{id}` — best-effort stored transaction body from the indexer.
+    ///
+    /// The transaction result endpoint is authoritative for finality, but does not include
+    /// the instruction body needed to verify a confidential funding output's recipient.
+    pub async fn transaction(&self, transaction_id: TransactionId) -> Result<Value, NetError> {
+        let path = format!("{TRANSACTIONS}/{transaction_id}");
+        self.get_json(&path).await
+    }
+
     /// `GET /substates/{id}`. `Down` is a 404 whose body says `(vN) is down`.
     pub async fn substate_presence(&self, substate_id: &str) -> Result<SubstatePresence, NetError> {
         let (version, down, _) = self.substate_lookup(substate_id).await?;

@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
+    time::Duration,
 };
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
@@ -980,22 +981,52 @@ async fn verify_relay_funding(
     config: &RelayConfig,
     funding_tx: TransactionId,
 ) -> Result<(), String> {
-    let wallet = connect_wallet(config).await?;
-    let result = wallet
-        .wait_result(funding_tx, Some(90))
-        .await
-        .map_err(|error| {
-            format!("funding transaction is not known/finalized by relay walletd: {error}")
-        })?;
-    let outcome = result.get("result").unwrap_or(&result);
-    if !(execution_accepted(outcome) || execution_accepted(&result)) {
-        return Err("Sapient funding transaction is not finalized".into());
+    // Sapient submits this transaction through the user's wallet provider, not relay walletd.
+    // walletd's transactions.wait_result / transactions.get only know transactions it submitted
+    // itself, so use the network indexer for finality and its stored body for output validation.
+    let indexer = IndexerClient::connect(&config.indexer_url).map_err(|e| e.to_string())?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        match indexer.transaction_result(funding_tx).await {
+            Ok(result) => match indexer_result_status(&result) {
+                "Finalized" => break,
+                "Pending" => {}
+                "FinalizedAbort" | "Rejected" => {
+                    return Err("Sapient funding transaction was rejected by Ootle".into());
+                }
+                _ => {
+                    return Err("indexer returned an unrecognized Sapient funding result".into());
+                }
+            },
+            Err(error) if tokio::time::Instant::now() >= deadline => {
+                return Err(format!(
+                    "could not confirm Sapient funding finality through the Esmeralda indexer within 90 seconds: {error}"
+                ));
+            }
+            Err(_) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Sapient funding transaction is still pending after 90 seconds".into());
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    let tx = wallet
-        .transaction_get(funding_tx)
-        .await
-        .map_err(|error| format!("cannot inspect Sapient funding transaction: {error}"))?;
-    let outputs = ghostline_net::stealth_utxos_from_wallet_tx(&tx);
+
+    let entry = indexer.transaction(funding_tx).await.map_err(|error| {
+        format!("cannot inspect finalized Sapient funding transaction in the indexer: {error}")
+    })?;
+    let indexed_id = entry
+        .pointer("/transaction/transaction_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("indexer funding transaction response omitted its transaction id")?;
+    if !indexed_id.eq_ignore_ascii_case(&funding_tx.to_string()) {
+        return Err(
+            "indexer returned a different transaction while verifying Sapient funding".into(),
+        );
+    }
+    let tx = entry
+        .pointer("/transaction/transaction")
+        .ok_or("indexer funding transaction response omitted its transaction body")?;
+    let outputs = ghostline_net::stealth_utxos_from_wallet_tx(tx);
     let mut relay_values = Vec::new();
     for output in outputs.iter().filter(|output| output.auth == "Key") {
         if output
