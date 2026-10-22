@@ -37,7 +37,7 @@ export GHOSTLINE_DEMO_DEPOSIT="${GHOSTLINE_DEMO_DEPOSIT:-51}"
 export GHOSTLINE_DEMO_OPENER_KEY_INDEX="${GHOSTLINE_DEMO_OPENER_KEY_INDEX:-2}"
 export GHOSTLINE_DEMO_FEE_KEY_INDEX="${GHOSTLINE_DEMO_FEE_KEY_INDEX:-3}"
 export PORT="${PORT:-10000}"
-recovery_retry_delay="${GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS:-30}"
+recovery_retry_delay="${GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS:-2}"
 case "$recovery_retry_delay" in
     ''|*[!0-9]*)
         echo 'GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS must be a nonnegative integer' >&2
@@ -117,6 +117,7 @@ account_create() {
     fi
 }
 
+recovery_pending_logged=no
 account_create_or_retry() {
     account_error_file="$wallet_base/.ghostline-account-create-error.$$"
     if account_create "$@" 2>"$account_error_file"; then
@@ -125,13 +126,17 @@ account_create_or_retry() {
     fi
     if grep -Fq 'the wallet is still recovering accounts from its seed' "$account_error_file"; then
         # This response proves walletd accepted the seed and opened this database.
-        # Recovery will be retried by walletd on its next start; preserve the database
-        # marker and let Render restart after a brief delay instead of flooding logs.
+        # Preserve that fact, then keep this process alive while the seed scan finishes.
+        # Exiting here makes Render mark the deployment failed even though recovery is
+        # transient and the account can be created as soon as walletd finishes scanning.
         mark_seed_initialized
         rm -f "$account_error_file"
-        echo 'wallet seed is initialized; account recovery is pending, preserving the wallet database for retry' >&2
+        if [ "$recovery_pending_logged" != yes ]; then
+            echo 'wallet seed is initialized; waiting for account recovery to finish' >&2
+            recovery_pending_logged=yes
+        fi
         sleep "$recovery_retry_delay"
-        exit 1
+        return 1
     fi
     rm -f "$account_error_file"
     return 1

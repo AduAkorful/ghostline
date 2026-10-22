@@ -33,10 +33,27 @@ case "$2" in
                 *) shift ;;
             esac
         done
-        case "${FAKE_CREATE_MODE:-recovering}" in
+        case "${FAKE_CREATE_MODE:-recovering-once}" in
             recovering)
                 echo "wallet daemon RPC accounts.create failed: Invalid request: the wallet is still recovering accounts from its seed" >&2
                 exit 1
+                ;;
+            recovering-once)
+                count=0
+                [ ! -f "$FAKE_RECOVERY_ATTEMPTS" ] || count=$(cat "$FAKE_RECOVERY_ATTEMPTS")
+                count=$((count + 1))
+                printf '%s\n' "$count" > "$FAKE_RECOVERY_ATTEMPTS"
+                if [ "$count" -eq 1 ]; then
+                    echo "wallet daemon RPC accounts.create failed: Invalid request: the wallet is still recovering accounts from its seed" >&2
+                    exit 1
+                fi
+                if [ "$key_index" -lt 2 ]; then
+                    echo "Store error: UNIQUE constraint failed: accounts.owner_public_key" >&2
+                    exit 1
+                fi
+                printf '%s %s\n' "$name" "$key_index" >> "$FAKE_ACCOUNT_CREATES"
+                : > "$FAKE_ACCOUNT_DIR/$name"
+                exit 0
                 ;;
             recovered)
                 # The seed scan already restored accounts at indexes 0 and 1.
@@ -104,17 +121,19 @@ export GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS=0
 export FAKE_WALLETD_ARGS="$tmp_root/walletd-args"
 export FAKE_ACCOUNT_DIR="$tmp_root/accounts"
 export FAKE_ACCOUNT_CREATES="$tmp_root/account-creates"
+export FAKE_RECOVERY_ATTEMPTS="$tmp_root/recovery-attempts"
 mkdir -p "$FAKE_ACCOUNT_DIR"
 export FAKE_WALLETD_MODE=running
-export FAKE_CREATE_MODE=recovering
+export FAKE_CREATE_MODE=recovering-once
 
 set +e
 bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/recovery.stdout" 2>"$tmp_root/recovery.stderr"
 recovery_status=$?
 set -e
 
-if [ "$recovery_status" -eq 0 ]; then
-    echo "expected startup to stop while wallet recovery is pending" >&2
+if [ "$recovery_status" -ne 0 ]; then
+    echo "expected startup to wait for wallet recovery and then finish" >&2
+    cat "$tmp_root/recovery.stderr" >&2
     exit 1
 fi
 if [ ! -f "$TARI_BASE_DIR/.ghostline-seed-initialized" ]; then
@@ -125,21 +144,31 @@ if ! grep -Fq -- "--indexer-api-url $GHOSTLINE_WALLET_INDEXER_URLS" "$FAKE_WALLE
     echo "walletd did not receive the optional indexer URL list" >&2
     exit 1
 fi
-if ! grep -Fq 'account recovery is pending' "$tmp_root/recovery.stderr"; then
+if ! grep -Fq 'waiting for account recovery to finish' "$tmp_root/recovery.stderr"; then
     echo "expected a concise recovery-pending diagnostic" >&2
     exit 1
 fi
+if [ "$(cat "$FAKE_RECOVERY_ATTEMPTS")" -lt 2 ]; then
+    echo "expected account creation to retry after wallet recovery" >&2
+    exit 1
+fi
+if ! grep -Fxq 'relay-opener 2' "$FAKE_ACCOUNT_CREATES" || ! grep -Fxq 'relay-fees 3' "$FAKE_ACCOUNT_CREATES"; then
+    echo "expected both demo accounts to be created after recovery" >&2
+    exit 1
+fi
 
-# A Render restart must reuse the accepted wallet database without replaying
+# A later process start must reuse the accepted wallet database without replaying
 # seed words. With no explicit override, walletd's built-in indexer set remains
 # in effect.
 unset GHOSTLINE_WALLET_INDEXER_URLS
+export FAKE_CREATE_MODE=recovered
 set +e
 bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/restart.stdout" 2>"$tmp_root/restart.stderr"
 restart_status=$?
 set -e
-if [ "$restart_status" -eq 0 ]; then
-    echo "expected restarted process to remain pending recovery" >&2
+if [ "$restart_status" -ne 0 ]; then
+    echo "expected restarted process to reuse the initialized wallet" >&2
+    cat "$tmp_root/restart.stderr" >&2
     exit 1
 fi
 if tail -n 1 "$FAKE_WALLETD_ARGS" | grep -Fq -- '--seed-words'; then
@@ -154,6 +183,8 @@ fi
 # An invalid-seed start exits before wallet RPC is available. It must not mark the
 # partially created database as initialized.
 rm -rf "$TARI_BASE_DIR"
+rm -rf "$FAKE_ACCOUNT_DIR"
+mkdir -p "$FAKE_ACCOUNT_DIR"
 export FAKE_WALLETD_MODE=exit
 export FAKE_CREATE_MODE=connection
 set +e
