@@ -12,6 +12,24 @@ set +x
 : "${GHOSTLINE_DEMO_FEE_ACCOUNT_NAME:?set the deterministic fee account name}"
 : "${GHOSTLINE_LEDGER_PATH:?set the private relay state directory}"
 
+# Render's bulk .env import strips these quotes, but copying the line into a single
+# value field can preserve them. Normalize harmless whitespace either way; never log the
+# resulting phrase. This also turns a wrapped paste into the one-line value walletd expects.
+wallet_seed_words="$GHOSTLINE_WALLET_SEED_WORDS"
+case "$wallet_seed_words" in
+    \"*\") wallet_seed_words=${wallet_seed_words#\"}; wallet_seed_words=${wallet_seed_words%\"} ;;
+    \'*\') wallet_seed_words=${wallet_seed_words#\'}; wallet_seed_words=${wallet_seed_words%\'} ;;
+esac
+wallet_seed_words="$(printf '%s' "$wallet_seed_words" | tr '\r\n\t' '   ' | awk '{$1=$1; print}')"
+if ! printf '%s\n' "$wallet_seed_words" | awk '
+    NR != 1 || NF != 24 { exit 1 }
+    { for (i = 1; i <= NF; i++) if ($i !~ /^[a-z][a-z]*$/) exit 1 }
+    END { if (NR != 1 || NF != 24) exit 1 }
+'; then
+    echo 'GHOSTLINE_WALLET_SEED_WORDS must be 24 lowercase English words; paste one line or import the .env file' >&2
+    exit 1
+fi
+
 export GHOSTLINE_DEMO_MODE=1
 export GHOSTLINE_NETWORK=esmeralda
 export GHOSTLINE_NETWORK_TAG="${GHOSTLINE_NETWORK_TAG:-38}"
@@ -44,7 +62,7 @@ elif [ -e "$wallet_db" ]; then
     exit 1
 else
     # The seed phrase is passed as one argument because walletd exposes it only as a CLI option.
-    set -- --seed-words "$GHOSTLINE_WALLET_SEED_WORDS"
+    set -- --seed-words "$wallet_seed_words"
 fi
 "$wallet_bin" --network esmeralda --base-path "$wallet_base" \
     --listen-on 127.0.0.1:5100 --authentication none \
