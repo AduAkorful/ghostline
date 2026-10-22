@@ -10,15 +10,49 @@ write_fake_cli() {
 #!/bin/sh
 case "$2" in
     account-get)
+        name=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --name) name=$2; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        if [ -n "$name" ] && [ -f "$FAKE_ACCOUNT_DIR/$name" ]; then
+            printf 'address=%s\n' "$name"
+            exit 0
+        fi
         exit 1
         ;;
     account-create)
-        if [ "${FAKE_CREATE_MODE:-recovering}" = recovering ]; then
-            echo "wallet daemon RPC accounts.create failed: Invalid request: the wallet is still recovering accounts from its seed" >&2
-            exit 1
-        fi
-        echo "wallet daemon RPC accounts.create failed: could not connect" >&2
-        exit 1
+        name=
+        key_index=0
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --name) name=$2; shift 2 ;;
+                --key-index) key_index=$2; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        case "${FAKE_CREATE_MODE:-recovering}" in
+            recovering)
+                echo "wallet daemon RPC accounts.create failed: Invalid request: the wallet is still recovering accounts from its seed" >&2
+                exit 1
+                ;;
+            recovered)
+                # The seed scan already restored accounts at indexes 0 and 1.
+                if [ "$key_index" -lt 2 ]; then
+                    echo "Store error: UNIQUE constraint failed: accounts.owner_public_key" >&2
+                    exit 1
+                fi
+                printf '%s %s\n' "$name" "$key_index" >> "$FAKE_ACCOUNT_CREATES"
+                : > "$FAKE_ACCOUNT_DIR/$name"
+                exit 0
+                ;;
+            *)
+                echo "wallet daemon RPC accounts.create failed: could not connect" >&2
+                exit 1
+                ;;
+        esac
         ;;
 esac
 exit 2
@@ -39,8 +73,17 @@ FAKE
     chmod +x "$tmp_root/walletd"
 }
 
+write_fake_api() {
+    cat > "$tmp_root/paid-api" <<'FAKE'
+#!/bin/sh
+exit 0
+FAKE
+    chmod +x "$tmp_root/paid-api"
+}
+
 write_fake_cli
 write_fake_walletd
+write_fake_api
 
 export GHOSTLINE_WALLET_SEED_WORDS="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon"
 export GHOSTLINE_WALLET_PASSWORD=test-password
@@ -56,8 +99,12 @@ export GHOSTLINE_WALLET_URL=http://127.0.0.1:5100
 export TARI_BASE_DIR="$tmp_root/wallet"
 export TARI_WALLETD_BIN="$tmp_root/walletd"
 export GHOSTLINE_CLI_BIN="$tmp_root/ghostline"
+export GHOSTLINE_PAID_API_BIN="$tmp_root/paid-api"
 export GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS=0
 export FAKE_WALLETD_ARGS="$tmp_root/walletd-args"
+export FAKE_ACCOUNT_DIR="$tmp_root/accounts"
+export FAKE_ACCOUNT_CREATES="$tmp_root/account-creates"
+mkdir -p "$FAKE_ACCOUNT_DIR"
 export FAKE_WALLETD_MODE=running
 export FAKE_CREATE_MODE=recovering
 
@@ -119,6 +166,31 @@ if [ "$invalid_status" -eq 0 ]; then
 fi
 if [ -f "$TARI_BASE_DIR/.ghostline-seed-initialized" ]; then
     echo "invalid-seed startup must not create the initialized wallet marker" >&2
+    exit 1
+fi
+
+# The Render wallet's successful seed scan recovered two existing account
+# owners. Startup must choose unused key indexes instead of recreating either.
+rm -rf "$TARI_BASE_DIR" "$FAKE_ACCOUNT_DIR"
+mkdir -p "$FAKE_ACCOUNT_DIR"
+unset GHOSTLINE_DEMO_OPENER_KEY_INDEX GHOSTLINE_DEMO_FEE_KEY_INDEX
+export FAKE_WALLETD_MODE=running
+export FAKE_CREATE_MODE=recovered
+set +e
+bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/recovered.stdout" 2>"$tmp_root/recovered.stderr"
+recovered_status=$?
+set -e
+if [ "$recovered_status" -ne 0 ]; then
+    echo "expected startup to reuse the recovered wallet and create relay accounts" >&2
+    cat "$tmp_root/recovered.stderr" >&2
+    exit 1
+fi
+if ! grep -Fxq 'relay-opener 2' "$FAKE_ACCOUNT_CREATES"; then
+    echo "expected opener account to use unused key index 2" >&2
+    exit 1
+fi
+if ! grep -Fxq 'relay-fees 3' "$FAKE_ACCOUNT_CREATES"; then
+    echo "expected fee account to use unused key index 3" >&2
     exit 1
 fi
 

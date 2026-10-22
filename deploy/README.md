@@ -45,7 +45,7 @@ wallet that holds valuable assets.
    startup logs and fund that account with Esmeralda test XTR for open,
    settlement, and refund fees. The demo's private deposits arrive at the
    separate `ghostline-demo-opener` account from each user's Sapient wallet.
-   These are derived accounts (indices 2 and 1 respectively) in the dedicated
+   These are derived accounts (indices 3 and 2 respectively) in the dedicated
    relay wallet. Each 51 µT user deposit covers five 10 µT calls and the
    required 1 µT change output; transaction fees are additional.
 4. Deploy and wait for `GET /healthz` to return `ok: true` and `walletReady:
