@@ -44,6 +44,8 @@ case "$recovery_retry_delay" in
         exit 1
         ;;
 esac
+recovery_restart_delay=30
+recovery_restart_limit=5
 
 wallet_bin="${TARI_WALLETD_BIN:-/usr/local/bin/tari_ootle_walletd}"
 cli_bin="${GHOSTLINE_CLI_BIN:-/usr/local/bin/ghostline}"
@@ -78,18 +80,37 @@ else
 fi
 # GHOSTLINE_WALLET_INDEXER_URLS is optional. Without it, walletd keeps its
 # network-provided indexer set (including its built-in fallback endpoints).
-if [ -n "$wallet_indexers" ]; then
-    # The daemon accepts a comma-separated URL list as one option value.
-    "$wallet_bin" --network esmeralda --indexer-api-url "$wallet_indexers" \
-        --base-path "$wallet_base" \
-        --listen-on 127.0.0.1:5100 --authentication none \
-        --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
-else
-    "$wallet_bin" --network esmeralda --base-path "$wallet_base" \
-    --listen-on 127.0.0.1:5100 --authentication none \
-    --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
-fi
-wallet_pid=$!
+# A retry after accepted seed recovery reopens the same database without
+# supplying the seed again. Never delete or replace that database on restart.
+walletd_start() {
+    if [ -f "$wallet_seed_marker" ]; then
+        if [ ! -d "$wallet_db" ]; then
+            echo 'wallet initialization marker exists but the wallet database is missing; refusing to create a different wallet' >&2
+            return 1
+        fi
+        set --
+    else
+        if [ -e "$wallet_db" ]; then
+            echo 'wallet database exists without a successful seed-initialization marker; refusing to seed or replace it' >&2
+            return 1
+        fi
+        set -- --seed-words "$wallet_seed_words"
+    fi
+    if [ -n "$wallet_indexers" ]; then
+        # The daemon accepts a comma-separated URL list as one option value.
+        "$wallet_bin" --network esmeralda --indexer-api-url "$wallet_indexers" \
+            --base-path "$wallet_base" \
+            --listen-on 127.0.0.1:5100 --authentication none \
+            --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
+    else
+        "$wallet_bin" --network esmeralda --base-path "$wallet_base" \
+            --listen-on 127.0.0.1:5100 --authentication none \
+            --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
+    fi
+    wallet_pid=$!
+}
+
+walletd_start
 api_pid=
 cleanup() {
     if [ -n "$api_pid" ]; then
@@ -133,7 +154,9 @@ account_create() {
 }
 
 recovery_pending_logged=no
+account_retry_reason=
 account_create_or_retry() {
+    account_retry_reason=rpc_transport
     account_error_file="$wallet_base/.ghostline-account-create-error.$$"
     if account_create "$@" 2>"$account_error_file"; then
         rm -f "$account_error_file"
@@ -142,6 +165,7 @@ account_create_or_retry() {
     if grep -Fq 'the wallet is still recovering accounts from its seed' "$account_error_file"; then
         # This response proves walletd accepted the seed and opened this database.
         mark_seed_initialized
+        account_retry_reason=seed_recovery
     elif grep -Eiq 'could not connect|connection refused|timed out|error sending request for url' "$account_error_file"; then
         # walletd may still be bringing up its loopback RPC; do not mark the seed as
         # initialized until walletd confirms that it accepted the seed.
@@ -160,7 +184,20 @@ account_create_or_retry() {
     return 1
 }
 
+walletd_restart() {
+    if ! kill -0 "$wallet_pid" 2>/dev/null; then
+        echo 'wallet daemon exited before recovery could be retried' >&2
+        return 1
+    fi
+    kill -TERM "$wallet_pid" 2>/dev/null || true
+    wait "$wallet_pid" 2>/dev/null || true
+    walletd_start || return 1
+    echo 'restarted wallet daemon to retry seed recovery against the configured indexers' >&2
+}
+
 ensure_account() {
+    recovery_restarts=0
+    restart_delay="$recovery_restart_delay"
     while :; do
         if account_ready "$1"; then
             return 0
@@ -172,6 +209,29 @@ ensure_account() {
         fi
         if [ "$create_status" -ne 1 ]; then
             return "$create_status"
+        fi
+        if [ "$account_retry_reason" = seed_recovery ]; then
+            if [ "$recovery_restarts" -ge "$recovery_restart_limit" ]; then
+                echo "wallet seed recovery is still blocked after $recovery_restarts wallet restarts; the configured Esmeralda indexer has not served a checkpoint walletd can verify" >&2
+                echo 'leaving the relay online but unready; recovery requires the indexer to catch up and a later wallet restart' >&2
+                wait "$api_pid"
+                return 1
+            fi
+            recovery_restarts=$((recovery_restarts + 1))
+            echo "wallet seed recovery attempt $recovery_restarts/$recovery_restart_limit; restarting in ${restart_delay}s" >&2
+            sleep "$restart_delay"
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+                echo 'paid API exited before wallet recovery completed' >&2
+                return 1
+            fi
+            if ! walletd_restart; then
+                return 1
+            fi
+            restart_delay=$((restart_delay * 2))
+            if [ "$restart_delay" -gt 300 ]; then
+                restart_delay=300
+            fi
+            continue
         fi
         if ! kill -0 "$wallet_pid" 2>/dev/null; then
             echo 'wallet daemon exited before a demo account became available' >&2
