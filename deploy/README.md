@@ -11,8 +11,9 @@ wallet that holds valuable assets.
 
 1. In Render, create a Blueprint from this repository and select `main`. Review
    [`render.yaml`](../render.yaml); the service is named `ghostline-paywall`.
-   Automatic deploys are disabled so pushing unrelated commits does not restart
-   the wallet. Deploy manually only when no channel is open.
+   Every push to `main` triggers a Render deploy. The service stores wallet and
+   channel state under ephemeral `/tmp`, so avoid pushing while a demo channel
+   is open; a deploy can restart the process and lose that state.
 2. Before the first deploy, create a dedicated Esmeralda relay wallet. Keep its
    seed words, wallet database password, and index-0 `view_only_key` private.
    Set these as Render secrets:

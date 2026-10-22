@@ -7,7 +7,7 @@ services:
     branch: main
     dockerfilePath: ./deploy/Dockerfile
     dockerContext: .
-    autoDeploy: false
+    autoDeploy: true
     healthCheckPath: /healthz
     envVars:
       - key: GHOSTLINE_NETWORK
