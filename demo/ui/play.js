@@ -149,12 +149,28 @@ function renderCall(fortune, callNumber, voucher) {
 function refreshControls() {
   if (liveChannel && !simulationMode) {
     byId("pay").disabled = liveRefundPending || liveCalls >= countLimit;
+    byId("pay").textContent = liveCalls >= countLimit ? "Five live calls complete" : `Send live call ${liveCalls + 1} of ${countLimit} · sign voucher`;
+    byId("run-simulation").hidden = true;
     byId("settle").disabled = liveRefundPending || liveCalls !== countLimit;
     byId("settle").textContent = liveCalls === countLimit ? "Settle live channel" : "Settlement unlocks after 5 calls";
+    byId("demo-progress").textContent = `${liveCalls} of ${countLimit} live calls complete · ${liveAccepted.toString()} µT accepted.`;
     return;
   }
-  byId("pay").disabled = !evidenceLoaded || paywall.calls >= countLimit;
+  const remaining = countLimit - paywall.calls;
+  byId("pay").disabled = !evidenceLoaded || remaining <= 0;
+  byId("pay").textContent = remaining <= 0
+    ? "Five simulated calls complete"
+    : `Run simulated call ${paywall.calls + 1} of ${countLimit} · sign voucher`;
+  byId("run-simulation").hidden = false;
+  byId("run-simulation").disabled = !evidenceLoaded || remaining <= 0;
+  byId("run-simulation").textContent = remaining === countLimit
+    ? `Run all ${countLimit} simulated calls`
+    : remaining > 0 ? `Finish the remaining ${remaining} calls` : "Simulation complete";
+  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted.${paywall.calls === countLimit ? " Recorded settlement evidence is now shown on the right." : " Run the next call or finish the remaining calls in one click."}`;
   byId("settle").disabled = paywall.calls !== countLimit;
+  byId("settle").textContent = paywall.calls === countLimit
+    ? "Show recorded settlement evidence · separate run"
+    : `Complete ${countLimit} calls to unlock recorded evidence`;
 }
 
 function askForQuote() {
@@ -181,6 +197,15 @@ function payToll() {
     status(`Voucher rejected: ${error instanceof Error ? error.message : "unknown error"}`);
     refreshControls();
   }
+}
+
+function runRemainingSimulation() {
+  if (liveChannel && !simulationMode) return;
+  const remaining = countLimit - paywall.calls;
+  if (remaining <= 0) return;
+  for (let index = 0; index < remaining; index += 1) payToll();
+  status(`Simulation complete: ${paywall.calls} paid calls, ${accepted.toString()} µT cumulative. The recorded Esmeralda evidence is separate from these browser clicks.`);
+  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted. The recorded Esmeralda proof is separate from this simulation.`;
 }
 
 function waitForTariProvider() {
@@ -717,6 +742,7 @@ function reset() {
 }
 
 byId("pay").addEventListener("click", payToll);
+byId("run-simulation").addEventListener("click", runRemainingSimulation);
   byId("settle").addEventListener("click", () => {
   if (liveChannel && !simulationMode) void settleLive().catch((error) => {
     if (liveChannel && !simulationMode) returnToSimulation();
