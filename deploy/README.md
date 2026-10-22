@@ -25,7 +25,13 @@ wallet that holds valuable assets.
      characters. Generate it locally with `openssl rand -hex 32`; enter it
      directly in Render. It encrypts recovery receipts that the browser keeps
      in session storage. Never publish the key or a recovery receipt.
-   - `GHOSTLINE_INDEXER_URL`: the Esmeralda indexer URL for the selected network.
+   - `GHOSTLINE_INDEXER_URL`: the Esmeralda indexer URL used by the relay API.
+     Walletd uses its network-configured indexer set by default.
+   - Optional `GHOSTLINE_WALLET_INDEXER_URLS`: a comma-separated list of
+     Esmeralda indexer URLs to explicitly pass to walletd. Leave it unset to
+     preserve walletd's configured indexer set and fallback behavior. Only set
+     it to endpoints verified for the same Esmeralda network and validator
+     state.
    - `GHOSTLINE_DEMO_EXPIRY_EPOCHS`: a short positive lifetime, from 1 to 100.
    To obtain the matching view-only key, restore this dedicated seed in the
    [Tari Ootle wallet CLI](https://github.com/tari-project/ootle-wallet-cli)

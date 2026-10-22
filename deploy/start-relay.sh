@@ -37,6 +37,13 @@ export GHOSTLINE_DEMO_DEPOSIT="${GHOSTLINE_DEMO_DEPOSIT:-51}"
 export GHOSTLINE_DEMO_OPENER_KEY_INDEX="${GHOSTLINE_DEMO_OPENER_KEY_INDEX:-1}"
 export GHOSTLINE_DEMO_FEE_KEY_INDEX="${GHOSTLINE_DEMO_FEE_KEY_INDEX:-2}"
 export PORT="${PORT:-10000}"
+recovery_retry_delay="${GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS:-30}"
+case "$recovery_retry_delay" in
+    ''|*[!0-9]*)
+        echo 'GHOSTLINE_WALLET_RECOVERY_RETRY_DELAY_SECS must be a nonnegative integer' >&2
+        exit 1
+        ;;
+esac
 
 wallet_bin="${TARI_WALLETD_BIN:-/usr/local/bin/tari_ootle_walletd}"
 cli_bin="${GHOSTLINE_CLI_BIN:-/usr/local/bin/ghostline}"
@@ -44,6 +51,7 @@ api_bin="${GHOSTLINE_PAID_API_BIN:-/usr/local/bin/ghostline-paid-api}"
 wallet_base="${TARI_BASE_DIR:-/tmp/tari-wallet}"
 wallet_db="$wallet_base/esmeralda"
 wallet_seed_marker="$wallet_base/.ghostline-seed-initialized"
+wallet_indexers="${GHOSTLINE_WALLET_INDEXER_URLS:-}"
 mkdir -p "$wallet_base" "$GHOSTLINE_LEDGER_PATH"
 
 # `None` auth is limited to loopback inside this single container. Never expose this port.
@@ -64,15 +72,32 @@ else
     # The seed phrase is passed as one argument because walletd exposes it only as a CLI option.
     set -- --seed-words "$wallet_seed_words"
 fi
-"$wallet_bin" --network esmeralda --base-path "$wallet_base" \
+# GHOSTLINE_WALLET_INDEXER_URLS is optional. Without it, walletd keeps its
+# network-provided indexer set (including its built-in fallback endpoints).
+if [ -n "$wallet_indexers" ]; then
+    # The daemon accepts a comma-separated URL list as one option value.
+    "$wallet_bin" --network esmeralda --indexer-api-url "$wallet_indexers" \
+        --base-path "$wallet_base" \
+        --listen-on 127.0.0.1:5100 --authentication none \
+        --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
+else
+    "$wallet_bin" --network esmeralda --base-path "$wallet_base" \
     --listen-on 127.0.0.1:5100 --authentication none \
     --override-keyring-password "$GHOSTLINE_WALLET_PASSWORD" "$@" run &
+fi
 wallet_pid=$!
 cleanup() {
     kill -TERM "$wallet_pid" 2>/dev/null || true
     wait "$wallet_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+mark_seed_initialized() {
+    [ -f "$wallet_seed_marker" ] && return 0
+    marker_tmp="$wallet_seed_marker.tmp.$$"
+    (umask 077 && : > "$marker_tmp")
+    mv -f "$marker_tmp" "$wallet_seed_marker"
+}
 
 account_ready() {
     "$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" \
@@ -92,12 +117,32 @@ account_create() {
     fi
 }
 
+account_create_or_retry() {
+    account_error_file="$wallet_base/.ghostline-account-create-error.$$"
+    if account_create "$@" 2>"$account_error_file"; then
+        rm -f "$account_error_file"
+        return 0
+    fi
+    if grep -Fq 'the wallet is still recovering accounts from its seed' "$account_error_file"; then
+        # This response proves walletd accepted the seed and opened this database.
+        # Recovery will be retried by walletd on its next start; preserve the database
+        # marker and let Render restart after a brief delay instead of flooding logs.
+        mark_seed_initialized
+        rm -f "$account_error_file"
+        echo 'wallet seed is initialized; account recovery is pending, preserving the wallet database for retry' >&2
+        sleep "$recovery_retry_delay"
+        exit 1
+    fi
+    rm -f "$account_error_file"
+    return 1
+}
+
 attempt=0
 while [ "$attempt" -lt 90 ]; do
     if account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT"; then
         break
     fi
-    if account_create "$GHOSTLINE_DEMO_OPENER_ACCOUNT" "$GHOSTLINE_DEMO_OPENER_KEY_INDEX" yes; then
+    if account_create_or_retry "$GHOSTLINE_DEMO_OPENER_ACCOUNT" "$GHOSTLINE_DEMO_OPENER_KEY_INDEX" yes; then
         break
     fi
     if ! kill -0 "$wallet_pid" 2>/dev/null; then
@@ -112,18 +157,14 @@ account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT" || {
     exit 1
 }
 
-# Only mark the seed as initialized once walletd accepted it and the deterministic opener
-# account can be read. A failed seed restore therefore remains a hard failure on restart.
-marker_tmp="$wallet_seed_marker.tmp.$$"
-(umask 077 && : > "$marker_tmp")
-mv -f "$marker_tmp" "$wallet_seed_marker"
+mark_seed_initialized
 
 attempt=0
 while [ "$attempt" -lt 90 ]; do
     if account_ready "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME"; then
         break
     fi
-    if account_create "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" "$GHOSTLINE_DEMO_FEE_KEY_INDEX"; then
+    if account_create_or_retry "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" "$GHOSTLINE_DEMO_FEE_KEY_INDEX"; then
         break
     fi
     if ! kill -0 "$wallet_pid" 2>/dev/null; then
