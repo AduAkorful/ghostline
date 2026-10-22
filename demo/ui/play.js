@@ -319,7 +319,11 @@ function walletError(error) {
   if (code === 4100) return "The wallet is disconnected. Reconnect it, then try again.";
   if (code === 4200) return "This wallet account does not support a required feature. Check its Sapient capabilities and use the simulated demo meanwhile.";
   if (code === -32603) return error?.message || "The Tari network rejected the request.";
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Indexer .+ did not respond|Network interface error: Indexer/i.test(message)) {
+    return "The Tari testnet indexer did not answer in time. Wait a minute and retry opening the channel; this page will not request another wallet transfer.";
+  }
+  return message;
 }
 
 function isSapientUnavailable(error) {

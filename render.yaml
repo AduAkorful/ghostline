@@ -44,6 +44,8 @@ services:
         value: /tmp/tari-wallet
       - key: GHOSTLINE_INDEXER_URL
         sync: false
+      - key: GHOSTLINE_WALLET_INDEXER_URLS
+        value: https://ootle-indexer-a.tari.com/
       - key: GHOSTLINE_DEMO_EXPIRY_EPOCHS
         sync: false
       - key: GHOSTLINE_WALLET_SEED_WORDS

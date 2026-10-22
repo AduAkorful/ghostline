@@ -241,8 +241,8 @@ if tail -n 1 "$FAKE_WALLETD_ARGS" | grep -Fq -- '--seed-words'; then
     echo "restart must not pass the seed again to the existing wallet database" >&2
     exit 1
 fi
-if tail -n 1 "$FAKE_WALLETD_ARGS" | grep -Fq -- '--indexer-api-url'; then
-    echo "walletd default indexer set should be preserved when no override is configured" >&2
+if ! tail -n 1 "$FAKE_WALLETD_ARGS" | grep -Fq -- '--indexer-api-url https://ootle-indexer-a.tari.com/'; then
+    echo "restart should pass the default Esmeralda indexer-a URL when no override is configured" >&2
     exit 1
 fi
 

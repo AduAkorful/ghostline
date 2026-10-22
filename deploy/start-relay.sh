@@ -55,7 +55,10 @@ wallet_db="$wallet_base/esmeralda"
 wallet_seed_marker="$wallet_base/.ghostline-seed-initialized"
 ready_file="${GHOSTLINE_DEMO_READY_FILE:-$wallet_base/.ghostline-demo-ready}"
 export GHOSTLINE_DEMO_READY_FILE="$ready_file"
-wallet_indexers="${GHOSTLINE_WALLET_INDEXER_URLS:-}"
+# Hosted Esmeralda: walletd 0.47 picks one configured indexer at startup. A
+# single slow endpoint (indexer-b) failed a funded channel open after 30s with
+# no fallback. Default to indexer-a, which served the local top-up path.
+wallet_indexers="${GHOSTLINE_WALLET_INDEXER_URLS:-https://ootle-indexer-a.tari.com/}"
 mkdir -p "$wallet_base" "$GHOSTLINE_LEDGER_PATH"
 mkdir -p "$(dirname "$ready_file")"
 rm -f "$ready_file"
@@ -78,8 +81,7 @@ else
     # The seed phrase is passed as one argument because walletd exposes it only as a CLI option.
     set -- --seed-words "$wallet_seed_words"
 fi
-# GHOSTLINE_WALLET_INDEXER_URLS is optional. Without it, walletd keeps its
-# network-provided indexer set (including its built-in fallback endpoints).
+# GHOSTLINE_WALLET_INDEXER_URLS overrides the default Esmeralda indexer-a URL.
 # A retry after accepted seed recovery reopens the same database without
 # supplying the seed again. Never delete or replace that database on restart.
 walletd_start() {

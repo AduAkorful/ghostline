@@ -31,11 +31,11 @@ wallet that holds valuable assets.
      in session storage. Never publish the key or a recovery receipt.
    - `GHOSTLINE_INDEXER_URL`: the Esmeralda indexer URL used by the relay API.
      Walletd uses its network-configured indexer set by default.
-   - Optional `GHOSTLINE_WALLET_INDEXER_URLS`: a comma-separated list of
-     Esmeralda indexer URLs to explicitly pass to walletd. Leave it unset to
-     preserve walletd's configured indexer set and fallback behavior. Only set
-     it to endpoints verified for the same Esmeralda network and validator
-     state.
+   - Optional `GHOSTLINE_WALLET_INDEXER_URLS`: indexer URL(s) passed to
+     walletd. The Blueprint defaults this to Esmeralda indexer-a. A hosted
+     open failed when walletd used only indexer-b and that endpoint timed
+     out in 30s. Set a comma-separated list only if those endpoints are
+     verified for the same Esmeralda network.
    - `GHOSTLINE_DEMO_EXPIRY_EPOCHS`: a short positive lifetime, from 1 to 100.
    To obtain the matching view-only key, restore this dedicated seed in the
    [Tari Ootle wallet CLI](https://github.com/tari-project/ootle-wallet-cli)
