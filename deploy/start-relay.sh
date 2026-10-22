@@ -142,7 +142,7 @@ account_create_or_retry() {
     if grep -Fq 'the wallet is still recovering accounts from its seed' "$account_error_file"; then
         # This response proves walletd accepted the seed and opened this database.
         mark_seed_initialized
-    elif grep -Eiq 'could not connect|connection refused|timed out' "$account_error_file"; then
+    elif grep -Eiq 'could not connect|connection refused|timed out|error sending request for url' "$account_error_file"; then
         # walletd may still be bringing up its loopback RPC; do not mark the seed as
         # initialized until walletd confirms that it accepted the seed.
         :

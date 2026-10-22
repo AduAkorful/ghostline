@@ -55,6 +55,19 @@ case "$2" in
                 : > "$FAKE_ACCOUNT_DIR/$name"
                 exit 0
                 ;;
+            wallet-rpc-transport-once)
+                count=0
+                [ ! -f "$FAKE_RECOVERY_ATTEMPTS" ] || count=$(cat "$FAKE_RECOVERY_ATTEMPTS")
+                count=$((count + 1))
+                printf '%s\n' "$count" > "$FAKE_RECOVERY_ATTEMPTS"
+                if [ "$count" -eq 1 ]; then
+                    echo "indexer request failed: error sending request for url (http://127.0.0.1:5100/json_rpc)" >&2
+                    exit 1
+                fi
+                printf '%s %s\n' "$name" "$key_index" >> "$FAKE_ACCOUNT_CREATES"
+                : > "$FAKE_ACCOUNT_DIR/$name"
+                exit 0
+                ;;
             recovered)
                 # The seed scan already restored accounts at indexes 0 and 1.
                 if [ "$key_index" -lt 2 ]; then
@@ -172,6 +185,29 @@ if [ "$(cat "$FAKE_RECOVERY_ATTEMPTS")" -lt 2 ]; then
 fi
 if ! grep -Fxq 'relay-opener 2' "$FAKE_ACCOUNT_CREATES" || ! grep -Fxq 'relay-fees 3' "$FAKE_ACCOUNT_CREATES"; then
     echo "expected both demo accounts to be created after recovery" >&2
+    exit 1
+fi
+
+# A wallet RPC transport failure while walletd is starting is also transient.
+rm -rf "$TARI_BASE_DIR" "$FAKE_ACCOUNT_DIR"
+mkdir -p "$FAKE_ACCOUNT_DIR"
+rm -f "$FAKE_RECOVERY_ATTEMPTS"
+export FAKE_CREATE_MODE=wallet-rpc-transport-once
+set +e
+bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/transport.stdout" 2>"$tmp_root/transport.stderr"
+transport_status=$?
+set -e
+if [ "$transport_status" -ne 0 ]; then
+    echo "expected startup to retry a wallet RPC transport failure" >&2
+    cat "$tmp_root/transport.stderr" >&2
+    exit 1
+fi
+if [ "$(cat "$FAKE_RECOVERY_ATTEMPTS")" -lt 2 ]; then
+    echo "expected account creation to retry after a wallet RPC transport failure" >&2
+    exit 1
+fi
+if [ ! -f "$TARI_BASE_DIR/.ghostline-seed-initialized" ]; then
+    echo "expected a successful wallet RPC response to mark the seed initialized" >&2
     exit 1
 fi
 
