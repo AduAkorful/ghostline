@@ -26,6 +26,7 @@ let tariConnectorPromise;
 const XTR_RESOURCE = `resource_${"01".repeat(32)}`;
 const LIVE_PENDING_KEY = "ghostline-live-pending";
 const LIVE_CHANNEL_KEY = "ghostline-live-channel";
+const configuredRelayUrl = String(window.GHOSTLINE_CONFIG?.relayUrl || "").trim();
 
 const status = (message) => { byId("status").textContent = message; };
 
@@ -223,14 +224,26 @@ function walletError(error) {
 }
 
 function apiBase() {
-  const raw = byId("relay-url").value.trim().replace(/\/$/, "");
-  if (!raw) throw new Error("Enter the public Render relay URL first.");
+  const raw = configuredRelayUrl.replace(/\/$/, "");
+  if (!raw) throw new Error("Live mode is not configured for this site yet. The instant simulation is available.");
   const url = new URL(raw);
   if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
     throw new Error("The relay URL must use HTTPS.");
   }
-  localStorage.setItem("ghostline-relay-url", url.origin);
   return url.origin;
+}
+
+function configureLiveRelay() {
+  const button = byId("live-open");
+  const note = byId("relay-config-note");
+  try {
+    apiBase();
+    button.disabled = false;
+    note.textContent = "Live Esmeralda relay is configured for this site.";
+  } catch (error) {
+    button.disabled = true;
+    note.textContent = error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function relayJson(path, options = {}) {
@@ -689,9 +702,7 @@ byId("live-open").addEventListener("click", () => void connectAndOpenLive());
 byId("live-refund").addEventListener("click", () => void requestLiveRefund());
 byId("live-stop").addEventListener("click", returnToSimulation);
 
-const storedRelay = localStorage.getItem("ghostline-relay-url");
-if (storedRelay) byId("relay-url").value = storedRelay;
-
+configureLiveRelay();
 begin();
 refreshControls();
 void restoreLiveChannel();

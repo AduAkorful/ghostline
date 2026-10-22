@@ -8,6 +8,7 @@
     <title>Summon a ghost payment — Ghostline</title>
     <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
     <link rel="stylesheet" href="play.css" />
+    <script src="relay-config.js"></script>
     <script type="module" src="play.js"></script>
   </head>
   <body>
@@ -26,8 +27,8 @@
       <section class="live-setup shell" aria-labelledby="live-title">
         <div><p class="eyebrow">OPTIONAL · REAL ESMERALDA TESTNET</p><h2 id="live-title">Run it with your wallet.</h2></div>
         <p>Live mode privately funds a relay wallet, then the relay opens and settles the Ghostline channel. The relay controls the testnet deposit and expiry refund. Use only test funds. <a href="https://sapient.tari.mw" target="_blank" rel="noopener noreferrer">Install Sapient ↗</a></p>
-        <label for="relay-url">Relay URL</label>
-        <div class="actions"><input id="relay-url" type="url" inputmode="url" placeholder="https://your-ghostline-relay.onrender.com" autocomplete="url" /><button id="live-open" class="button button-secondary" type="button">Connect Sapient and open channel</button><button id="live-refund" class="button button-quiet" type="button" hidden>Check expiry and request refund</button><button id="live-stop" class="button button-quiet" type="button" hidden>Return to simulation</button></div>
+        <div class="actions"><button id="live-open" class="button button-secondary" type="button">Connect Sapient and open channel</button><button id="live-refund" class="button button-quiet" type="button" hidden>Check expiry and request refund</button><button id="live-stop" class="button button-quiet" type="button" hidden>Return to simulation</button></div>
+        <p id="relay-config-note" class="fine-print" role="status">Checking live relay configuration…</p>
         <p id="live-note" class="fine-print">The static site has no wallet secrets. The configured private testnet deposit and Sapient transaction fee require your approval.</p>
         <p class="fine-print"><a id="pending-funding-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Inspect pending Sapient funding transaction ↗</a></p>
       </section>

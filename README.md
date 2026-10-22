@@ -8,7 +8,7 @@ Ghostline lets an agent pay a service request by request while keeping the indiv
 
 ## Try Ghostline
 
-- **[Try the browser demo](https://ghostline-ui.vercel.app/play.html):** no install, wallet, or backend required. It simulates the real voucher signing and verification, then links to a separate recorded Esmeralda transaction.
+- **[Try the browser demo](https://ghostline-ui.vercel.app/play.html):** the simulation needs no install, wallet, or backend; optional live mode uses Sapient and the configured Esmeralda relay. The page also links to separate recorded transaction evidence.
 - **Run the prebuilt local demo** after installing Ghostline on Linux x86-64:
 
   ```sh

@@ -1,10 +1,12 @@
 # Ghostline motion demo
 
-This read-only motion demo opens with the many-calls/one-settlement payoff, then follows the CLI from install through payment and close using a scroll-led story. One schematic payment trace changes with each chapter; the command map covers the wider `ghostline` CLI. The page contains no wallet connection, credentials, transaction submission, or live network reads. The motion is illustrative, not a live feed or a replay of per-call data.
+The Ghostline site includes a browser simulation and an optional live Esmeralda Sapient flow. The live page asks the visitor to approve a small private testnet transfer; the configured relay opens and closes the channel. The static frontend contains no wallet credentials. Its motion demo is illustrative, not a live feed or a replay of per-call data.
 
 ## Static hosting
 
-The site needs no backend or environment variables. To deploy it through the Vercel dashboard, import the repository and set **Root Directory** to `demo/ui`, **Framework Preset** to `Other`, leave the build command empty, and use `.` as the output directory. The published page serves only these static files; it has no wallet credentials or transaction controls.
+The frontend is static, but live Sapient mode needs the public relay URL at build time. In the Vercel project, set **Root Directory** to `demo/ui`, **Framework Preset** to `Other`, **Build Command** to `node build.mjs`, and **Output Directory** to `dist`. Set the Production environment variable `GHOSTLINE_RELAY_URL` to the Render service's HTTPS origin, then redeploy. The build writes that public URL into `relay-config.js`; it is intentionally visible to site visitors and must not contain credentials. If it is unset, the browser simulation remains available and the live button is disabled.
+
+The Render service must allow the deployed Vercel site's origin in `GHOSTLINE_CORS_ORIGINS`. The checked-in Blueprint already allows `https://ghostline-ui.vercel.app`.
 
 Visitors can try the local, no-funds flow from a checkout:
 

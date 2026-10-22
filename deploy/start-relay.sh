@@ -25,15 +25,26 @@ cli_bin="${GHOSTLINE_CLI_BIN:-/usr/local/bin/ghostline}"
 api_bin="${GHOSTLINE_PAID_API_BIN:-/usr/local/bin/ghostline-paid-api}"
 wallet_base="${TARI_BASE_DIR:-/tmp/tari-wallet}"
 wallet_db="$wallet_base/esmeralda"
+wallet_seed_marker="$wallet_base/.ghostline-seed-initialized"
 mkdir -p "$wallet_base" "$GHOSTLINE_LEDGER_PATH"
 
 # `None` auth is limited to loopback inside this single container. Never expose this port.
 # The wallet password protects its local database; the relay connects only over loopback.
-if [ ! -d "$wallet_db" ]; then
+# Do not infer successful initialization from the database directory existing: walletd can
+# create it before rejecting a malformed seed, and Render may restart the process with the
+# same /tmp contents. Skipping the seed in that case silently creates a different wallet.
+if [ -f "$wallet_seed_marker" ]; then
+    if [ ! -d "$wallet_db" ]; then
+        echo 'wallet initialization marker exists but the wallet database is missing; refusing to create a different wallet' >&2
+        exit 1
+    fi
+    set --
+elif [ -e "$wallet_db" ]; then
+    echo 'wallet database exists without a successful seed-initialization marker; refusing to use or replace it' >&2
+    exit 1
+else
     # The seed phrase is passed as one argument because walletd exposes it only as a CLI option.
     set -- --seed-words "$GHOSTLINE_WALLET_SEED_WORDS"
-else
-    set --
 fi
 "$wallet_bin" --network esmeralda --base-path "$wallet_base" \
     --listen-on 127.0.0.1:5100 --authentication none \
@@ -82,6 +93,12 @@ account_ready "$GHOSTLINE_DEMO_OPENER_ACCOUNT" || {
     echo 'wallet daemon did not prepare the opener account' >&2
     exit 1
 }
+
+# Only mark the seed as initialized once walletd accepted it and the deterministic opener
+# account can be read. A failed seed restore therefore remains a hard failure on restart.
+marker_tmp="$wallet_seed_marker.tmp.$$"
+(umask 077 && : > "$marker_tmp")
+mv -f "$marker_tmp" "$wallet_seed_marker"
 
 attempt=0
 while [ "$attempt" -lt 90 ]; do

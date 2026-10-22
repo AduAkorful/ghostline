@@ -124,6 +124,7 @@ function makeHarness({ wallet = true, walletOverrides = {}, failHealth = false, 
 
   const window = {
     ...(tari ? { tari } : {}),
+    GHOSTLINE_CONFIG: { relayUrl: RELAY },
     setTimeout: fastTime ? ((callback, delay = 0) => setTimeout(() => { virtualNow += Number(delay); callback?.(); }, 0)) : setTimeout,
     clearTimeout,
   };
@@ -142,8 +143,7 @@ function makeHarness({ wallet = true, walletOverrides = {}, failHealth = false, 
       removeItem: (key) => local.delete(key),
     },
   });
-  elements.set("relay-url", new Element("relay-url"));
-  elements.get("relay-url").value = RELAY;
+  elements.set("relay-config-note", new Element("relay-config-note"));
 
   return {
     calls, walletCalls, elements, session,
