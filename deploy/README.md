@@ -15,13 +15,16 @@ wallet that holds valuable assets.
    channel state under ephemeral `/tmp`, so avoid pushing while a demo channel
    is open; a deploy can restart the process and lose that state.
 2. Before the first deploy, create a dedicated Esmeralda relay wallet. Keep its
-   seed words, wallet database password, and index-0 `view_only_key` private.
+   seed words, wallet database password, and opener account's `view_only_key` private.
    Set these as Render secrets:
    - `GHOSTLINE_WALLET_SEED_WORDS`: seed words for this dedicated testnet wallet.
    - `GHOSTLINE_WALLET_PASSWORD`: a new password for the daemon's local database.
    - `GHOSTLINE_CLAIM_SECRET`: 64-character hex for that wallet's
-     `view_only_key` at index 0. This must match the receiver identity used by
-     the wallet. Do not use the payer/voucher signing key here.
+     `view_only_key` at `GHOSTLINE_DEMO_OPENER_KEY_INDEX` (index 2 in the
+     Blueprint). This must match the receiver account used by the relay;
+     index 0 is incorrect when the opener uses index 2. The relay checks the
+     corresponding public view key before offering a funding session.
+     Do not use the payer/voucher signing key here.
    - `GHOSTLINE_DEMO_STATE_KEY`: a fresh 32-byte key encoded as 64 hex
      characters. Generate it locally with `openssl rand -hex 32`; enter it
      directly in Render. It encrypts recovery receipts that the browser keeps
@@ -37,7 +40,7 @@ wallet that holds valuable assets.
    To obtain the matching view-only key, restore this dedicated seed in the
    [Tari Ootle wallet CLI](https://github.com/tari-project/ootle-wallet-cli)
    on your own machine and use its documented `ootle-wallet show-keys -a
-   <account>` command. Copy the `view_only_key` for index 0 into
+   <account>` command. Copy the opener account's matching `view_only_key` into
    `GHOSTLINE_CLAIM_SECRET`; verify the index and network before saving it.
    This CLI displays secret key material locally, so do not run it in a shared
    terminal or paste its output into chat.

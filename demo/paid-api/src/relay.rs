@@ -388,7 +388,7 @@ pub async fn config(State(_state): State<AppState>) -> impl IntoResponse {
     }
     match RelayConfig::load() {
         Ok(config) => match connect_wallet(&config).await {
-            Ok(wallet) => match wallet.account_get(&config.opener_account).await {
+            Ok(wallet) => match relay_funding_account(&wallet, &config).await {
                 Ok(account) => (
                     StatusCode::OK,
                     Json(RelayConfigResponse {
@@ -446,7 +446,7 @@ pub async fn create_session(
         Ok(wallet) => wallet,
         Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
     };
-    let account = match wallet.account_get(&config.opener_account).await {
+    let account = match relay_funding_account(&wallet, &config).await {
         Ok(account) => account,
         Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response(),
     };
@@ -1193,13 +1193,13 @@ async fn verify_relay_funding(
             funding_tx_id = %funding_tx,
             transaction_output_count = outputs.len(),
             candidate_output_count = candidate_count,
-            relay_owned_output_count = relay_values.len(),
-            relay_owned_total_micro_xtr = owned_total,
+            verified_output_count = relay_values.len(),
+            verified_total_micro_xtr = owned_total,
             expected_micro_xtr = config.deposit,
-            "finalized Sapient transfer did not credit the exact configured deposit to the relay"
+            "could not verify the finalized Sapient deposit and its encrypted session binding"
         );
         return Err(format!(
-            "Sapient funding is finalized, but the relay identified {} of {} candidate private outputs ({} µT total); expected {} µT. Check that GHOSTLINE_CLAIM_SECRET is the relay wallet's index-0 view_only_key and that the Sapient recipient is the relay funding address.",
+            "Sapient funding is finalized, but the relay verified {} of {} candidate private outputs for this session ({} µT total); expected {} µT. The relay operator must check the opener account's matching view_only_key and encrypted session memo. Keep this pending transaction and do not send another deposit.",
             relay_values.len(),
             candidate_count,
             owned_total,
@@ -1337,6 +1337,7 @@ fn unblind_wallet_output(
     session_id: &str,
 ) -> Result<ghostline_sdk::MaskAndValue, String> {
     use ghostline_sdk::{OutputScan, unblind_output};
+    use tari_crypto::ristretto::RistrettoPublicKey;
 
     let secret_bytes = from_hex(&config.claim_secret).map_err(|e| e.to_string())?;
     let secret = RistrettoSecretKey::from_canonical_bytes(&secret_bytes)
@@ -1360,13 +1361,19 @@ fn unblind_wallet_output(
         OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS),
     )
     .map_err(|error| format!("funding output is not addressed to the relay: {error}"))?;
-    let decrypted = tari_ootle_wallet_crypto::encrypted_data::decrypt_data(
-        &secret,
-        &utxo.commitment,
-        &utxo.encrypted_data,
-        false,
-    )
-    .map_err(|error| format!("could not decrypt Sapient funding memo: {error}"))?;
+    let nonce = RistrettoPublicKey::from_canonical_bytes(utxo.sender_public_nonce.as_bytes())
+        .map_err(|error| format!("invalid funding sender nonce: {error}"))?;
+    // Stealth outputs use a DH-derived encryption key, not the raw recipient view key.
+    // Use the same authenticated decryption as value recovery, with memo decoding enabled.
+    let decrypted = tari_ootle_wallet_crypto::StealthCryptoApi::new()
+        .decrypt_utxo_data(
+            &utxo.encrypted_data,
+            &utxo.commitment,
+            &secret,
+            &nonce,
+            false,
+        )
+        .map_err(|error| format!("could not decrypt Sapient funding memo: {error}"))?;
     if !funding_memo_matches_session(decrypted.memo(), session_id) {
         return Err("funding output is not bound to this relay session".into());
     }
@@ -1393,6 +1400,62 @@ async fn connect_wallet(config: &RelayConfig) -> Result<WalletClient, String> {
     let mut wallet = WalletClient::connect(&config.wallet_url).map_err(|e| e.to_string())?;
     wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
     Ok(wallet)
+}
+
+async fn relay_funding_account(
+    wallet: &WalletClient,
+    config: &RelayConfig,
+) -> Result<ghostline_net::AccountWithAddress, String> {
+    let account = wallet
+        .account_get(&config.opener_account)
+        .await
+        .map_err(|error| error.to_string())?;
+    let view_keys = wallet
+        .keys_list(ghostline_net::VIEW_ONLY_KEY_BRANCH)
+        .await
+        .map_err(|error| error.to_string())?;
+    validate_relay_claim_key(&account, &view_keys, &config.claim_secret)?;
+    Ok(account)
+}
+
+fn validate_relay_claim_key(
+    account: &ghostline_net::AccountWithAddress,
+    view_keys: &[serde_json::Value],
+    claim_secret: &str,
+) -> Result<(), String> {
+    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+    let owner = account
+        .account
+        .owner_key_id
+        .as_ref()
+        .and_then(|key| key.get("Derived"))
+        .ok_or("relay opener must have a derived account key")?;
+    if owner.get("key_branch").and_then(serde_json::Value::as_str)
+        != Some(ghostline_net::ACCOUNT_KEY_BRANCH)
+    {
+        return Err("relay opener does not have a derived account signing key".into());
+    }
+    let index = owner
+        .get("index")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("relay opener account omitted its key index")?;
+    let expected = view_keys.iter().find_map(|row| {
+        let key = row.get(0)?.get("Derived")?;
+        (key.get("key_branch")?.as_str()? == ghostline_net::VIEW_ONLY_KEY_BRANCH
+            && key.get("index")?.as_u64()? == index)
+            .then(|| row.get(1)?.as_str()).flatten()
+    }).ok_or_else(|| format!("relay operator must derive the opener account's view_only_key at index {index}; no deposit should be sent"))?;
+    let secret = RistrettoSecretKey::from_canonical_bytes(
+        &from_hex(claim_secret).map_err(|_| "relay claim key is not valid hex")?,
+    )
+    .map_err(|_| "relay claim key is not a canonical secret key")?;
+    let actual = to_hex(RistrettoPublicKey::from_secret_key(&secret).as_bytes());
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(format!(
+            "relay operator must correct GHOSTLINE_CLAIM_SECRET: it does not match the opener account's view_only_key at index {index}. No deposit should be sent."
+        ));
+    }
+    Ok(())
 }
 
 async fn warn_if_fee_float_low(config: &RelayConfig) {
@@ -1978,6 +2041,103 @@ mod tests {
         assert!(funding_memo_matches_session(Some(&memo), "session-a"));
         assert!(!funding_memo_matches_session(Some(&memo), "session-b"));
         assert!(!funding_memo_matches_session(None, "session-a"));
+    }
+
+    #[test]
+    fn funding_preflight_requires_the_configured_opener_accounts_view_key() {
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+        let (other_secret, other_public) = create_key_pair_from_seed(37);
+        let (opener_secret, opener_public) = create_key_pair_from_seed(41);
+        let account = ghostline_net::AccountWithAddress {
+            account: ghostline_net::WalletAccount {
+                name: Some("relay-opener".into()),
+                component_address: "component_test".into(),
+                owner_key_id: Some(ghostline_net::derived_account_key_id(2)),
+                is_default: true,
+            },
+            address: "otl_esm_test".into(),
+        };
+        let view_keys = vec![
+            serde_json::json!([{"Derived":{"key_branch":"view_only_key","index":0}},to_hex(other_public.as_bytes()),true]),
+            serde_json::json!([{"Derived":{"key_branch":"view_only_key","index":2}},to_hex(opener_public.as_bytes()),false]),
+        ];
+        assert!(
+            validate_relay_claim_key(&account, &view_keys, &to_hex(opener_secret.as_bytes()))
+                .is_ok()
+        );
+        assert!(
+            validate_relay_claim_key(&account, &view_keys, &to_hex(other_secret.as_bytes()))
+                .unwrap_err()
+                .contains("view_only_key at index 2")
+        );
+        assert!(
+            validate_relay_claim_key(&account, &view_keys[..1], &to_hex(opener_secret.as_bytes()))
+                .unwrap_err()
+                .contains("must derive")
+        );
+    }
+
+    #[test]
+    fn relay_decrypts_a_dh_encrypted_funding_memo_and_rejects_a_different_session() {
+        use ghostline_sdk::{MaskAndValue, OutputScan};
+        use ootle_byte_type::ToByteType;
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+        use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
+
+        let (view_secret, view_public) = create_key_pair_from_seed(41);
+        let (sender_secret, sender_public) = create_key_pair_from_seed(43);
+        let (mask, _) = create_key_pair_from_seed(47);
+        let scan = OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS);
+        let crypto = StealthCryptoApi::new();
+        let memo = Memo::new_message("Ghostline:session-a").unwrap();
+        let encrypted = crypto
+            .encrypt_value_and_mask(51, &mask, &view_public, &sender_secret, Some(&memo))
+            .unwrap();
+        let commitment: PedersenCommitmentBytes =
+            MaskAndValue::new(51, mask).to_commitment().to_byte_type();
+        let tag = crypto.derive_stealth_output_tag(
+            scan.network,
+            &view_secret,
+            &sender_public,
+            &scan.resource,
+        );
+        let output = ghostline_net::WalletStealthUtxo {
+            commitment: to_hex(commitment.as_bytes()),
+            nonce: to_hex(sender_public.as_bytes()),
+            encrypted_hex: to_hex(encrypted.as_bytes()),
+            tag: i64::from(tag.value()),
+            auth: "Key".into(),
+            resource: Some(scan.resource.to_string()),
+            from_fee_instruction: false,
+        };
+        let config = RelayConfig {
+            cli_path: PathBuf::new(),
+            wallet_url: String::new(),
+            indexer_url: String::new(),
+            state_dir: PathBuf::new(),
+            claim_secret: to_hex(view_secret.as_bytes()),
+            recovery_key: [0u8; 32],
+            template_hex: String::new(),
+            network_tag: 38,
+            deposit: DEFAULT_DEPOSIT,
+            expiry_epochs: 10,
+            open_max_fee: 0,
+            settle_max_fee: 0,
+            refund_max_fee: 0,
+            opener_account: String::new(),
+            fee_account_name: String::new(),
+        };
+        assert_eq!(
+            unblind_wallet_output(&output, &config, "session-a")
+                .unwrap()
+                .value,
+            51
+        );
+        assert!(
+            unblind_wallet_output(&output, &config, "session-b")
+                .unwrap_err()
+                .contains("not bound to this relay session")
+        );
     }
 
     #[tokio::test]
