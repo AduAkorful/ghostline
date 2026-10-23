@@ -345,6 +345,7 @@ pub struct ChannelDirectory {
 impl ChannelDirectory {
     pub fn open(dir: impl AsRef<Path>) -> Result<Self, PaywallError> {
         let dir = dir.as_ref();
+        fs::create_dir_all(dir).map_err(|e| PaywallError::Storage(e.to_string()))?;
         let mut paths: Vec<PathBuf> = fs::read_dir(dir)
             .map_err(|e| PaywallError::Storage(e.to_string()))?
             .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -710,6 +711,23 @@ mod tests {
         assert_eq!(loaded.accepted(), 10);
         assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn directory_open_creates_a_missing_folder() {
+        let dir = std::env::temp_dir().join(format!(
+            "ghostline-dir-missing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert!(!dir.exists());
+        let directory = ChannelDirectory::open(&dir).unwrap();
+        assert_eq!(directory.len(), 0);
+        assert!(dir.is_dir());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

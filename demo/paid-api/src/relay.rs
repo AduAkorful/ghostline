@@ -14,7 +14,8 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use ghostline_core::{from_hex, to_hex};
 use ghostline_net::{
     IndexerClient, StealthTransfer, StealthTransferRequest, TransactionId, TransferFeeParams,
-    UtxoInputSelection, WalletClient, account_name, execution_accepted, indexer_result_status,
+    UtxoInputSelection, WalletClient, account_name, execution_accepted, indexed_receipt_status,
+    indexed_transaction_status,
 };
 use ghostline_paywall::{ChannelStore, PaymentTerms};
 use serde::{Deserialize, Serialize};
@@ -1091,15 +1092,65 @@ async fn transaction_status(
     transaction_id: TransactionId,
 ) -> Result<&'static str, String> {
     let indexer = IndexerClient::connect(&config.indexer_url).map_err(|e| e.to_string())?;
-    let result = indexer
-        .transaction_result(transaction_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    match indexer_result_status(&result) {
-        "Finalized" => Ok("Finalized"),
-        "Pending" => Ok("Pending"),
-        "FinalizedAbort" | "Rejected" => Err("Ootle rejected the transaction".into()),
-        _ => Err("indexer returned an unrecognized transaction status".into()),
+    match indexer.transaction(transaction_id).await {
+        Ok(entry) => match indexed_transaction_status(&entry) {
+            "Finalized" => Ok("Finalized"),
+            "Pending" | "Unknown" => Ok("Pending"),
+            "FinalizedAbort" | "Rejected" => Err("Ootle rejected the transaction".into()),
+            other => Err(format!(
+                "indexer returned an unrecognized transaction status: {other}"
+            )),
+        },
+        Err(error) if indexer_lookup_missing(&error) => {
+            match indexer.transaction_receipt(transaction_id).await {
+                Ok(receipt) => match indexed_receipt_status(&receipt) {
+                    "Finalized" => Ok("Finalized"),
+                    "FinalizedAbort" | "Rejected" => Err("Ootle rejected the transaction".into()),
+                    _ => Ok("Pending"),
+                },
+                Err(error) if indexer_lookup_missing(&error) => Ok("Pending"),
+                Err(error) => Err(error.to_string()),
+            }
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct TxStatusQuery {
+    id: String,
+}
+
+#[derive(Serialize)]
+struct TxStatusResponse {
+    state: &'static str,
+}
+
+/// Public Esmeralda 0.47 `/transactions/{id}/result` 404s while the transaction record remains.
+/// The play page polls this instead of treating that 404 as a dropped deposit.
+pub async fn tx_status(
+    axum::extract::Query(query): axum::extract::Query<TxStatusQuery>,
+) -> impl IntoResponse {
+    if !demo_mode() {
+        return (StatusCode::NOT_FOUND, "demo relay is disabled").into_response();
+    }
+    let config = match RelayConfig::load() {
+        Ok(config) => config,
+        Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+    };
+    let id = match TransactionId::from_hex(query.id.trim()) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "transaction id must be 32-byte hex",
+            )
+                .into_response();
+        }
+    };
+    match transaction_status(&config, id).await {
+        Ok(state) => (StatusCode::OK, Json(TxStatusResponse { state })).into_response(),
+        Err(error) => (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
     }
 }
 
@@ -1212,26 +1263,28 @@ fn indexer_lookup_missing(error: &impl std::fmt::Display) -> bool {
     text.contains("not found") || text.contains("http 404")
 }
 
+#[cfg(test)]
 fn json_microtari(value: &serde_json::Value) -> Option<u64> {
     value
         .as_u64()
         .or_else(|| value.as_str()?.parse::<u64>().ok())
 }
 
+#[cfg(test)]
 fn listed_utxo_memo_message(utxo: &serde_json::Value) -> Option<&str> {
     utxo.get("memo")
         .and_then(|memo| memo.get("Message").or_else(|| memo.get("message")))
         .and_then(serde_json::Value::as_str)
 }
 
+#[cfg(test)]
 fn listed_utxo_is_unspent(utxo: &serde_json::Value) -> bool {
     utxo.get("status")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|status| status.eq_ignore_ascii_case("unspent"))
 }
 
-/// Match an already-unblinded opener UTXO that the wallet scanned, including when
-/// the public indexer has dropped the original Sapient transaction result.
+#[cfg(test)]
 fn verify_funding_from_listed_utxos(
     utxos: &[serde_json::Value],
     deposit: u64,
@@ -1326,49 +1379,40 @@ fn verify_unblinded_funding_outputs(
     })
 }
 
-async fn verify_funding_from_opener_wallet(
-    config: &RelayConfig,
-    session_id: &str,
-) -> Result<VerifiedFunding, String> {
-    let wallet = connect_wallet(config).await?;
-    let listed = wallet
-        .stealth_utxos_list(
-            &config.opener_account,
-            &STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
-        )
-        .await
-        .map_err(|error| {
-            format!("indexer dropped the funding transaction, and listing opener stealth outputs failed: {error}")
-        })?;
-    verify_funding_from_listed_utxos(&listed, config.deposit, session_id)
-}
-
-async fn verify_relay_funding(
-    config: &RelayConfig,
+async fn wait_indexed_funding_transaction(
+    indexer: &IndexerClient,
     funding_tx: TransactionId,
-    session_id: &str,
-) -> Result<VerifiedFunding, String> {
-    // Sapient submits this transaction through the user's wallet provider, not relay walletd.
-    // walletd's transactions.wait_result / transactions.get only know transactions it submitted
-    // itself, so use the network indexer for finality and its stored body for output validation.
-    // Esmeralda indexers can drop older transaction results while explorer still shows them;
-    // then match the already-scanned opener UTXO instead of asking for another deposit.
-    let indexer = IndexerClient::connect(&config.indexer_url).map_err(|e| e.to_string())?;
+) -> Result<serde_json::Value, String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
     loop {
-        match indexer.transaction_result(funding_tx).await {
-            Ok(result) => match indexer_result_status(&result) {
-                "Finalized" => break,
-                "Pending" => {}
+        match indexer.transaction(funding_tx).await {
+            Ok(entry) => match indexed_transaction_status(&entry) {
+                "Finalized" => return Ok(entry),
+                "Pending" | "Unknown" => {}
                 "FinalizedAbort" | "Rejected" => {
                     return Err("Sapient funding transaction was rejected by Ootle".into());
                 }
-                _ => {
-                    return Err("indexer returned an unrecognized Sapient funding result".into());
+                other => {
+                    return Err(format!(
+                        "indexer returned an unrecognized Sapient funding result: {other}"
+                    ));
                 }
             },
             Err(error) if indexer_lookup_missing(&error) => {
-                return verify_funding_from_opener_wallet(config, session_id).await;
+                if let Ok(receipt) = indexer.transaction_receipt(funding_tx).await {
+                    match indexed_receipt_status(&receipt) {
+                        "FinalizedAbort" | "Rejected" => {
+                            return Err("Sapient funding transaction was rejected by Ootle".into());
+                        }
+                        "Finalized" => {
+                            tracing::info!(
+                                event = "sapient_funding_receipt_without_body",
+                                "indexer has a Commit receipt; waiting for the transaction body"
+                            );
+                        }
+                        _ => {}
+                    }
+                }
             }
             Err(error) if tokio::time::Instant::now() >= deadline => {
                 return Err(format!(
@@ -1378,22 +1422,22 @@ async fn verify_relay_funding(
             Err(_) => {}
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err("Sapient funding transaction is still pending after 90 seconds".into());
+            return Err("Sapient funding transaction is still pending after 90 seconds. The indexer transaction record was not a Commit; retry without sending another deposit.".into());
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
 
-    let entry = match indexer.transaction(funding_tx).await {
-        Ok(entry) => entry,
-        Err(error) if indexer_lookup_missing(&error) => {
-            return verify_funding_from_opener_wallet(config, session_id).await;
-        }
-        Err(error) => {
-            return Err(format!(
-                "cannot inspect finalized Sapient funding transaction in the indexer: {error}"
-            ));
-        }
-    };
+async fn verify_relay_funding(
+    config: &RelayConfig,
+    funding_tx: TransactionId,
+    session_id: &str,
+) -> Result<VerifiedFunding, String> {
+    // Sapient submits this transaction through the user's wallet, not relay walletd.
+    // Public Esmeralda 0.47 `/transactions/{id}/result` 404s for committed transfers;
+    // GET /transactions/{id} still has the body and summary.outcome used by the explorer.
+    let indexer = IndexerClient::connect(&config.indexer_url).map_err(|e| e.to_string())?;
+    let entry = wait_indexed_funding_transaction(&indexer, funding_tx).await?;
     let indexed_id = entry
         .pointer("/transaction/transaction_id")
         .and_then(serde_json::Value::as_str)
@@ -2290,9 +2334,9 @@ mod tests {
     }
 
     #[test]
-    fn indexer_404_is_treated_as_a_dropped_funding_receipt() {
+    fn indexer_404_is_a_missing_local_record_not_a_dropped_deposit() {
         assert!(indexer_lookup_missing(
-            &"indexer rejected transactions/abc/result: HTTP 404: {\"error\":\"Transaction abc not found\"}"
+            &"indexer rejected transactions/abc: HTTP 404: {\"error\":\"Transaction abc not found\"}"
         ));
         assert!(!indexer_lookup_missing(
             &"could not confirm Sapient funding finality through the Esmeralda indexer"

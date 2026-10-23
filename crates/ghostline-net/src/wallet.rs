@@ -708,6 +708,7 @@ impl WalletClient {
 
     /// `stealth_utxos.list` — unspent and spent outputs the daemon has already unblinded.
     ///
+    /// walletd 0.47 takes `account_address` (component), not an account name.
     /// Live Esmeralda 0.47 returns `{ "utxos": [ { "status", "value", "memo": { "Message" }, ... } ] }`.
     /// `value` may be a JSON number or a decimal string.
     pub async fn stealth_utxos_list(
@@ -715,11 +716,12 @@ impl WalletClient {
         name: &str,
         resource_address: &str,
     ) -> Result<Vec<Value>, NetError> {
+        let account = self.account_get(name).await?;
         let resp: Value = self
             .rpc(
                 STEALTH_UTXOS_LIST,
                 serde_json::json!({
-                    "account": account_name(name),
+                    "account_address": account.account.component_address,
                     "resource_address": resource_address,
                 }),
             )

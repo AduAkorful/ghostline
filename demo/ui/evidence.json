@@ -1,7 +1,7 @@
 {
   "label": "Verified Esmeralda deposit-masking runs",
   "network": "Esmeralda",
-  "runDate": "2026-10-19",
+  "runDate": "2026-10-22",
   "templateRecord": {
     "address": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
     "publishTransactionId": "59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741",
@@ -13,26 +13,26 @@
   "serviceRecord": {
     "source": "local HTTP paywall ledger",
     "endpoint": "/fortune",
-    "successfulCalls": 20,
+    "successfulCalls": 5,
     "unitPriceMicroTari": 10,
-    "acceptedTotalMicroTari": 200
+    "acceptedTotalMicroTari": 50
   },
   "chainRecord": {
     "source": "Esmeralda indexer and wallet",
     "templateAddress": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
-    "openTransactionId": "1ea836af8636a655abda0ee6e32a7880551624960c1cb6d12a3eac0a936ffca9",
-    "openTransactionUrl": "https://explorer.tari.mw/tx/1ea836af8636a655abda0ee6e32a7880551624960c1cb6d12a3eac0a936ffca9",
+    "openTransactionId": "9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1",
+    "openTransactionUrl": "https://explorer.tari.mw/tx/9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1",
     "openFinality": "Finalized Commit",
-    "openFeeCapMicroTari": 15200,
-    "openFeeMicroTari": 15200,
-    "settlementTransactionId": "6a44670272ee5cb5528c8b7bfac3ce89170b6885afb6cfdf1ae1cd0952424e17",
-    "settlementTransactionUrl": "https://explorer.tari.mw/tx/6a44670272ee5cb5528c8b7bfac3ce89170b6885afb6cfdf1ae1cd0952424e17",
+    "openFeeCapMicroTari": 20000,
+    "openFeeMicroTari": 20000,
+    "settlementTransactionId": "1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc",
+    "settlementTransactionUrl": "https://explorer.tari.mw/tx/1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc",
     "settlementFinality": "Finalized Commit",
     "settledTotalMicroTari": null,
     "settlementAmountVisibility": "Not revealed in public transaction fields",
     "depositVisibility": "Not revealed in the tested claim-free open or settlement transaction fields",
-    "settlementFeeCapMicroTari": 17756,
-    "settlementFeeMicroTari": 17744,
+    "settlementFeeCapMicroTari": 22964,
+    "settlementFeeMicroTari": 17952,
     "feePayerRole": "service-side fee account",
     "channelOutputAfterSettlement": "down",
     "settlementShape": {
@@ -106,7 +106,8 @@
   },
   "notes": [
     "The current template was published and finalized before the fresh standard, pooled-batch, and expiry-refund runs.",
-    "The standard run accepted 20 HTTP /fortune calls at 10 µT each (200 µT cumulative) in a local service ledger, then finalized one settlement. The chain does not prove the call count or exact service amount.",
+    "The current clickable proof is the 2026-10-22 CLI run: open 9986c19d…, five HTTP /fortune calls at 10 µT (50 µT cumulative) in a local ledger, then settle 1684aad9…. Indexer-a reported Finalized Commit; explorer.tari.mw still loads both IDs. The chain does not prove the call count or exact service amount.",
+    "An earlier 2026-10-19 20-call run (open 1ea836af…, settle 6a446702…) is outside the public indexer’s 50-epoch transaction-body window and returns “not known to this indexer” on explorer. Those IDs remain in notes only.",
     "The standard settlement used a claim-free confidential transfer with zero revealed input amount, no revealed output, and exactly two stealth outputs. The deposit, service amount, and payer remainder were not readable in public transaction fields.",
     "The batch run accepted 20 calls in each of two local service ledgers, then finalized one two-input pooled settlement. Its three outputs were one pooled service output and two payer-change outputs; the pooled value was confirmed locally with the one-time payout key, but the amount is omitted from this public evidence file.",
     "The batch prototype is trusted-local only: its builder received both deposit masks and values. Observers can see the two channels are grouped in one transaction, and the coordinator can learn the deposits.",

@@ -42,7 +42,7 @@ class Element {
   }
 }
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, fastTime = false, pending } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, fastTime = false, pending, txStatus = "Finalized" } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -95,7 +95,8 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     if (url.pathname === "/evidence.json") return json({ chainRecord: { settlementTransactionUrl: "https://explorer.tari.mw/tx/recorded", settlementFinality: "Finalized" } });
     calls.push({ url: url.href, method: (options.method || "GET").toUpperCase(), headers: new Headers(options.headers), body: options.body || "" });
     if (url.origin !== RELAY) throw new Error(`Unexpected outbound origin: ${url.origin}`);
-    if (url.pathname === "/healthz") return failHealth ? json({ error: "missing" }, 404) : coldHealth ? json({ ok: false, walletReady: false }, 503) : json({ ok: true, walletReady: true });
+    if (url.pathname === "/healthz" || url.pathname === "/health" || url.pathname === "/") return failHealth ? json({ error: "missing" }, 404) : coldHealth ? json({ ok: false, walletReady: false }, 503) : json({ ok: true, walletReady: true });
+    if (url.pathname === "/demo/tx-status") return json({ state: txStatus });
     if (url.pathname === "/demo/config") return json({ enabled: true, deposit: 51, price: 10, network: "esmeralda" });
     if (url.pathname === "/demo/session") {
       const body = JSON.parse(options.body);
@@ -323,7 +324,7 @@ test("cold relay retries to the deadline and then leaves simulated mode usable",
 });
 
 test("a funding transaction that stays pending is reported without opening a channel", async () => {
-  const h = makeHarness({ fastTime: true, walletOverrides: { tari_getTransactionResult: {} } });
+  const h = makeHarness({ fastTime: true, txStatus: "Pending", walletOverrides: { tari_getTransactionResult: {} } });
   try {
     await h.load();
     await h.elements.get("live-open").click();
@@ -373,11 +374,11 @@ test("a pending funding record from another tab is offered for recovery without 
   assert.equal(h.elements.get("abandon-pending-funding").hidden, true);
 });
 
-test("a retry continues when the indexer has dropped the saved funding receipt", async () => {
+test("a retry uses the indexer transaction record when Sapient’s /result lookup 404s", async () => {
   const payerSecret = new Uint8Array(32).fill(3);
   const pending = {
     sessionId: "session-test",
-    fundingTxId: "funding-test-tx",
+    fundingTxId: "aa".repeat(32),
     payerPublicKey: hex(publicKeyFromSecret(payerSecret)),
     payerSecretHex: hex(payerSecret),
   };
@@ -385,14 +386,18 @@ test("a retry continues when the indexer has dropped the saved funding receipt",
     pending,
     walletOverrides: {
       tari_getTransactionResult: () => {
-        throw Object.assign(new Error('HTTP 404: {"error":"Transaction funding-test-tx not found"}'), { code: -32603 });
+        throw Object.assign(new Error('HTTP 404: {"error":"Transaction not found"}'), { code: -32603 });
       },
     },
   });
   await h.load();
+  assert.equal(h.elements.get("live-stop").hidden, false);
+  assert.equal(h.elements.get("live-stop").textContent, "Continue with simulation");
+  assert.equal(h.elements.get("pay").disabled, false);
   await h.elements.get("live-open").click();
   await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
   assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.equal(h.calls.some((call) => call.url.includes("/demo/tx-status")), true);
   assert.equal(h.calls.some((call) => call.url.includes("/demo/open")), true);
   assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
 });

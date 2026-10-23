@@ -271,7 +271,10 @@ fn router_inner(state: AppState, expose_metrics: bool, rate_limit: bool) -> Rout
     let router = Router::new()
         .route("/fortune", get(fortune))
         .route("/meter", get(meter))
+        .route("/", get(healthz))
+        .route("/health", get(healthz))
         .route("/healthz", get(healthz))
+        .route("/status", get(healthz))
         .route("/demo/open", axum::routing::post(relay::open))
         .route("/demo/session", axum::routing::post(relay::create_session))
         .route("/demo/recover", axum::routing::post(relay::recover))
@@ -282,7 +285,8 @@ fn router_inner(state: AppState, expose_metrics: bool, rate_limit: bool) -> Rout
         .route("/demo/settle", axum::routing::post(relay::settle))
         .route("/demo/refund", axum::routing::post(relay::refund))
         .route("/demo/config", get(relay::config))
-        .route("/demo/status", get(relay::status));
+        .route("/demo/status", get(relay::status))
+        .route("/demo/tx-status", get(relay::tx_status));
     let router = if expose_metrics {
         router.route("/metrics", get(metrics))
     } else {
@@ -309,7 +313,11 @@ async fn enforce_rate_limit(
     next: Next,
 ) -> Response {
     let path = request.uri().path();
-    if path == "/healthz" || request.method() == axum::http::Method::OPTIONS {
+    if matches!(
+        path,
+        "/" | "/health" | "/healthz" | "/status" | "/demo/tx-status"
+    ) || request.method() == axum::http::Method::OPTIONS
+    {
         return next.run(request).await;
     }
     let forwarded = request
@@ -1088,6 +1096,33 @@ mod tests {
         assert!(health.get("version").is_some());
         assert!(health.get("walletReady").is_some());
         assert!(health.get("uptimeSecs").is_some());
+    }
+
+    #[tokio::test]
+    async fn health_aliases_share_healthz() {
+        let (_, payer_public) = create_key_pair_from_seed(83);
+        let params = ChannelParams {
+            network_tag: 38,
+            payer: payer_public.to_byte_type(),
+            deposit: 100,
+            payer_root: Hash32::from_array([0u8; 32]),
+            nonce: [6u8; NONCE_LEN],
+        };
+        let app = router(AppState::new(ServiceLedger::new(params)));
+        for uri in ["/", "/health", "/status"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert!(
+                matches!(
+                    response.status(),
+                    StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+                ),
+                "{uri}"
+            );
+        }
     }
 
     #[tokio::test]

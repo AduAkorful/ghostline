@@ -83,7 +83,11 @@ impl IndexerClient {
             .await
     }
 
-    /// `GET /transactions/{id}/result` (`tari_indexer_client` 0.45 `get_transaction_result`).
+    /// `GET /transactions/{id}/result` (`tari_indexer_client` 0.47 `get_transaction_result`).
+    ///
+    /// Public Esmeralda 0.47 indexers have returned HTTP 404 here for transactions whose
+    /// body and receipt still exist. Prefer [`transaction`](Self::transaction) and
+    /// [`transaction_receipt`](Self::transaction_receipt) for finality.
     pub async fn transaction_result(
         &self,
         transaction_id: TransactionId,
@@ -94,12 +98,24 @@ impl IndexerClient {
         self.send_json(self.http.get(url), &path).await
     }
 
-    /// `GET /transactions/{id}` — best-effort stored transaction body from the indexer.
+    /// `GET /transactions/{id}` — stored transaction body plus `summary.outcome`.
     ///
-    /// The transaction result endpoint is authoritative for finality, but does not include
-    /// the instruction body needed to verify a confidential funding output's recipient.
+    /// This is the record the explorer uses. On Esmeralda 0.47 it remains available when
+    /// `/result` 404s.
     pub async fn transaction(&self, transaction_id: TransactionId) -> Result<Value, NetError> {
         let path = format!("{TRANSACTIONS}/{transaction_id}");
+        self.get_json(&path).await
+    }
+
+    /// `GET /transaction-receipts/{id}` — synced receipt (`receipt.outcome`).
+    ///
+    /// Ootle documents this as complete back to the indexer's receipt retention window,
+    /// unlike the gossiped transaction body store.
+    pub async fn transaction_receipt(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<Value, NetError> {
+        let path = format!("transaction-receipts/{transaction_id}");
         self.get_json(&path).await
     }
 
@@ -356,6 +372,41 @@ fn down_version_from_indexer_body(body: &str) -> Option<u32> {
     body[i + 2..].split(')').next()?.parse().ok()
 }
 
+/// Classify `GET /transactions/{id}` (`summary.outcome`) without dumping the body.
+pub fn indexed_transaction_status(entry: &Value) -> &'static str {
+    let tx = entry.get("transaction").unwrap_or(entry);
+    if tx
+        .get("rejected_reason")
+        .is_some_and(|reason| !reason.is_null())
+    {
+        return "Rejected";
+    }
+    match tx
+        .pointer("/summary/outcome")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "Commit" => "Finalized",
+        "Abort" => "FinalizedAbort",
+        "Pending" => "Pending",
+        _ => "Unknown",
+    }
+}
+
+/// Classify `GET /transaction-receipts/{id}` (`receipt.outcome`).
+pub fn indexed_receipt_status(body: &Value) -> &'static str {
+    match body
+        .pointer("/receipt/outcome")
+        .or_else(|| body.get("outcome"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "Commit" => "Finalized",
+        "Abort" => "FinalizedAbort",
+        _ => "Unknown",
+    }
+}
+
 /// Classify `GET /transactions/{id}/result` without dumping the execution payload.
 pub fn indexer_result_status(body: &Value) -> &str {
     let result = body.get("result").unwrap_or(body);
@@ -462,6 +513,30 @@ mod tests {
         let back: TransactionId = serde_json::from_str(&json).unwrap();
         assert_eq!(back, id);
         assert!(json.contains("abab"));
+    }
+
+    #[test]
+    fn indexed_transaction_status_reads_commit_summary() {
+        assert_eq!(
+            indexed_transaction_status(&serde_json::json!({
+                "transaction": {
+                    "transaction_id": "ab",
+                    "summary": {"outcome": "Commit", "finalized_at": "2026-10-22 22:44:48.0"},
+                    "rejected_reason": null
+                }
+            })),
+            "Finalized"
+        );
+        assert_eq!(
+            indexed_transaction_status(&serde_json::json!({
+                "transaction": {"summary": {"outcome": "Abort"}, "rejected_reason": null}
+            })),
+            "FinalizedAbort"
+        );
+        assert_eq!(
+            indexed_receipt_status(&serde_json::json!({"receipt": {"outcome": "Commit"}})),
+            "Finalized"
+        );
     }
 
     #[test]
