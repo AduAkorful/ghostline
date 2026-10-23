@@ -770,18 +770,77 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     if config.expiry_epochs == 0 || config.expiry_epochs > 100 {
         return Err("demo expiry must be between 1 and 100 epochs".into());
     }
-    if let Some(attempt) = state.relay_registry.open_attempt(&funding_id).await {
-        return continue_saved_open(
-            state,
-            &config,
-            &request.session_id,
-            &funding_id,
-            attempt,
-            &verified.commitments,
-        )
-        .await;
-    }
-    require_funding_outputs_spendable(&config, &verified.commitments).await?;
+    let attempt_open = || async {
+        if let Some(attempt) = state.relay_registry.open_attempt(&funding_id).await {
+            continue_saved_open(
+                state,
+                &config,
+                &request.session_id,
+                &funding_id,
+                attempt,
+                &verified.commitments,
+            )
+            .await
+        } else {
+            require_funding_outputs_spendable(&config, &verified.commitments).await?;
+            start_new_open(
+                state,
+                &config,
+                &request.session_id,
+                &funding_id,
+                NewOpen {
+                    payer: &payer,
+                    refund_address: &refund_address,
+                    current_epoch,
+                    expiry_epoch,
+                    commitments: &verified.commitments,
+                },
+            )
+            .await
+        }
+    };
+    open_with_collision_retries(
+        MAX_OUTPUT_COLLISION_ATTEMPTS,
+        attempt_open,
+        || output_collision_attempt(state, &config, &funding_id),
+        |rejected_tx, attempt| {
+            let funding_id = funding_id.clone();
+            async move {
+                tracing::warn!(
+                    event = "open_output_collision",
+                    funding_tx = %funding_id,
+                    rejected_tx = %rejected_tx,
+                    attempt,
+                );
+                state.relay_registry.discard_open_attempt(&funding_id).await
+            }
+        },
+    )
+    .await
+}
+
+struct NewOpen<'a> {
+    payer: &'a RistrettoPublicKeyBytes,
+    refund_address: &'a str,
+    current_epoch: u64,
+    expiry_epoch: u64,
+    commitments: &'a [String],
+}
+
+async fn start_new_open(
+    state: &AppState,
+    config: &RelayConfig,
+    session_id: &str,
+    funding_id: &str,
+    open: NewOpen<'_>,
+) -> Result<OpenResponse, String> {
+    let NewOpen {
+        payer,
+        refund_address,
+        current_epoch,
+        expiry_epoch,
+        commitments,
+    } = open;
     let max_epoch = current_epoch.checked_add(100).ok_or("max epoch overflow")?;
     let nonce = random_nonce_hex()?;
 
@@ -794,11 +853,11 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     let service_signer_file = directory.join(format!("{temp_id}.service-key.json"));
     let output_signer_file = directory.join(format!("{temp_id}.output-key.json"));
     let refund_signer_file = directory.join(format!("{temp_id}.refund-key.json"));
-    let service = create_wallet_key(&config, &service_signer_file).await?;
-    let service_output = create_wallet_key(&config, &output_signer_file).await?;
-    let refund = create_wallet_key(&config, &refund_signer_file).await?;
+    let service = create_wallet_key(config, &service_signer_file).await?;
+    let service_output = create_wallet_key(config, &output_signer_file).await?;
+    let refund = create_wallet_key(config, &refund_signer_file).await?;
     let fee_component = run_cli(
-        &config,
+        config,
         &[
             "wallet",
             "account-get",
@@ -816,7 +875,7 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
 
     let payer_hex = to_hex(payer.as_bytes());
     let spec_output = run_cli(
-        &config,
+        config,
         &[
             "spec",
             "--network-tag",
@@ -893,7 +952,7 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
         session_file.display().to_string(),
     ];
     let init_args = open_args.iter().map(String::as_str).collect::<Vec<_>>();
-    run_cli(&config, &init_args).await?;
+    run_cli(config, &init_args).await?;
     let attempt = OpenAttempt {
         channel_file: channel_file.clone(),
         ledger_file,
@@ -903,7 +962,7 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
         service_public_key: service.public_key_hex,
         service_output_public_key: service_output.public_key_hex,
         refund_public_key: refund.public_key_hex,
-        refund_address,
+        refund_address: refund_address.to_owned(),
         expiry_epoch,
         payer_root,
         nonce,
@@ -911,24 +970,16 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     // The channel file is fixed before the wallet call. A retry resumes this attempt.
     state
         .relay_registry
-        .save_open_attempt(&funding_id, attempt.clone())
+        .save_open_attempt(funding_id, attempt.clone())
         .await?;
-    state.relay_registry.mark_opening(&funding_id).await?;
-    let output = match run_channel_open(&config, &channel_file, &verified.commitments).await {
+    state.relay_registry.mark_opening(funding_id).await?;
+    let output = match run_channel_open(config, &channel_file, commitments).await {
         Ok(output) => output,
         Err(error) => {
-            return note_open_cli_failure(state, &funding_id, &channel_file, error).await;
+            return note_open_cli_failure(state, funding_id, &channel_file, error).await;
         }
     };
-    finish_registered_open(
-        state,
-        &config,
-        &request.session_id,
-        &funding_id,
-        &attempt,
-        &output,
-    )
-    .await
+    finish_registered_open(state, config, session_id, funding_id, &attempt, &output).await
 }
 
 async fn continue_saved_open(
@@ -945,7 +996,7 @@ async fn continue_saved_open(
             SavedOpen::Finalized => {
                 run_channel_open(config, &attempt.channel_file, commitments).await?
             }
-            SavedOpen::Rejected(reason) => {
+            SavedOpen::Rejected { reason, .. } => {
                 state.relay_registry.release_opening(funding_id).await?;
                 return Err(format!(
                     "channel open {tx} was rejected ({reason}). Refusing to create another output for this funding transaction."
@@ -1083,28 +1134,47 @@ fn channel_open_tx_id(path: &Path) -> Result<Option<String>, String> {
 enum SavedOpen {
     Finalized,
     Pending,
-    Rejected(String),
+    /// `executed` is false for an indexer `Rejected` record: the transaction was refused before
+    /// execution, so it spent nothing and paid no fee. `FinalizedAbort` executed and paid.
+    Rejected {
+        reason: String,
+        executed: bool,
+    },
+}
+
+fn saved_open_from_entry(entry: &serde_json::Value) -> Result<SavedOpen, String> {
+    match indexed_transaction_status(entry) {
+        "Finalized" => Ok(SavedOpen::Finalized),
+        "Pending" | "Unknown" => Ok(SavedOpen::Pending),
+        "Rejected" => Ok(SavedOpen::Rejected {
+            reason: open_rejection_reason(entry),
+            executed: false,
+        }),
+        "FinalizedAbort" => Ok(SavedOpen::Rejected {
+            reason: open_rejection_reason(entry),
+            executed: true,
+        }),
+        other => Err(format!(
+            "indexer returned an unrecognized transaction status: {other}"
+        )),
+    }
 }
 
 async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpen, String> {
     let transaction_id = TransactionId::from_hex(tx).map_err(|error| error.to_string())?;
     let indexer = IndexerClient::connect(&config.indexer_url).map_err(|error| error.to_string())?;
     match indexer.transaction(transaction_id).await {
-        Ok(entry) => match indexed_transaction_status(&entry) {
-            "Finalized" => Ok(SavedOpen::Finalized),
-            "Pending" | "Unknown" => Ok(SavedOpen::Pending),
-            "FinalizedAbort" | "Rejected" => Ok(SavedOpen::Rejected(open_rejection_reason(&entry))),
-            other => Err(format!(
-                "indexer returned an unrecognized transaction status: {other}"
-            )),
-        },
+        Ok(entry) => saved_open_from_entry(&entry),
         Err(error) if indexer_lookup_missing(&error) => {
             match indexer.transaction_receipt(transaction_id).await {
                 Ok(receipt) => match indexed_receipt_status(&receipt) {
                     "Finalized" => Ok(SavedOpen::Finalized),
-                    "FinalizedAbort" | "Rejected" => {
-                        Ok(SavedOpen::Rejected("Ootle rejected the transaction".into()))
-                    }
+                    "FinalizedAbort" | "Rejected" => Ok(SavedOpen::Rejected {
+                        reason: "Ootle rejected the transaction".into(),
+                        // A receipt alone does not say whether execution ran; never treat it
+                        // as safe to replace.
+                        executed: true,
+                    }),
                     _ => Ok(SavedOpen::Pending),
                 },
                 Err(error) if indexer_lookup_missing(&error) => Ok(SavedOpen::Pending),
@@ -1112,6 +1182,73 @@ async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpe
             }
         }
         Err(error) => Err(error.to_string()),
+    }
+}
+
+/// walletd 0.47 derives each output mask from a counter its database restarts at 0 (OBS-033).
+/// The relay wallet database is lost on every Render restart, so a fresh channel output can
+/// recreate a 51 µT commitment that is already on chain. Ootle refuses that before execution.
+const MAX_OUTPUT_COLLISION_ATTEMPTS: usize = 3;
+
+/// A pre-execution refusal for an output substate that already exists. Nothing was spent and no
+/// fee was charged, and each new walletd statement takes the next mask index, so a fresh attempt
+/// can succeed.
+fn is_output_collision_reject(reason: &str, executed: bool) -> bool {
+    !executed && reason.contains("already exists and cannot be created as an output")
+}
+
+/// The rejected open transaction id when the saved attempt failed only by output collision.
+/// Lookup errors and every other outcome return `None`, so the caller keeps the original error.
+async fn output_collision_attempt(
+    state: &AppState,
+    config: &RelayConfig,
+    funding_id: &str,
+) -> Option<String> {
+    let attempt = state.relay_registry.open_attempt(funding_id).await?;
+    let tx = channel_open_tx_id(&attempt.channel_file).ok().flatten()?;
+    match indexed_open_outcome(config, &tx).await {
+        Ok(SavedOpen::Rejected { reason, executed })
+            if is_output_collision_reject(&reason, executed) =>
+        {
+            Some(tx)
+        }
+        _ => None,
+    }
+}
+
+/// Runs `attempt` until it succeeds, it fails for a reason other than an output collision, or
+/// `max_attempts` collisions have been discarded. `discard` must drop the saved attempt so the
+/// next `attempt` builds a new channel and a new wallet statement.
+async fn open_with_collision_retries<T, A, AF, C, CF, D, DF>(
+    max_attempts: usize,
+    mut attempt: A,
+    mut collided: C,
+    mut discard: D,
+) -> Result<T, String>
+where
+    A: FnMut() -> AF,
+    AF: std::future::Future<Output = Result<T, String>>,
+    C: FnMut() -> CF,
+    CF: std::future::Future<Output = Option<String>>,
+    D: FnMut(String, usize) -> DF,
+    DF: std::future::Future<Output = Result<(), String>>,
+{
+    let mut collisions = 0;
+    loop {
+        let error = match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(error) => error,
+        };
+        let Some(rejected_tx) = collided().await else {
+            return Err(error);
+        };
+        collisions += 1;
+        discard(rejected_tx, collisions).await?;
+        if collisions >= max_attempts {
+            return Err(format!(
+                "the relay wallet recreated an output that already exists on chain {collisions} times (its key counter restarted with the relay). Ootle refused each open before execution, so the deposit is unspent and no fee was charged. Retry opening the channel; do not send another deposit"
+            ));
+        }
     }
 }
 
@@ -2350,6 +2487,15 @@ impl RelayRegistry {
         self.persist_locked(&state)
     }
 
+    /// Forget an open attempt whose transaction Ootle refused before execution, so the next
+    /// attempt builds a new channel. Its files stay on disk for diagnosis.
+    async fn discard_open_attempt(&self, tx: &str) -> Result<(), String> {
+        let mut state = self.0.lock().await;
+        state.open_attempts.remove(tx);
+        state.opening_funding.remove(tx);
+        self.persist_locked(&state)
+    }
+
     async fn release_opening(&self, tx: &str) -> Result<(), String> {
         let mut state = self.0.lock().await;
         state.opening_funding.remove(tx);
@@ -3193,5 +3339,163 @@ mod tests {
         )
         .await;
         assert!(listing.unwrap_err().contains("could not list"));
+    }
+
+    const COLLISION_REASON: &str = "Failed to lock inputs: Substate utxo_0101010101010101010101010101010101010101010101010101010101010101_ccf795b6c1396a700eafe8a49e72a56043cc9234157da4d020526a8a97c7e550:0 already exists and cannot be created as an output";
+
+    #[test]
+    fn only_a_pre_execution_output_collision_allows_a_fresh_open() {
+        // Shape of the indexer record for rejected relay open c61e30fd… (2026-10-23).
+        let rejected = serde_json::json!({
+            "transaction": { "summary": null, "rejected_reason": COLLISION_REASON }
+        });
+        match saved_open_from_entry(&rejected).unwrap() {
+            SavedOpen::Rejected { reason, executed } => {
+                assert!(!executed);
+                assert!(is_output_collision_reject(&reason, executed));
+            }
+            _ => panic!("expected a pre-execution rejection"),
+        }
+
+        let aborted = serde_json::json!({
+            "transaction": { "summary": { "outcome": "Abort" } }
+        });
+        match saved_open_from_entry(&aborted).unwrap() {
+            SavedOpen::Rejected { reason, executed } => {
+                assert!(executed, "an abort executed and paid a fee");
+                assert!(!is_output_collision_reject(&reason, executed));
+            }
+            _ => panic!("expected an executed rejection"),
+        }
+
+        assert!(!is_output_collision_reject(COLLISION_REASON, true));
+        assert!(!is_output_collision_reject(
+            "Failed to lock inputs: Substate utxo_…:0 is down",
+            false
+        ));
+        assert!(!is_output_collision_reject(
+            "OneOrMoreInputsNotFound",
+            false
+        ));
+    }
+
+    #[tokio::test]
+    async fn collision_retries_discard_each_rejected_attempt_then_open() {
+        let attempts = std::cell::Cell::new(0);
+        let discarded = std::cell::RefCell::new(Vec::new());
+        let result = open_with_collision_retries(
+            MAX_OUTPUT_COLLISION_ATTEMPTS,
+            || async {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() < 3 {
+                    Err("wait did not Accept".to_string())
+                } else {
+                    Ok("opened")
+                }
+            },
+            || async { Some(format!("rejected-{}", attempts.get())) },
+            |tx, n| {
+                discarded.borrow_mut().push((tx, n));
+                async { Ok(()) }
+            },
+        )
+        .await;
+        assert_eq!(result, Ok("opened"));
+        assert_eq!(attempts.get(), 3);
+        assert_eq!(
+            discarded.into_inner(),
+            vec![("rejected-1".to_string(), 1), ("rejected-2".to_string(), 2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn collision_retries_stop_at_the_bound_without_suggesting_a_new_deposit() {
+        let attempts = std::cell::Cell::new(0);
+        let result: Result<(), String> = open_with_collision_retries(
+            MAX_OUTPUT_COLLISION_ATTEMPTS,
+            || async {
+                attempts.set(attempts.get() + 1);
+                Err("wait did not Accept".to_string())
+            },
+            || async { Some("rejected".to_string()) },
+            |_, _| async { Ok(()) },
+        )
+        .await;
+        let error = result.unwrap_err();
+        assert_eq!(attempts.get(), MAX_OUTPUT_COLLISION_ATTEMPTS);
+        assert!(error.contains("deposit is unspent"), "{error}");
+        assert!(error.contains("do not send another deposit"), "{error}");
+        assert!(!error.ends_with('.'), "page appends its own period");
+    }
+
+    #[tokio::test]
+    async fn other_open_failures_are_returned_without_a_fresh_attempt() {
+        let attempts = std::cell::Cell::new(0);
+        let discards = std::cell::Cell::new(0);
+        let result: Result<(), String> = open_with_collision_retries(
+            MAX_OUTPUT_COLLISION_ATTEMPTS,
+            || async {
+                attempts.set(attempts.get() + 1);
+                Err("channel open abc is still pending".to_string())
+            },
+            || async { None },
+            |_, _| {
+                discards.set(discards.get() + 1);
+                async { Ok(()) }
+            },
+        )
+        .await;
+        assert_eq!(result, Err("channel open abc is still pending".to_string()));
+        assert_eq!(attempts.get(), 1);
+        assert_eq!(discards.get(), 0);
+
+        let failed_discard: Result<(), String> = open_with_collision_retries(
+            MAX_OUTPUT_COLLISION_ATTEMPTS,
+            || async { Err("wait did not Accept".to_string()) },
+            || async { Some("rejected".to_string()) },
+            |_, _| async { Err("relay state: disk full".to_string()) },
+        )
+        .await;
+        assert_eq!(failed_discard, Err("relay state: disk full".to_string()));
+    }
+
+    #[tokio::test]
+    async fn discarded_open_attempt_stays_discarded_after_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "ghostline-discard-attempt-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state_path = root.join("relay-state.json");
+        let registry = RelayRegistry::open(state_path.clone()).await.unwrap();
+        let attempt = OpenAttempt {
+            channel_file: root.join("channel.json"),
+            ledger_file: root.join("channel.ledger.json"),
+            service_signer_file: root.join("service.json"),
+            service_output_signer_file: root.join("output.json"),
+            refund_signer_file: root.join("refund.json"),
+            service_public_key: "aa".into(),
+            service_output_public_key: "bb".into(),
+            refund_public_key: "cc".into(),
+            refund_address: "otl_esm_1refund".into(),
+            expiry_epoch: 9,
+            payer_root: "dd".into(),
+            nonce: "ee".into(),
+        };
+        registry
+            .save_open_attempt("funding", attempt)
+            .await
+            .unwrap();
+        registry.mark_opening("funding").await.unwrap();
+        registry.discard_open_attempt("funding").await.unwrap();
+        let restored = RelayRegistry::open(state_path).await.unwrap();
+        assert!(restored.open_attempt("funding").await.is_none());
+        assert!(!restored.is_opening("funding").await);
+        assert!(
+            !restored.has_funding("funding").await,
+            "the deposit was never used"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
