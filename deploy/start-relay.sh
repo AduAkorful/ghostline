@@ -173,6 +173,57 @@ fee_component_presence() {
     return 1
 }
 
+# 1 XTR. The 13:25 Esmeralda log showed the opener revealed vault at 196100873 µT.
+# The transfer also pays its fee from that vault. Stealth deposits are not spent.
+fee_float_amount() {
+    fee_float=${GHOSTLINE_DEMO_FEE_FLOAT:-1000000}
+    case "$fee_float" in
+        ''|*[!0-9]*|0)
+            echo 'GHOSTLINE_DEMO_FEE_FLOAT must be a positive integer of micro-units' >&2
+            return 1
+            ;;
+    esac
+    printf '%s\n' "$fee_float"
+}
+
+fund_fee_from_opener() {
+    fee_amount=$(fee_float_amount) || return 1
+    fee_claim_cap=${GHOSTLINE_DEMO_OPEN_MAX_FEE:-100000}
+    case "$fee_claim_cap" in
+        ''|*[!0-9]*|0)
+            echo 'GHOSTLINE_DEMO_OPEN_MAX_FEE must be a positive integer of micro-units' >&2
+            return 1
+            ;;
+    esac
+    transfer_error="$wallet_base/.ghostline-fee-transfer-error.$$"
+    transfer_attempts=0
+    while :; do
+        if "$cli_bin" wallet transfer --url "$GHOSTLINE_WALLET_URL" \
+            --from "$GHOSTLINE_DEMO_OPENER_ACCOUNT" --to "$1" \
+            --amount "$fee_amount" --max-fee "$fee_claim_cap" 2>"$transfer_error"; then
+            rm -f "$transfer_error"
+            return 0
+        fi
+        if grep -Eiq 'could not connect|connection refused|timed out|error sending request for url' "$transfer_error"; then
+            transfer_attempts=$((transfer_attempts + 1))
+            if [ "$transfer_attempts" -ge 15 ]; then
+                echo 'fee component transfer could not reach the wallet' >&2
+                cat "$transfer_error" >&2
+                rm -f "$transfer_error"
+                return 1
+            fi
+            echo 'fee component transfer could not reach the wallet; retrying' >&2
+            rm -f "$transfer_error"
+            sleep "$recovery_retry_delay"
+            continue
+        fi
+        echo 'fee component transfer failed' >&2
+        cat "$transfer_error" >&2
+        rm -f "$transfer_error"
+        return 1
+    done
+}
+
 claim_fee_faucet() {
     fee_claim_cap=${GHOSTLINE_DEMO_OPEN_MAX_FEE:-100000}
     case "$fee_claim_cap" in
@@ -192,6 +243,12 @@ claim_fee_faucet() {
         if grep -F 'already claimed' "$claim_error" >/dev/null; then
             echo 'fee account has already claimed the faucet; waiting for its component' >&2
             rm -f "$claim_error"
+            return 0
+        fi
+        if grep -F 'does not hold enough funds' "$claim_error" >/dev/null; then
+            echo 'Esmeralda faucet is empty; publishing the fee component from the opener revealed balance' >&2
+            rm -f "$claim_error"
+            fund_fee_from_opener "$1" || return 1
             return 0
         fi
         # The wallet is already serving other RPC calls during its UTXO scan. One

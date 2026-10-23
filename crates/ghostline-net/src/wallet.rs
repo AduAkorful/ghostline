@@ -39,6 +39,7 @@ const ACCOUNTS_GET: &str = "accounts.get";
 const ACCOUNTS_GET_BALANCES: &str = "accounts.get_balances";
 const ACCOUNTS_CREATE: &str = "accounts.create";
 const CREATE_FREE_TEST_COINS: &str = "accounts.create_free_test_coins";
+const ACCOUNTS_TRANSFER: &str = "accounts.transfer";
 const ACCOUNTS_CREATE_OR_GET: &str = "accounts.create_or_get";
 const ACCOUNTS_RENAME: &str = "accounts.rename";
 const ACCOUNTS_SET_DEFAULT: &str = "accounts.set_default";
@@ -539,6 +540,42 @@ pub fn faucet_claim_request(account: &str, max_fee: u64) -> Value {
     })
 }
 
+/// `accounts.transfer` body. walletd 0.47 calls `create_account` for `destination_public_key`,
+/// withdraws revealed `amount` from the source vault, and deposits it into that component.
+/// The source pays `max_fee`. This is how a missing fee component is published when the
+/// Esmeralda faucet cannot pay a claim.
+pub fn revealed_transfer_request(
+    from: &str,
+    destination_public_key_hex: &str,
+    resource_address: &str,
+    amount: u64,
+    max_fee: u64,
+) -> Value {
+    serde_json::json!({
+        "account": account_name(from),
+        "amount": amount.to_string(),
+        "resource_address": resource_address,
+        "destination_public_key": destination_public_key_hex,
+        "max_fee": max_fee,
+        "proof_from_badge_resource": null,
+        "dry_run": false,
+    })
+}
+
+pub fn public_key_hex_for_key_id(entries: &[Value], key_id: &Value) -> Option<String> {
+    entries.iter().find_map(|entry| {
+        let row = entry.as_array()?;
+        if row.first()? != key_id {
+            return None;
+        }
+        let hex = row.get(1)?.as_str()?;
+        if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some(hex.to_ascii_lowercase())
+    })
+}
+
 fn json_u64(value: Option<&Value>) -> Option<u64> {
     match value {
         Some(Value::Number(number)) => number.as_u64(),
@@ -745,6 +782,11 @@ impl WalletClient {
             faucet_claim_request(account, max_fee),
         )
         .await
+    }
+
+    /// Revealed `accounts.transfer`. The handler waits until the transaction finalizes.
+    pub async fn transfer_revealed(&self, request: &Value) -> Result<Value, NetError> {
+        self.rpc(ACCOUNTS_TRANSFER, request).await
     }
 
     pub async fn account_get(&self, name: &str) -> Result<AccountWithAddress, NetError> {
@@ -1405,5 +1447,33 @@ mod tests {
         let request = faucet_claim_request("ghostline-demo-fees", 100_000);
         assert_eq!(request["account"]["Name"], "ghostline-demo-fees");
         assert_eq!(request["max_fee"], 100_000);
+    }
+
+    #[test]
+    fn revealed_transfer_names_the_source_and_destination_key() {
+        let public_key = "ab".repeat(32);
+        let request = revealed_transfer_request(
+            "ghostline-demo-opener",
+            &public_key,
+            "resource_0101",
+            1_000_000,
+            100_000,
+        );
+        assert_eq!(request["account"]["Name"], "ghostline-demo-opener");
+        assert_eq!(request["amount"], "1000000");
+        assert_eq!(request["destination_public_key"], public_key);
+        assert_eq!(request["resource_address"], "resource_0101");
+        assert_eq!(request["max_fee"], 100_000);
+        assert!(request["proof_from_badge_resource"].is_null());
+        assert_eq!(request["dry_run"], false);
+        let key_id = serde_json::json!({"Derived":{"index":3,"key_branch":"account"}});
+        let keys = vec![serde_json::json!([key_id, public_key.to_uppercase(), true])];
+        assert_eq!(
+            public_key_hex_for_key_id(&keys, &keys[0][0]).as_deref(),
+            Some(public_key.as_str())
+        );
+        assert!(
+            public_key_hex_for_key_id(&keys, &serde_json::json!({"Derived":{"index":2}})).is_none()
+        );
     }
 }

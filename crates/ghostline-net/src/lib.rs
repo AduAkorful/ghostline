@@ -24,5 +24,6 @@ pub use wallet::{
     WalletDryRunResponse, WalletStealthUtxo, WalletSubmitRequest, WalletSubmitResponse,
     account_name, channel_open_utxo, derived_account_key_id, execution_accepted,
     funding_key_path_addresses, funding_output_spend_gate, pinned_funding_statement_request,
-    pinned_statement_matches_funding, settle_fee_signers, stealth_utxos_from_wallet_tx,
+    pinned_statement_matches_funding, public_key_hex_for_key_id, revealed_transfer_request,
+    settle_fee_signers, stealth_utxos_from_wallet_tx,
 };

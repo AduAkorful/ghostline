@@ -37,6 +37,10 @@ case "$2" in
                 *) shift ;;
             esac
         done
+        if [ "${FAKE_FAUCET_MODE:-ok}" = empty ]; then
+            echo "wallet daemon RPC accounts.create_free_test_coins failed: Application error: 1002: The testnet faucet does not hold enough funds for a claim. Claim tTARI by burning on L1 instead" >&2
+            exit 1
+        fi
         if [ "${FAKE_FAUCET_MODE:-ok}" = transport-once ]; then
             count=0
             [ ! -f "$FAKE_FAUCET_ATTEMPTS" ] || count=$(cat "$FAKE_FAUCET_ATTEMPTS")
@@ -49,6 +53,24 @@ case "$2" in
         fi
         printf '%s %s\n' "$name" "$max_fee" >> "$FAKE_FAUCET_CLAIMS"
         printf 'transaction_id=abc\nfee=%s\namount=1000000000\nresult=Accept\n' "$max_fee"
+        exit 0
+        ;;
+    transfer)
+        from=
+        to=
+        amount=
+        max_fee=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --from) from=$2; shift 2 ;;
+                --to) to=$2; shift 2 ;;
+                --amount) amount=$2; shift 2 ;;
+                --max-fee) max_fee=$2; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        printf '%s %s %s %s\n' "$from" "$to" "$amount" "$max_fee" >> "$FAKE_FEE_TRANSFERS"
+        printf 'transaction_id=transfer\namount=%s\nmax_fee=%s\n' "$amount" "$max_fee"
         exit 0
         ;;
     account-create|account-ensure)
@@ -348,7 +370,7 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' "$url" >> "$FAKE_CURL_URLS"
 mode=${FAKE_INDEXER_MODE:-not-found}
-if [ "$mode" = not-found ] && [ -s "$FAKE_FAUCET_CLAIMS" ]; then
+if [ "$mode" = not-found ] && { [ -s "$FAKE_FAUCET_CLAIMS" ] || [ -s "${FAKE_FEE_TRANSFERS:-}" ]; }; then
     mode=up
 fi
 case "$mode" in
@@ -474,6 +496,31 @@ if ! grep -Fxq 'relay-fees 100000' "$FAKE_FAUCET_CLAIMS"; then
 fi
 if [ "$(cat "$FAKE_FAUCET_ATTEMPTS")" -lt 2 ]; then
     echo "expected two faucet claim attempts" >&2
+    exit 1
+fi
+
+# The 13:25 deploy reached the faucet and it was empty. Startup must publish the
+# fee component from the opener's revealed balance instead of exiting.
+rm -f "$FAKE_FAUCET_CLAIMS" "$FAKE_CURL_URLS" "$GHOSTLINE_DEMO_READY_FILE" "$tmp_root/fee-transfers"
+export FAKE_FEE_TRANSFERS="$tmp_root/fee-transfers"
+export FAKE_FAUCET_MODE=empty
+export FAKE_INDEXER_MODE=not-found
+set +e
+PATH="$tmp_root:$PATH" bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/faucet-empty.stdout" 2>"$tmp_root/faucet-empty.stderr"
+faucet_empty_status=$?
+set -e
+if [ "$faucet_empty_status" -ne 0 ]; then
+    echo "expected startup to fund the fee component from the opener when the faucet is empty" >&2
+    cat "$tmp_root/faucet-empty.stderr" >&2
+    exit 1
+fi
+if ! grep -Fxq 'relay-opener relay-fees 1000000 100000' "$FAKE_FEE_TRANSFERS"; then
+    echo "expected one revealed transfer of 1000000 µT from the opener to the fee account" >&2
+    cat "$FAKE_FEE_TRANSFERS" >&2
+    exit 1
+fi
+if [ -s "$FAKE_FAUCET_CLAIMS" ]; then
+    echo "an empty faucet must not be recorded as a successful claim" >&2
     exit 1
 fi
 

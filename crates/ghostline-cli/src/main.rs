@@ -666,6 +666,24 @@ enum WalletCommand {
         #[arg(long)]
         is_default: bool,
     },
+    /// Move revealed XTR from one wallet account into another.
+    ///
+    /// `accounts.transfer` also publishes the destination component when it is not on chain.
+    /// Use this when the Esmeralda faucet cannot fund the fee account.
+    Transfer {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        /// Revealed µT to deposit in the destination vault.
+        #[arg(long)]
+        amount: u64,
+        /// Maximum µT fee, paid from the source account.
+        #[arg(long)]
+        max_fee: u64,
+    },
     /// Publish an account that is not on chain and fund it from the Esmeralda faucet.
     ///
     /// Calls walletd 0.47 `accounts.create_free_test_coins`. The handler creates the
@@ -1195,6 +1213,69 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|e| e.to_string())?;
                 println!("derived_keys={index}");
                 println!("associated_resource={resource}");
+            }
+            WalletCommand::Transfer {
+                url,
+                from,
+                to,
+                amount,
+                max_fee,
+            } => {
+                if from.trim().is_empty() || to.trim().is_empty() {
+                    return Err(
+                        "revealed transfer requires source and destination account names".into(),
+                    );
+                }
+                if from.trim() == to.trim() {
+                    return Err(
+                        "revealed transfer source and destination must be different accounts"
+                            .into(),
+                    );
+                }
+                if amount == 0 || max_fee == 0 {
+                    return Err(
+                        "revealed transfer amount and max fee must be greater than zero".into(),
+                    );
+                }
+                let wallet = connect_wallet(&url).await?;
+                let destination = wallet
+                    .account_get(to.trim())
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let owner_key = destination
+                    .account
+                    .fee_signer_key_id()
+                    .map_err(|error| error.to_string())?;
+                let keys = wallet
+                    .keys_list(ghostline_net::ACCOUNT_KEY_BRANCH)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let public_key = ghostline_net::public_key_hex_for_key_id(&keys, owner_key)
+                    .ok_or("destination account key has no 32-byte public key")?;
+                let resource =
+                    tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS.to_string();
+                let request = ghostline_net::revealed_transfer_request(
+                    from.trim(),
+                    &public_key,
+                    &resource,
+                    amount,
+                    max_fee,
+                );
+                let transferred = wallet
+                    .transfer_revealed(&request)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let transaction_id = transferred
+                    .get("transaction_id")
+                    .and_then(|value| match value {
+                        serde_json::Value::String(text) if !text.is_empty() => Some(text.clone()),
+                        serde_json::Value::Number(number) => Some(number.to_string()),
+                        _ => None,
+                    })
+                    .ok_or("revealed transfer response has no transaction_id")?;
+                println!("transaction_id={transaction_id}");
+                println!("amount={amount}");
+                println!("max_fee={max_fee}");
             }
             WalletCommand::FaucetClaim { url, name, max_fee } => {
                 if name.trim().is_empty() {

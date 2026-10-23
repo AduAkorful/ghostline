@@ -49,7 +49,10 @@ wallet that holds valuable assets.
    the account component. When that component is missing on the indexer, startup
    claims the Esmeralda faucet once (`accounts.create_free_test_coins`, 1,000
    TARI) and pays the fee from the new account, capped at
-   `GHOSTLINE_DEMO_OPEN_MAX_FEE` (100000 µT). That claim is public. A stealth
+   `GHOSTLINE_DEMO_OPEN_MAX_FEE` (100000 µT). If that faucet is empty, startup
+   instead moves 1 XTR (1000000 µT, `GHOSTLINE_DEMO_FEE_FLOAT`) of the opener's
+   revealed balance into the fee account. That transfer publishes the component.
+   Both the faucet claim and the revealed transfer are public. A stealth
    transfer to the printed address does not create the component, and a second
    claim on the same key fails. The demo's private deposits arrive at the
    separate `ghostline-demo-opener` account from each user's Sapient wallet.
