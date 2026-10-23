@@ -36,6 +36,9 @@ const LIVE_OPEN_DEADLINE_MS = 180_000;
 const RELAY_OPEN_TIMEOUT_MS = 120_000;
 const RELAY_RETRY_MIN_MS = 10_000;
 const FUNDING_NOT_DISCOVERED = /has not discovered this Sapient funding output/i;
+// The relay stops stepping past recreated outputs before this page's request timeout; walletd
+// keeps its counter, so asking again continues past them.
+const OUTPUT_COLLISION_EXHAUSTED = /recreated an output that already exists on chain/i;
 const configuredRelayUrl = String(window.GHOSTLINE_CONFIG?.relayUrl || "").trim();
 
 function readPendingFunding() {
@@ -128,9 +131,36 @@ function saveLiveChannel() {
   }));
 }
 
+const SIMULATION_CHAIN_COPY = {
+  subtitle: "Recorded Esmeralda proof, separate from these clicks",
+  title: "No transaction was created by this demo.",
+  text: "The browser simulation never connects to a wallet or sends a transaction. After five calls, this panel shows a separate recorded Esmeralda run.",
+};
+
+function explorerTxUrl(transactionId) {
+  return `https://explorer.tari.mw/tx/${encodeURIComponent(transactionId)}`;
+}
+
+// The chain panel describes whichever mode the call panel is in; a live channel must not keep
+// the simulation's "no transaction" copy (QA run 16 retry 11).
+function showChainPanelMode() {
+  const live = Boolean(liveChannel) && !simulationMode;
+  const openTx = live ? liveChannel.openTransactionId : undefined;
+  byId("chain-subtitle").textContent = live
+    ? "Live Esmeralda channel · one open and one settlement transaction"
+    : SIMULATION_CHAIN_COPY.subtitle;
+  byId("chain-empty-title").textContent = live ? "Channel opened on Esmeralda." : SIMULATION_CHAIN_COPY.title;
+  byId("chain-empty-text").textContent = live
+    ? "Each paid call is an off-chain signed voucher, so calls create no transactions. After five calls the relay settles the cumulative voucher and the settlement appears here."
+    : SIMULATION_CHAIN_COPY.text;
+  const link = byId("open-tx-link");
+  link.hidden = !openTx;
+  if (openTx) link.href = explorerTxUrl(openTx);
+}
+
 function showPendingFunding(transactionId) {
   const link = byId("pending-funding-link");
-  link.href = `https://explorer.tari.mw/tx/${encodeURIComponent(transactionId)}`;
+  link.href = explorerTxUrl(transactionId);
   link.textContent = "Inspect pending Sapient funding transaction ↗";
   link.hidden = false;
 }
@@ -159,7 +189,8 @@ async function restoreLiveChannel() {
   byId("live-stop").textContent = "Continue with simulation";
   byId("reset").disabled = true;
   byId("pay").disabled = liveCalls >= countLimit || payerSecret.length !== 32;
-  byId("quote").textContent = `Restored live channel ${liveChannel.channelId} · ${liveCalls}/${countLimit} calls · ${liveAccepted} µT accepted`;
+  byId("quote").textContent = `Restored live channel · channel id ${liveChannel.channelId} (off-chain identifier, not a transaction) · ${liveCalls}/${countLimit} calls · ${liveAccepted} µT accepted`;
+  showChainPanelMode();
   byId("live-note").textContent = payerSecret.length === 32
     ? "Restored this tab’s live channel. Its voucher key remains local; settlement/refund status is checked with the relay."
     : "The live channel was restored, but this tab no longer has its voucher key. You can still request its expiry refund after expiry.";
@@ -185,7 +216,10 @@ async function restoreLiveChannel() {
       status("The expiry refund has started. Waiting for the private transfer to Sapient to finalize.");
     } else {
       status(`Restored open channel ${liveChannel.channelId}. Continue the calls or check for expiry refund.`);
-      if (liveCalls === countLimit) await settleLive();
+      if (liveCalls === countLimit) {
+        refreshControls();
+        await settleLive();
+      }
     }
   } catch (error) {
     status(`Live channel ${liveChannel.channelId} is saved in this tab, but the relay could not be reached: ${error instanceof Error ? error.message : String(error)}`);
@@ -520,12 +554,17 @@ async function openFundedChannel(pending, deadline) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!FUNDING_NOT_DISCOVERED.test(message)) throw error;
+      const collided = OUTPUT_COLLISION_EXHAUSTED.test(message);
+      if (!collided && !FUNDING_NOT_DISCOVERED.test(message)) throw error;
       if (deadline - Date.now() < RELAY_RETRY_MIN_MS) {
+        if (collided) throw error;
         throw new Error("The relay wallet has not discovered your finalized deposit yet. Esmeralda wallet scans can take up to about 10 minutes; retry opening the channel later. No second transfer will be requested");
       }
-      status(`Deposit finalized; waiting for the relay wallet to discover it (${Math.round((Date.now() - started) / 1000)} s). No second transfer will be requested.`);
-      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      const waited = Math.round((Date.now() - started) / 1000);
+      status(collided
+        ? `The relay is stepping past outputs its restarted wallet recreated (${waited} s). No second transfer will be requested.`
+        : `Deposit finalized; waiting for the relay wallet to discover it (${waited} s). No second transfer will be requested.`);
+      if (!collided) await new Promise((resolve) => window.setTimeout(resolve, 5000));
     }
   }
 }
@@ -655,12 +694,13 @@ async function connectAndOpenLive() {
     saveLiveChannel();
     serviceKey = hexToBytes(opened.servicePublicKey);
     byId("service-subtitle").textContent = "Live Esmeralda relay · each accepted call has a real signed voucher";
-    byId("quote").textContent = `Channel ${opened.channelId} · expires at epoch ${opened.expiryEpoch}`;
+    byId("quote").textContent = `Channel id ${opened.channelId} (off-chain identifier, not a transaction) · expires at epoch ${opened.expiryEpoch}`;
     byId("live-note").textContent = `Channel open through expiry epoch ${opened.expiryEpoch}. Custodial testnet flow: five calls can settle 50 µT; 1 µT remains in Ghostline’s fixed-shape change output. If left unsettled, the relay can return the full deposit privately after expiry. Your voucher key stays in this browser.`;
     byId("live-stop").hidden = false;
     byId("live-stop").textContent = "Continue with simulation";
     byId("live-refund").hidden = false;
     byId("reset").disabled = true;
+    showChainPanelMode();
     refreshControls();
     status("Channel finalized. Each click now sends a real signed voucher to the relay.");
   } catch (error) {
@@ -739,7 +779,11 @@ async function payLiveToll() {
     renderCall(body.fortune, liveCalls, voucher);
     byId("quote").textContent = `Live voucher accepted · ${liveCalls}/5 · cumulative ${liveAccepted} µT`;
     status(`Ootle has not seen this call. The service accepted voucher ${liveCalls}/5; cumulative amount ${liveAccepted} µT.`);
-    if (liveCalls === countLimit) await settleLive();
+    if (liveCalls === countLimit) {
+      // Settlement takes seconds; show the fifth call as complete before waiting on it.
+      refreshControls();
+      await settleLive();
+    }
   } catch (error) {
     if (liveChannel && !simulationMode) returnToSimulation();
     byId("live-stop").hidden = false;
@@ -823,7 +867,11 @@ function showLiveEvidence(url, transactionId) {
   byId("chain-panel").classList.remove("is-settling");
   byId("chain-empty").hidden = true;
   byId("chain-result").hidden = false;
-  byId("record-summary").textContent = `Live run: ${liveCalls} paid calls · ${liveAccepted} µT cumulative · channel ${liveChannel.channelId} · settlement ${transactionId}.`;
+  const openTx = liveChannel.openTransactionId;
+  byId("record-summary").textContent = `Live run: ${liveCalls} paid calls · ${liveAccepted} µT cumulative${openTx ? ` · open ${openTx}` : ""} · settlement ${transactionId}.`;
+  const openLink = byId("open-explorer-link");
+  openLink.hidden = !openTx;
+  if (openTx) openLink.href = explorerTxUrl(openTx);
   const link = byId("explorer-link");
   link.href = url;
   byId("recorded-tx-id").textContent = transactionId;
@@ -887,6 +935,7 @@ function returnToSimulation() {
     byId("service-subtitle").textContent = "Live Esmeralda relay · each accepted call has a real signed voucher";
     status("Back in the live session. Its channel and local voucher key remain saved.");
   }
+  showChainPanelMode();
   refreshControls();
   byId("demo-title").scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
@@ -946,6 +995,7 @@ function showRecordedEvidence() {
     return;
   }
   settlementShown = true;
+  byId("open-explorer-link").hidden = true;
   const chain = evidence.chainRecord;
   byId("record-summary").textContent = "This is a separate recorded transaction from an earlier Esmeralda run. The browser clicks did not create or submit it.";
   const link = byId("explorer-link");
@@ -1005,6 +1055,7 @@ function reset() {
   byId("chain-empty").hidden = false;
   byId("chain-result").hidden = true;
   byId("chain-panel").classList.remove("is-settling");
+  showChainPanelMode();
   settlementShown = false;
   byId("settle").textContent = "Show recorded settlement evidence";
   refreshControls();

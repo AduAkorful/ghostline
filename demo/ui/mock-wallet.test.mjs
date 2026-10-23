@@ -42,7 +42,7 @@ class Element {
   }
 }
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], fastTime = false, pending, txStatus = "Finalized" } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], settleGate, fastTime = false, pending, txStatus = "Finalized" } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -124,7 +124,10 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
       paidCalls += 1;
       return json({ fortune: `Mock paid response ${paidCalls}` }, 200, { "ghostline-recovery": `opaque-recovery-${paidCalls}` });
     }
-    if (url.pathname === "/demo/settle") return json({ state: "Finalized", settlementTransactionId: "settle-test-tx", explorerUrl: "https://explorer.tari.mw/tx/settle-test-tx", recoveryReceipt: "opaque-recovery-final" });
+    if (url.pathname === "/demo/settle") {
+      if (settleGate) await settleGate;
+      return json({ state: "Finalized", settlementTransactionId: "settle-test-tx", explorerUrl: "https://explorer.tari.mw/tx/settle-test-tx", recoveryReceipt: "opaque-recovery-final" });
+    }
     if (url.pathname === "/demo/refund-funding") return json({ state: "refunded", deposit: 51, refundTransactionId: "funding-refund-tx", explorerUrl: "https://explorer.tari.mw/tx/funding-refund-tx" });
     if (url.pathname === "/demo/status") return json({ state: "Finalized", settlementTransactionId: "settle-test-tx", explorerUrl: "https://explorer.tari.mw/tx/settle-test-tx" });
     throw new Error(`Unexpected relay request: ${options.method || "GET"} ${url.pathname}`);
@@ -499,5 +502,72 @@ test("an undiscovered deposit ends at the deadline with the retry button usable 
     assert.ok(h.local.has("ghostline-live-pending"), "the funded transfer stays saved for a later retry");
     const opens = h.calls.filter((call) => call.url.includes("/demo/open")).length;
     assert.ok(opens > 1 && opens < 60, `bounded re-posts (${opens})`);
+  } finally { h.restoreClock(); }
+});
+
+const COLLISION_EXHAUSTED = "the relay wallet recreated an output that already exists on chain 9 times in this request (its key counter restarted with the relay). Ootle refused each open before execution, so the deposit is unspent and no fee was charged. Retry opening the channel; it continues past these outputs. Do not send another deposit";
+
+test("a live channel shows its open transaction and live panel copy, then the open link beside the settlement", async () => {
+  const h = makeHarness();
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.equal(h.elements.get("open-tx-link").hidden, false);
+  assert.equal(h.elements.get("open-tx-link").href, "https://explorer.tari.mw/tx/open-test-tx");
+  assert.match(h.elements.get("chain-empty-title").textContent, /Channel opened on Esmeralda/);
+  assert.doesNotMatch(h.elements.get("chain-empty-text").textContent, /simulation never connects/);
+  assert.match(h.elements.get("chain-subtitle").textContent, /Live Esmeralda channel/);
+  assert.match(h.elements.get("quote").textContent, /off-chain identifier, not a transaction/);
+
+  for (let i = 0; i < 5; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("open-explorer-link").hidden, false);
+  assert.equal(h.elements.get("open-explorer-link").href, "https://explorer.tari.mw/tx/open-test-tx");
+  assert.match(h.elements.get("record-summary").textContent, /open open-test-tx · settlement settle-test-tx/);
+  assert.doesNotMatch(h.elements.get("record-summary").textContent, /channel [0-9a-f]{64}/);
+
+  await h.elements.get("live-stop").click();
+  assert.match(h.elements.get("chain-empty-title").textContent, /No transaction was created/);
+  assert.equal(h.elements.get("open-tx-link").hidden, true);
+});
+
+test("the fifth live call shows as complete while settlement is still running", async () => {
+  let release;
+  const settleGate = new Promise((resolve) => { release = resolve; });
+  const h = makeHarness({ settleGate });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  for (let i = 0; i < 4; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  const fifth = h.elements.get("pay").click();
+  await h.waitFor(() => /submitting the cumulative voucher settlement/.test(h.elements.get("status").textContent));
+  assert.match(h.elements.get("demo-progress").textContent, /^5 of 5 live calls complete · 50 µT accepted/);
+  assert.equal(h.elements.get("pay").textContent, "Five live calls complete");
+  assert.equal(h.elements.get("pay").disabled, true);
+  release();
+  await fifth;
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+});
+
+test("the page asks again after the relay stops stepping past recreated outputs, then opens", async () => {
+  const payerSecret = new Uint8Array(32).fill(3);
+  const h = makeHarness({
+    fastTime: true,
+    pending: { sessionId: "session-test", fundingTxId: "funding-test-tx", payerPublicKey: hex(publicKeyFromSecret(payerSecret)), payerSecretHex: hex(payerSecret) },
+    openFailures: [COLLISION_EXHAUSTED],
+  });
+  try {
+    await h.load();
+    await h.elements.get("live-open").click();
+    await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+    assert.match(h.elements.get("status").textContent, /Channel finalized/);
+    assert.equal(h.calls.filter((call) => call.url.includes("/demo/open")).length, 2);
+    assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
   } finally { h.restoreClock(); }
 });

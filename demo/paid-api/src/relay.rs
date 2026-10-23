@@ -801,6 +801,7 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     };
     open_with_collision_retries(
         MAX_OUTPUT_COLLISION_ATTEMPTS,
+        OUTPUT_COLLISION_BUDGET,
         attempt_open,
         || output_collision_attempt(state, &config, &funding_id),
         |rejected_tx, attempt| {
@@ -1188,11 +1189,23 @@ async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpe
 /// walletd 0.47 derives each output mask from a counter its database restarts at 0 (OBS-033).
 /// The relay wallet database is lost on every Render restart, so a fresh channel output can
 /// recreate a 51 µT commitment that is already on chain. Ootle refuses that before execution.
-const MAX_OUTPUT_COLLISION_ATTEMPTS: usize = 3;
+/// Every landed open adds one more index a later restart must step past (hosted run 16 needed
+/// two), so the bound is generous. Each refused attempt took 1–2 s on Esmeralda.
+const MAX_OUTPUT_COLLISION_ATTEMPTS: usize = 32;
+/// Stop stepping before play.js abandons its 120 s `/demo/open` request. walletd keeps its mask
+/// counter between requests, so the browser's next request resumes past the indices tried here.
+const OUTPUT_COLLISION_BUDGET: Duration = Duration::from_secs(75);
+// Hosted run 16 retry 11 needed two refused attempts; play.js abandons `/demo/open` at 120 s.
+const _: () =
+    assert!(MAX_OUTPUT_COLLISION_ATTEMPTS >= 16 && OUTPUT_COLLISION_BUDGET.as_secs() < 120);
 
 /// A pre-execution refusal for an output substate that already exists. Nothing was spent and no
 /// fee was charged, and each new walletd statement takes the next mask index, so a fresh attempt
 /// can succeed.
+/// Prefix play.js matches to keep re-requesting the open within its own deadline.
+const OUTPUT_COLLISION_EXHAUSTED: &str =
+    "the relay wallet recreated an output that already exists on chain";
+
 fn is_output_collision_reject(reason: &str, executed: bool) -> bool {
     !executed && reason.contains("already exists and cannot be created as an output")
 }
@@ -1216,11 +1229,13 @@ async fn output_collision_attempt(
     }
 }
 
-/// Runs `attempt` until it succeeds, it fails for a reason other than an output collision, or
-/// `max_attempts` collisions have been discarded. `discard` must drop the saved attempt so the
-/// next `attempt` builds a new channel and a new wallet statement.
+/// Runs `attempt` until it succeeds, it fails for a reason other than an output collision,
+/// `max_attempts` collisions have been discarded, or `budget` has elapsed after a collision.
+/// `discard` must drop the saved attempt so the next `attempt` builds a new channel and a new
+/// wallet statement.
 async fn open_with_collision_retries<T, A, AF, C, CF, D, DF>(
     max_attempts: usize,
+    budget: Duration,
     mut attempt: A,
     mut collided: C,
     mut discard: D,
@@ -1233,6 +1248,7 @@ where
     D: FnMut(String, usize) -> DF,
     DF: std::future::Future<Output = Result<(), String>>,
 {
+    let started = tokio::time::Instant::now();
     let mut collisions = 0;
     loop {
         let error = match attempt().await {
@@ -1244,9 +1260,9 @@ where
         };
         collisions += 1;
         discard(rejected_tx, collisions).await?;
-        if collisions >= max_attempts {
+        if collisions >= max_attempts || started.elapsed() >= budget {
             return Err(format!(
-                "the relay wallet recreated an output that already exists on chain {collisions} times (its key counter restarted with the relay). Ootle refused each open before execution, so the deposit is unspent and no fee was charged. Retry opening the channel; do not send another deposit"
+                "{OUTPUT_COLLISION_EXHAUSTED} {collisions} times in this request (its key counter restarted with the relay). Ootle refused each open before execution, so the deposit is unspent and no fee was charged. Retry opening the channel; it continues past these outputs. Do not send another deposit"
             ));
         }
     }
@@ -3399,6 +3415,7 @@ mod tests {
         let discarded = std::cell::RefCell::new(Vec::new());
         let result = open_with_collision_retries(
             MAX_OUTPUT_COLLISION_ATTEMPTS,
+            OUTPUT_COLLISION_BUDGET,
             || async {
                 attempts.set(attempts.get() + 1);
                 if attempts.get() < 3 {
@@ -3427,6 +3444,7 @@ mod tests {
         let attempts = std::cell::Cell::new(0);
         let result: Result<(), String> = open_with_collision_retries(
             MAX_OUTPUT_COLLISION_ATTEMPTS,
+            OUTPUT_COLLISION_BUDGET,
             || async {
                 attempts.set(attempts.get() + 1);
                 Err("wait did not Accept".to_string())
@@ -3438,8 +3456,28 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(attempts.get(), MAX_OUTPUT_COLLISION_ATTEMPTS);
         assert!(error.contains("deposit is unspent"), "{error}");
-        assert!(error.contains("do not send another deposit"), "{error}");
+        assert!(error.starts_with(OUTPUT_COLLISION_EXHAUSTED), "{error}");
+        assert!(error.contains("Do not send another deposit"), "{error}");
         assert!(!error.ends_with('.'), "page appends its own period");
+    }
+
+    #[tokio::test]
+    async fn collision_retries_stop_when_the_request_budget_is_spent() {
+        // A restart can leave more taken mask indices than one request has time to step past.
+        let attempts = std::cell::Cell::new(0);
+        let result: Result<(), String> = open_with_collision_retries(
+            MAX_OUTPUT_COLLISION_ATTEMPTS,
+            Duration::ZERO,
+            || async {
+                attempts.set(attempts.get() + 1);
+                Err("wait did not Accept".to_string())
+            },
+            || async { Some("rejected".to_string()) },
+            |_, _| async { Ok(()) },
+        )
+        .await;
+        assert_eq!(attempts.get(), 1);
+        assert!(result.unwrap_err().starts_with(OUTPUT_COLLISION_EXHAUSTED));
     }
 
     #[tokio::test]
@@ -3448,6 +3486,7 @@ mod tests {
         let discards = std::cell::Cell::new(0);
         let result: Result<(), String> = open_with_collision_retries(
             MAX_OUTPUT_COLLISION_ATTEMPTS,
+            OUTPUT_COLLISION_BUDGET,
             || async {
                 attempts.set(attempts.get() + 1);
                 Err("channel open abc is still pending".to_string())
@@ -3465,6 +3504,7 @@ mod tests {
 
         let failed_discard: Result<(), String> = open_with_collision_retries(
             MAX_OUTPUT_COLLISION_ATTEMPTS,
+            OUTPUT_COLLISION_BUDGET,
             || async { Err("wait did not Accept".to_string()) },
             || async { Some("rejected".to_string()) },
             |_, _| async { Err("relay state: disk full".to_string()) },
