@@ -9,9 +9,11 @@ COPY . .
 RUN cargo build --locked --release -p ghostline-cli -p ghostline-paid-api
 
 FROM debian:bookworm-slim AS runtime
-ARG OOTLE_WALLETD_VERSION=0.47.0
-ARG OOTLE_WALLETD_COMMIT=9dabb2a
-ARG OOTLE_WALLETD_SHA256=919579e691fa3ec4ddead30a40f96c67f1efa0a735ca77a17cc2dc53d611ba52
+# Upstream v0.47.0 (9dabb2a) can skip stealth outputs while scanning, so the relay never finds
+# some finalized deposits. This build backports the public upstream fix tari-ootle#3047
+# (32cd4c5) onto v0.47.0, built in rust:1.97.1-bookworm; see the release notes for the patch.
+ARG OOTLE_WALLETD_URL=https://github.com/AduAkorful/ghostline/releases/download/walletd-v0.47.0-ghostline.3047/tari_ootle_walletd-0.47.0-ghostline.3047-linux-x86_64
+ARG OOTLE_WALLETD_SHA256=4617bac9c53b53d52a871450eeb0f27f65d5e089a839cafb36b6300ed8da2874
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl libdbus-1-3 libgcc-s1 libgcrypt20 liblz4-1 liblzma5 passwd \
     libssl3 libstdc++6 libsystemd0 libzstd1 \
@@ -20,9 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=build /src/target/release/ghostline /usr/local/bin/ghostline
 COPY --from=build /src/target/release/ghostline-paid-api /usr/local/bin/ghostline-paid-api
-RUN asset="tari_ootle_walletd-${OOTLE_WALLETD_VERSION}-${OOTLE_WALLETD_COMMIT}-linux-x86_64" \
-    && curl --fail --location --silent --show-error \
-      "https://github.com/tari-project/tari-ootle/releases/download/v${OOTLE_WALLETD_VERSION}/${asset}" \
+RUN curl --fail --location --silent --show-error "$OOTLE_WALLETD_URL" \
       --output /usr/local/bin/tari_ootle_walletd \
     && printf '%s  %s\n' "$OOTLE_WALLETD_SHA256" /usr/local/bin/tari_ootle_walletd | sha256sum --check --status \
     && chmod 0755 /usr/local/bin/tari_ootle_walletd

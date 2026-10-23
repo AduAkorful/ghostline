@@ -7,6 +7,17 @@ voucher-signing key in their browser. The relay cannot forge an early voucher,
 but it can delay or withhold an expiry refund. Do not use real funds or reuse a
 wallet that holds valuable assets.
 
+## Wallet daemon build
+
+The image downloads a Ghostline build of `tari_ootle_walletd` 0.47.0, not the
+official asset. Official v0.47.0 can skip stealth outputs while scanning, so the
+relay may never discover a finalized deposit. The build backports the public
+upstream fix tari-project/tari-ootle#3047 (`32cd4c5`) onto v0.47.0 (`9dabb2a`).
+It is compiled in `rust:1.97.1-bookworm` without the embedded web UI and pinned
+by SHA-256 in [`Dockerfile`](Dockerfile). The release page carries the patch,
+licence and test results. Switch back to an official release once one contains
+#3047.
+
 ## Render setup
 
 1. In Render, create a Blueprint from this repository and select `main`. Review
