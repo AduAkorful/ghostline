@@ -1127,6 +1127,7 @@ fn open_rejection_reason(entry: &serde_json::Value) -> String {
     }
 }
 
+/// The CLI then locks only these commitments. Other unspent outputs stay where they are.
 async fn require_funding_outputs_spendable(
     config: &RelayConfig,
     commitments: &[String],

@@ -33,6 +33,7 @@ const SUBMIT: &str = "transactions.submit";
 const SUBMIT_DRY_RUN: &str = "transactions.submit_dry_run";
 const WAIT_RESULT: &str = "transactions.wait_result";
 const STEALTH_TRANSFER: &str = "accounts.stealth_transfer";
+const CREATE_STEALTH_STATEMENT: &str = "accounts.create_stealth_transfer_statement";
 const GET_DEFAULT: &str = "accounts.get_default";
 const ACCOUNTS_GET: &str = "accounts.get";
 const ACCOUNTS_GET_BALANCES: &str = "accounts.get_balances";
@@ -372,16 +373,63 @@ impl WalletStealthUtxo {
     }
 }
 
-/// Refuse a hosted open unless `commitments` are the only unspent stealth outputs.
+/// Refuse a hosted open unless every funding commitment is an unspent key-path output.
 ///
-/// walletd 0.47 `accounts.stealth_transfer` selects inputs with an enum. For a TARI
-/// transfer it merges the fee into that selection, so `ConfidentialOnly` would require
-/// confidential inputs for the deposit and the fee. `PreferConfidential` spends revealed
-/// funds for whatever the stealth outputs do not cover. The hosted relay therefore
-/// submits only when the verified Sapient commitments are the account's entire unspent
-/// stealth set: the deposit input has to be one of those outputs, and another output
-/// cannot be chosen instead.
+/// Other unspent outputs are ignored. The hosted open spends only the addresses this returns,
+/// via `accounts.create_stealth_transfer_statement` `InputSelection::Specific`. Script outputs
+/// are not key-path spendable (`StealthOutputsApi::validate_output_for_specific_spend`).
 pub fn funding_output_spend_gate(utxos: &[Value], commitments: &[String]) -> Result<(), String> {
+    funding_key_path_addresses(utxos, commitments).map(|_| ())
+}
+
+/// `stealth_utxos.list` `address` values for `commitments`, in that order.
+///
+/// walletd 0.47 `UtxoAddress` JSON is `{ "resource_address", "id" }`. `id` is the output commitment.
+pub fn funding_key_path_addresses(
+    utxos: &[Value],
+    commitments: &[String],
+) -> Result<Vec<Value>, String> {
+    let wanted = funding_commitments(commitments)?;
+    let mut addresses = vec![None; wanted.len()];
+    for utxo in utxos {
+        let status = utxo
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !status.eq_ignore_ascii_case("unspent") {
+            continue;
+        }
+        let Some(id) = utxo
+            .pointer("/address/id")
+            .and_then(Value::as_str)
+            .map(|id| id.trim().to_ascii_lowercase())
+        else {
+            continue;
+        };
+        let Some(index) = wanted.iter().position(|commitment| commitment == &id) else {
+            continue;
+        };
+        if !stealth_output_is_key_path(utxo) {
+            return Err(
+                "the Sapient funding output is not key-path spendable, so this open cannot lock it"
+                    .to_string(),
+            );
+        }
+        let address = utxo.get("address").cloned().ok_or_else(|| {
+            "the Sapient funding output has no address, so this open cannot lock it".to_string()
+        })?;
+        addresses[index] = Some(address);
+    }
+    if addresses.iter().any(Option::is_none) {
+        return Err(
+            "the opener wallet has not discovered this Sapient funding output yet. Retry without sending another deposit."
+                .to_string(),
+        );
+    }
+    Ok(addresses.into_iter().flatten().collect())
+}
+
+fn funding_commitments(commitments: &[String]) -> Result<Vec<String>, String> {
     let wanted: Vec<String> = commitments
         .iter()
         .map(|commitment| commitment.trim().to_ascii_lowercase())
@@ -395,40 +443,121 @@ pub fn funding_output_spend_gate(utxos: &[Value], commitments: &[String]) -> Res
     }) {
         return Err("Sapient funding commitment is not 32-byte hex".to_string());
     }
-    let mut found = vec![false; wanted.len()];
-    let mut other_unspent = 0u64;
-    for utxo in utxos {
-        let status = utxo
-            .get("status")
+    Ok(wanted)
+}
+
+/// `accounts.create_stealth_transfer_statement` body that locks only `utxo_addresses`.
+///
+/// walletd 0.47 wraps one [`TransferStatementRequest`] in `requests`. `Specific` contributes
+/// no revealed amount. The fee is not part of this statement.
+pub fn pinned_funding_statement_request(
+    account: &str,
+    resource_address: &str,
+    destination_address: &str,
+    blinded_amount: u64,
+    pay_to: &Value,
+    utxo_addresses: &[Value],
+) -> Value {
+    serde_json::json!({
+        "requests": [{
+            "sender_account": account_name(account),
+            "resource_address": resource_address,
+            "input_selection": { "Specific": { "utxo_addresses": utxo_addresses } },
+            "outputs": [{
+                "address": destination_address,
+                "revealed_amount": "0",
+                "blinded_amount": blinded_amount.to_string(),
+                "memo": null,
+                "pay_to": pay_to,
+            }]
+        }]
+    })
+}
+
+/// The statement spends exactly `commitments` and moves no revealed amount.
+pub fn pinned_statement_matches_funding(
+    statement: &Value,
+    commitments: &[String],
+) -> Result<(), String> {
+    let wanted = funding_commitments(commitments)?;
+    let inputs = statement
+        .pointer("/inputs_statement/inputs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "pinned statement has no stealth inputs".to_string())?;
+    let mut got = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        let commitment = input
+            .get("commitment")
             .and_then(Value::as_str)
-            .unwrap_or_default();
-        if !status.eq_ignore_ascii_case("unspent") {
-            continue;
-        }
-        let blob = serde_json::to_string(utxo)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if let Some(index) = wanted
-            .iter()
-            .position(|commitment| blob.contains(commitment))
-        {
-            found[index] = true;
-        } else {
-            other_unspent = other_unspent.saturating_add(1);
-        }
+            .ok_or_else(|| "pinned statement input commitment is not hex".to_string())?;
+        got.push(commitment.trim().to_ascii_lowercase());
     }
-    if found.iter().any(|present| !present) {
+    got.sort();
+    let mut expected = wanted;
+    expected.sort();
+    if got != expected {
         return Err(
-            "the opener wallet has not discovered this Sapient funding output yet. Retry without sending another deposit."
-                .to_string(),
+            "pinned statement does not spend only the verified Sapient funding output".to_string(),
         );
     }
-    if other_unspent > 0 {
+    let revealed_input = statement
+        .pointer("/inputs_statement/revealed_amount")
+        .ok_or_else(|| "pinned statement has no revealed input amount".to_string())?;
+    if !json_amount_is_zero(Some(revealed_input)) {
+        return Err("pinned statement spends revealed funds; refusing to broadcast".to_string());
+    }
+    let outputs = statement
+        .pointer("/outputs_statement/outputs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "pinned statement has no stealth output".to_string())?;
+    if outputs.len() != 1 {
         return Err(format!(
-            "the opener wallet holds {other_unspent} other unspent stealth output(s), so this open could spend those instead of the Sapient deposit. Refusing to broadcast."
+            "pinned statement created {} stealth outputs; refusing to broadcast",
+            outputs.len()
         ));
     }
+    if !json_amount_is_zero(statement.pointer("/outputs_statement/revealed_output")) {
+        return Err("pinned statement reveals funds; refusing to broadcast".to_string());
+    }
     Ok(())
+}
+
+fn json_amount_is_zero(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => true,
+        Some(Value::String(text)) => text == "0",
+        Some(Value::Number(number)) => number.as_u64() == Some(0),
+        Some(_) => false,
+    }
+}
+
+fn json_u64(value: Option<&Value>) -> Option<u64> {
+    match value {
+        Some(Value::Number(number)) => number.as_u64(),
+        Some(Value::String(text)) => text.parse().ok(),
+        _ => None,
+    }
+}
+
+/// One locked stealth statement from `accounts.create_stealth_transfer_statement`.
+#[derive(Debug, Clone)]
+pub struct PinnedFundingStatement {
+    pub statement: Value,
+    pub lock_id: u64,
+}
+
+/// walletd 0.47 auto-selects an output only when its auth carries a spend key.
+///
+/// `{"Script": ...}` is a condition-tree output. A missing `auth` stays selectable so an
+/// older list shape cannot hide a spendable output.
+fn stealth_output_is_key_path(utxo: &Value) -> bool {
+    match utxo.get("auth") {
+        Some(Value::String(name)) => !name.eq_ignore_ascii_case("script"),
+        Some(Value::Object(map)) => {
+            map.is_empty() || !map.keys().all(|key| key.eq_ignore_ascii_case("script"))
+        }
+        _ => true,
+    }
 }
 
 /// Channel deposit: first `Script` output (`PayTo::Conditions` is stored as Script).
@@ -755,6 +884,38 @@ impl WalletClient {
         request: &StealthTransferRequest,
     ) -> Result<WalletSubmitResponse, NetError> {
         self.rpc(STEALTH_TRANSFER, request).await
+    }
+
+    /// Lock exactly the named outputs and return the wallet-built statement.
+    ///
+    /// walletd 0.47 holds that lock for five minutes. There is no unlock method. A dry-run does
+    /// not bind the lock; `transactions.submit` does, via `lock_ids`.
+    pub async fn create_pinned_funding_statement(
+        &self,
+        request: &Value,
+    ) -> Result<PinnedFundingStatement, NetError> {
+        let response: Value = self.rpc(CREATE_STEALTH_STATEMENT, request).await?;
+        let statements = response
+            .get("statements")
+            .and_then(Value::as_array)
+            .ok_or_else(|| NetError::Decode {
+                path: CREATE_STEALTH_STATEMENT.to_string(),
+                details: "response has no statements array".into(),
+            })?;
+        if statements.len() != 1 {
+            return Err(NetError::Decode {
+                path: CREATE_STEALTH_STATEMENT.to_string(),
+                details: format!("expected one statement, got {}", statements.len()),
+            });
+        }
+        let lock_id = json_u64(response.get("lock_id")).ok_or_else(|| NetError::Decode {
+            path: CREATE_STEALTH_STATEMENT.to_string(),
+            details: "response lock_id is not an integer".into(),
+        })?;
+        Ok(PinnedFundingStatement {
+            statement: statements[0].clone(),
+            lock_id,
+        })
     }
 
     pub async fn transaction_get(&self, transaction_id: TransactionId) -> Result<Value, NetError> {
@@ -1117,30 +1278,96 @@ mod tests {
     }
 
     #[test]
-    fn funding_spend_gate_requires_only_the_verified_output() {
+    fn funding_spend_gate_pins_the_verified_output() {
         let funding = "ab".repeat(32);
         let other = "cd".repeat(32);
+        let funding_address = serde_json::json!({
+            "resource_address": "resource_0101",
+            "id": funding,
+        });
         let utxos = vec![serde_json::json!({
             "status": "Unspent",
-            "address": { "id": funding },
+            "address": funding_address.clone(),
             "value": "51"
         })];
-        assert!(funding_output_spend_gate(&utxos, &[funding.clone()]).is_ok());
+        let addresses = funding_key_path_addresses(&utxos, &[funding.clone()]).unwrap();
+        assert_eq!(addresses, vec![funding_address]);
 
         let mut extra = utxos.clone();
         extra.push(serde_json::json!({
             "status": "Unspent",
             "address": { "id": other },
+            "auth": { "Key": "bb" },
             "value": "51"
         }));
-        let error = funding_output_spend_gate(&extra, &[funding.clone()]).unwrap_err();
-        assert!(error.contains("other unspent stealth output"));
+        assert!(funding_output_spend_gate(&extra, &[funding.clone()]).is_ok());
+
+        let mut script_leftover = utxos.clone();
+        script_leftover.push(serde_json::json!({
+            "status": "Unspent",
+            "address": { "id": other },
+            "auth": { "Script": "5a91af49" },
+            "value": "51"
+        }));
+        assert!(funding_output_spend_gate(&script_leftover, &[funding.clone()]).is_ok());
+
+        let script_funding = vec![serde_json::json!({
+            "status": "Unspent",
+            "address": { "id": funding },
+            "auth": { "Script": "5a91af49" },
+        })];
+        let error = funding_output_spend_gate(&script_funding, &[funding.clone()]).unwrap_err();
+        assert!(error.contains("not key-path spendable"));
 
         let missing = vec![serde_json::json!({
             "status": "Spent",
             "address": { "id": funding }
         })];
-        let error = funding_output_spend_gate(&missing, &[funding]).unwrap_err();
+        let error = funding_output_spend_gate(&missing, &[funding.clone()]).unwrap_err();
         assert!(error.contains("has not discovered"));
+    }
+
+    #[test]
+    fn pinned_funding_request_names_only_the_verified_output() {
+        let address = serde_json::json!({ "resource_address": "resource_0101", "id": "ab" });
+        let request = pinned_funding_statement_request(
+            "ghostline-demo-opener",
+            "resource_0101",
+            "addr",
+            51,
+            &serde_json::json!({ "Conditions": [["leaf"]] }),
+            &[address.clone()],
+        );
+        let body = &request["requests"][0];
+        assert_eq!(body["sender_account"]["Name"], "ghostline-demo-opener");
+        assert_eq!(
+            body["input_selection"]["Specific"]["utxo_addresses"][0],
+            address
+        );
+        assert!(body.get("fee").is_none());
+        assert_eq!(body["outputs"][0]["blinded_amount"], "51");
+        assert_eq!(body["outputs"][0]["revealed_amount"], "0");
+        assert!(!request.to_string().contains("PreferConfidential"));
+
+        let commitment = "ab".repeat(32);
+        let statement = serde_json::json!({
+            "inputs_statement": {
+                "inputs": [{ "commitment": commitment.to_uppercase() }],
+                "revealed_amount": "0"
+            },
+            "outputs_statement": {
+                "outputs": [{ "output": {} }],
+                "revealed_output": null
+            }
+        });
+        assert!(pinned_statement_matches_funding(&statement, &[commitment.clone()]).is_ok());
+        let revealed = serde_json::json!({
+            "inputs_statement": {
+                "inputs": [{ "commitment": commitment }],
+                "revealed_amount": "51"
+            },
+            "outputs_statement": { "outputs": [{}] }
+        });
+        assert!(pinned_statement_matches_funding(&revealed, &[commitment]).is_err());
     }
 }
