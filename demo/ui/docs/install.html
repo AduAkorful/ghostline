@@ -19,15 +19,18 @@
         <a href="../play.html">Try the demo</a>
         <a href="../index.html#story">How it works</a>
         <a href="../index.html#evidence">Proof</a>
-        <a href="../index.html#capabilities">CLI map</a>
-        <a class="nav-cta" href="quickstart.html">Quickstart <span aria-hidden="true">↗</span></a>
+        <a href="../index.html#privacy">Privacy</a>
+        <a href="install.html" aria-current="page">Docs</a>
+        <a class="nav-cta" href="../index.html#start">Get Ghostline <span aria-hidden="true">→</span></a>
         <details class="mobile-nav">
           <summary>Explore <span aria-hidden="true">+</span></summary>
           <div class="mobile-nav-panel">
             <a href="../play.html">Try the demo</a>
-            <a href="../index.html#story">How it works</a><a href="../index.html#evidence">Proof</a>
-            <a href="../index.html#capabilities">CLI map</a><a href="quickstart.html">Esmeralda quickstart</a>
-            <a href="interfaces.html">Interfaces and tools</a>
+            <a href="../index.html#story">How it works</a>
+            <a href="../index.html#evidence">Proof</a>
+            <a href="../index.html#privacy">Privacy</a>
+            <a href="install.html" aria-current="page">Docs</a>
+            <a href="../index.html#start">Get Ghostline</a>
           </div>
         </details>
       </nav>
@@ -38,7 +41,7 @@
         <p class="eyebrow">GET THE TOOLS</p>
         <h1>Install Ghostline.<br /><em>Keep control.</em></h1>
         <p>Download the CLI, reference paid API, and MCP server to your own machine. Installation does not create or fund a wallet.</p>
-        <div class="guide-meta"><span>LINUX · x86-64 · glibc</span><span>NO ROOT REQUIRED</span><span>TESTNET ONLY</span></div>
+        <div class="guide-meta"><span>LINUX · x86-64 · glibc</span><span>NO macOS OR WINDOWS BUILDS</span><span>NO ROOT REQUIRED</span><span>TESTNET ONLY</span></div>
       </header>
       <div class="guide-layout">
         <nav class="guide-nav" aria-label="On this page">
@@ -63,7 +66,7 @@
               <div class="guide-command-head"><span>PIN GHOSTLINE v0.4.0</span><button class="guide-copy" type="button" data-copy="install-pinned">Copy command</button></div>
               <pre><code id="install-pinned">curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.4.0 sh</code></pre>
             </div>
-            <div class="guide-callout"><strong>Want to try it without a wallet?</strong> After the install, run <code>ghostline demo --show-chain-evidence</code>. It runs the local quote-and-pay flow and prints separate historical Esmeralda links; it does not use test funds or create a transaction. For a real testnet run, continue to the <a href="quickstart.html">Esmeralda quickstart ↗</a>.</div>
+            <div class="guide-callout"><strong>Want to try it without a wallet?</strong> After the install, run <code>ghostline demo --show-chain-evidence</code>. It runs the local quote-and-pay flow and prints separate historical Esmeralda links; it does not use test funds or create a transaction. For a real testnet run, continue to the <a href="quickstart.html">Esmeralda quickstart →</a>.</div>
           </section>
           <section id="path" class="guide-section">
             <p class="guide-label">02 / FIRST RUN</p>
@@ -87,12 +90,12 @@
               <li>Your own private key storage, payer signing key, and wallet claim/view key.</li>
             </ul>
             <p>Installation does not establish wallet compatibility or guarantee funding discovery. Review the fee estimate before opening, use integer µT values, and keep credentials and channel files private.</p>
-            <div class="guide-actions"><a href="quickstart.html">Read the Esmeralda quickstart ↗</a><a href="interfaces.html">Explore interfaces and tools ↗</a></div>
+            <div class="guide-actions"><a href="quickstart.html">Read the Esmeralda quickstart →</a><a href="interfaces.html">Explore interfaces and tools →</a></div>
           </section>
           <section id="source" class="guide-section">
             <p class="guide-label">04 / BUILD FROM SOURCE</p>
             <h2>For contributors.</h2>
-            <p>The verified development platform is Linux. Source builds require Rust from the repository's pinned toolchain, Git, a C/C++ toolchain, Clang with libclang, CMake, and <code>protoc</code>.</p>
+            <p><strong>Supported platforms:</strong> release binaries exist only for Linux x86-64 with glibc. macOS and Windows are not supported: there are no release binaries, and source builds there have not been tested (the upstream Ootle template tooling does not build on native Windows). The verified development platform is Linux. Source builds require Rust from the repository's pinned toolchain, Git, a C/C++ toolchain, Clang with libclang, CMake, and <code>protoc</code>.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>BUILD RELEASE EXECUTABLES</span><button class="guide-copy" type="button" data-copy="source-build">Copy commands</button></div>
               <pre><code id="source-build">git clone https://github.com/AduAkorful/ghostline.git&#10;cd ghostline&#10;git checkout v0.4.0&#10;cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api</code></pre>

@@ -2,6 +2,7 @@
 // Local integration harness for play.html. No browser extension, chain, or funds are used.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { channelId, publicKeyFromSecret, toHex } from "./vendor/ghostline.js";
 
 const ROOT = new URL("./", import.meta.url);
@@ -34,13 +35,25 @@ class Element {
   prepend(item) { this.children.unshift(item); }
   replaceChildren(...items) { this.children = items; }
   scrollIntoView() { this.scrolledIntoView = true; }
-  querySelector(selector) {
-    if (selector === ".result-label" || selector === ".fine-print") {
-      return this.childrenBySelector?.get(selector) || (this.childrenBySelector ||= new Map()).set(selector, new Element(selector)).get(selector);
-    }
-    return null;
-  }
+  setAttribute(name, value) { this.attributes = { ...this.attributes, [name]: String(value) }; }
+  getAttribute(name) { return this.attributes?.[name] ?? null; }
 }
+
+// play.js may only touch elements that play.html really has: a missing id is null in a browser,
+// so the harness must not invent it (QA UI audit #1 hid behind invented elements).
+const PLAY_HTML = readFileSync(new URL("./play.html", import.meta.url), "utf8");
+const PLAY_IDS = new Set([...PLAY_HTML.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
+
+const EVIDENCE_FIXTURE = {
+  runDate: "2026-10-22",
+  serviceRecord: { successfulCalls: 5, unitPriceMicroTari: 10, acceptedTotalMicroTari: 50 },
+  chainRecord: {
+    openTransactionId: "recorded-open-tx",
+    settlementTransactionId: "recorded-settle-tx",
+    settlementTransactionUrl: "https://explorer.tari.mw/tx/recorded-settle-tx",
+    settlementFinality: "Finalized",
+  },
+};
 
 function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], settleGate, fastTime = false, pending, txStatus = "Finalized" } = {}) {
   const elements = new Map();
@@ -60,6 +73,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
 
   const document = {
     getElementById(id) {
+      if (!PLAY_IDS.has(id)) return null;
       if (!elements.has(id)) elements.set(id, new Element(id));
       return elements.get(id);
     },
@@ -92,7 +106,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
   const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
   const fetch = async (input, options = {}) => {
     const url = new URL(String(input), "https://site.test.invalid");
-    if (url.pathname === "/evidence.json") return json({ chainRecord: { settlementTransactionUrl: "https://explorer.tari.mw/tx/recorded", settlementFinality: "Finalized" } });
+    if (url.pathname === "/evidence.json") return json(EVIDENCE_FIXTURE);
     calls.push({ url: url.href, method: (options.method || "GET").toUpperCase(), headers: new Headers(options.headers), body: options.body || "" });
     if (url.origin !== RELAY) throw new Error(`Unexpected outbound origin: ${url.origin}`);
     if (url.pathname === "/healthz" || url.pathname === "/health" || url.pathname === "/") return failHealth ? json({ error: "missing" }, 404) : coldHealth ? json({ ok: false, walletReady: false }, 503) : json({ ok: true, walletReady: true });
@@ -145,6 +159,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     dispatchEvent(event) {
       for (const callback of [...(windowListeners.get(event.type) || [])]) callback(event);
     },
+    matchMedia: () => ({ matches: false }),
     setTimeout: fastTime ? ((callback, delay = 0) => setTimeout(() => { virtualNow += Number(delay); callback?.(); }, 0)) : setTimeout,
     clearTimeout,
   };
@@ -240,10 +255,119 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
 
   await h.elements.get("live-stop").click();
   assert.match(h.elements.get("service-subtitle").textContent, /Separate browser simulation/);
-  assert.equal(h.elements.get("live-stop").textContent, "Return to live session");
+  assert.equal(h.elements.get("live-stop").textContent, "Return to your live result");
   assert.equal(h.elements.get("demo-title").scrolledIntoView, true);
   await h.elements.get("pay").click();
   assert.equal(h.elements.get("calls").children.length, 1, "continuing with simulation switches from live vouchers to usable mock calls");
+});
+
+test("after a settled live run, five simulated calls show the recorded run without inheriting live copy", async () => {
+  const h = makeHarness();
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Channel finalized|Live setup stopped/.test(h.elements.get("status").textContent));
+  for (let i = 0; i < 5; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+  assert.match(h.elements.get("result-label").textContent, /YOUR LIVE RUN · SETTLEMENT FINALIZED/);
+  assert.match(h.elements.get("result-note").textContent, /Your browser and Sapient created/);
+  assert.equal(h.elements.get("recorded-tx-id").textContent, "settle-test-tx");
+
+  await h.elements.get("live-stop").click();
+  assert.equal(h.elements.get("chain-result").hidden, true, "the live result is hidden while simulating");
+  assert.equal(h.elements.get("open-explorer-link").hidden, true);
+  assert.equal(h.elements.get("quote-note").hidden, true);
+  assert.equal(h.elements.get("settle").hidden, false);
+  for (let i = 0; i < 5; i += 1) await h.elements.get("pay").click();
+  assert.doesNotMatch(h.elements.get("status").textContent, /Voucher rejected/);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED RUN · NOT CREATED BY THESE CLICKS/);
+  assert.match(h.elements.get("record-summary").textContent, /Recorded command-line run, 22 Oct 2026: 5 paid calls · 50 µT cumulative/);
+  assert.match(h.elements.get("result-note").textContent, /did not create or submit/);
+  assert.doesNotMatch(h.elements.get("result-note").textContent, /Sapient created/);
+  assert.equal(h.elements.get("recorded-tx-id").textContent, "recorded-settle-tx");
+  assert.equal(h.elements.get("explorer-link").href, "https://explorer.tari.mw/tx/recorded-settle-tx");
+  assert.equal(h.elements.get("open-explorer-link").href, "https://explorer.tari.mw/tx/recorded-open-tx");
+  assert.equal(h.elements.get("reset").disabled, false);
+
+  await h.elements.get("live-stop").click();
+  assert.match(h.elements.get("result-label").textContent, /YOUR LIVE RUN/);
+  assert.equal(h.elements.get("recorded-tx-id").textContent, "settle-test-tx");
+  assert.equal(h.elements.get("total").textContent, "50 µT");
+  assert.equal(h.elements.get("settle").hidden, true);
+});
+
+test("a finished live run enables Start a new live run, which clears it and offers live mode again", async () => {
+  const h = makeHarness();
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Channel finalized|Live setup stopped/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("reset").disabled, true, "an open channel with a deposit cannot be reset");
+  assert.equal(h.elements.get("quote-note").hidden, false, "live mode explains the expected HTTP 402");
+  for (let i = 0; i < 5; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+  const reset = h.elements.get("reset");
+  assert.equal(reset.disabled, false);
+  assert.equal(reset.textContent, "Start a new live run");
+  assert.ok(reset.classes.has("button-primary"));
+
+  await reset.click();
+  assert.equal(h.session.has("ghostline-live-channel"), false);
+  assert.equal(h.session.has("ghostline-live-payer-secret"), false);
+  assert.equal(h.elements.get("live-open").hidden, false);
+  assert.equal(h.elements.get("live-open").textContent, "Connect Sapient and open channel");
+  assert.equal(h.elements.get("chain-result").hidden, true);
+  assert.equal(h.elements.get("total").textContent, "0 µT");
+  assert.equal(reset.textContent, "Reset simulation");
+  assert.match(h.elements.get("chain-empty-title").textContent, /No transaction was created/);
+  await h.elements.get("run-simulation").click();
+  assert.match(h.elements.get("result-label").textContent, /RECORDED RUN/);
+});
+
+test("a restored settled channel shows its total and result, and can start over", async () => {
+  const h = makeHarness();
+  const payerSecret = new Uint8Array(32).fill(4);
+  const payerRoot = new Uint8Array(32).fill(7);
+  const nonce = new Uint8Array(32).fill(8);
+  const servicePublicKey = hex(publicKeyFromSecret(new Uint8Array(32).fill(9)));
+  h.session.set("ghostline-live-payer-secret", hex(payerSecret));
+  h.session.set("ghostline-live-channel", JSON.stringify({
+    channel: {
+      channelId: "c".repeat(64), payerRoot: hex(payerRoot), nonce: hex(nonce), networkTag: 38, deposit: "51",
+      expiryEpoch: 999, servicePublicKey, serviceOutputPublicKey: servicePublicKey,
+      payerPublicKey: hex(publicKeyFromSecret(payerSecret)), openTransactionId: "a".repeat(64),
+    },
+    calls: 5,
+    accepted: "50",
+  }));
+  await h.load();
+  await h.waitFor(() => !h.elements.get("chain-result").hidden);
+  assert.equal(h.elements.get("total").textContent, "50 µT");
+  assert.equal(h.elements.get("calls").children.length, 1);
+  assert.match(h.elements.get("record-summary").textContent, /open aaaaaaaa…aaaa · settlement settle-test-tx/);
+  assert.match(h.elements.get("quote").textContent, /Restored your finished live run/);
+  assert.equal(h.elements.get("reset").textContent, "Start a new live run");
+  assert.equal(h.elements.get("reset").disabled, false);
+  await h.elements.get("reset").click();
+  assert.equal(h.elements.get("live-open").hidden, false);
+  assert.equal(h.session.has("ghostline-live-channel"), false);
+});
+
+test("simulation alone completes five calls, shows the recorded run and can be reset", async () => {
+  const h = makeHarness();
+  await h.load();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await h.elements.get("run-simulation").click();
+  assert.doesNotMatch(h.elements.get("status").textContent, /Voucher rejected/);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED RUN/);
+  assert.equal(h.elements.get("reset").disabled, false);
+  await h.elements.get("reset").click();
+  assert.equal(h.elements.get("chain-result").hidden, true);
+  assert.equal(h.elements.get("pay").disabled, false);
 });
 
 test("relay health failure leaves the user in a usable simulated mode without calling the wallet", async () => {

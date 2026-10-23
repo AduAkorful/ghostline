@@ -504,3 +504,37 @@ h1 span { display:inline-block; margin-top:.12em; color:#c5baff; font-style:ital
 @media (max-width:760px) {
   .batch-proof { grid-template-columns:1fr; gap:18px; margin-top:28px; padding-block:21px; }
 }
+
+/* QA UI audit (23 Oct 2026): status labels, glossary, step index, spacing and contrast. */
+.explorer-status { display:inline-block; margin-left:8px; padding:1px 6px; border:1px solid rgba(197,186,255,.35); color:#d2d0e1; font:9px/1.6 var(--mono); white-space:nowrap; }
+.explorer-status.is-live { border-color:rgba(154,246,238,.5); color:var(--lime); }
+.tx-line { flex-wrap:wrap; }
+.live-run-links { display:grid; gap:8px; margin:6px 0 0; padding:0; list-style:none; }
+.live-run-links li { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; color:#c9cbda; font-size:12px; }
+.live-run-links li > span:first-child { min-width:110px; }
+.live-run-links code { font:10px var(--mono); }
+.hero-note { max-width:440px; color:#b9bdcf; font:11px/1.7 var(--mono); }
+.hero-note a,.judge-path-note a { color:var(--lime); text-underline-offset:3px; }
+.judge-path-note { color:#b4b8ca; font-size:10px; }
+.story-steps { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0 0; padding:0; list-style:none; }
+.story-steps a { display:inline-flex; gap:6px; align-items:center; min-height:34px; padding:4px 10px; border:1px solid rgba(197,186,255,.28); color:#d2d0e1; font:10px var(--mono); text-decoration:none; }
+.story-steps a span { color:var(--lilac); }
+.story-steps a:hover,.story-steps a:focus-visible { border-color:var(--lime); color:var(--lime); }
+/* The pinned trace still needs scroll room, but not most of a screen per chapter. */
+.story-chapter { min-height:62svh; padding:56px 0; }
+.chapter-aside,.story-footnote,.capability-note,.leak-note,.evidence-footnote,.art-footnote,.hero-index { color:#b3b5ca!important; }
+.terms-section { padding:96px 0; }
+.terms-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:0; border-top:1px solid rgba(197,186,255,.2); }
+.terms-list > div { padding:20px 24px 22px 0; border-bottom:1px solid rgba(197,186,255,.14); }
+.terms-list dt { margin:0 0 8px; color:var(--white); font:600 15px var(--display); }
+.terms-list dd { margin:0; color:#c1c4d4; font-size:12px; line-height:1.65; }
+.terms-list code { font:10px var(--mono); }
+@media (max-width:1100px) { .story-chapter { min-height:56svh; } .terms-list { grid-template-columns:1fr 1fr; } }
+@media (max-width:760px) {
+  .story-chapter { min-height:0; padding:52px 0; }
+  .terms-section { padding:70px 0; }
+  .terms-list { grid-template-columns:1fr; }
+  .explorer-status { margin-left:0; }
+}
+.refund-links { flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
+.refund-proof .explorer-status { margin-left:0; white-space:normal; }

@@ -19,6 +19,8 @@ let liveChannel;
 let liveCalls = 0;
 let liveAccepted = 0n;
 let liveRefundPending = false;
+// Set once the live channel has settled or been refunded: { kind, url, transactionId, deposit }.
+let liveResult;
 let simulationMode = false;
 let liveSetupCancelled = false;
 let abandonArmed = false;
@@ -141,6 +143,50 @@ function explorerTxUrl(transactionId) {
   return `https://explorer.tari.mw/tx/${encodeURIComponent(transactionId)}`;
 }
 
+// Full 64-hex ids overflow the result card on narrow screens (QA UI audit #5); the full id
+// stays in the copyable transaction field and the explorer links.
+function shortTxId(transactionId) {
+  const id = String(transactionId || "");
+  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatRunDate(isoDate) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ""));
+  if (!match || !MONTHS[Number(match[2]) - 1]) return "an earlier date";
+  return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
+}
+
+// Every result state writes all of the card's fields, so no state inherits another's label,
+// provenance note or links (QA UI audit #1 and #6).
+function showResult({ label, summary, txLabel, transactionId, url, linkText, openTransactionId, openLinkText, note }) {
+  byId("result-label").textContent = label;
+  byId("record-summary").textContent = summary;
+  byId("recorded-tx-label").textContent = txLabel;
+  byId("recorded-tx-id").textContent = transactionId;
+  const link = byId("explorer-link");
+  link.href = url;
+  link.textContent = linkText;
+  link.setAttribute("aria-label", `${linkText.replace(/ ↗$/, "")}: ${transactionId}`);
+  const openLink = byId("open-explorer-link");
+  openLink.hidden = !openTransactionId;
+  if (openTransactionId) {
+    openLink.href = explorerTxUrl(openTransactionId);
+    openLink.textContent = openLinkText || "Inspect the channel-open transaction ↗";
+  }
+  byId("result-note").textContent = note;
+  byId("chain-empty").hidden = true;
+  byId("chain-result").hidden = false;
+}
+
+function hideResult() {
+  byId("chain-result").hidden = true;
+  byId("chain-empty").hidden = false;
+  byId("open-explorer-link").hidden = true;
+  byId("chain-panel").classList.remove("is-settling");
+}
+
 // The chain panel describes whichever mode the call panel is in; a live channel must not keep
 // the simulation's "no transaction" copy (QA run 16 retry 11).
 function showChainPanelMode() {
@@ -156,6 +202,7 @@ function showChainPanelMode() {
   const link = byId("open-tx-link");
   link.hidden = !openTx;
   if (openTx) link.href = explorerTxUrl(openTx);
+  byId("quote-note").hidden = !live;
 }
 
 function showPendingFunding(transactionId) {
@@ -187,10 +234,17 @@ async function restoreLiveChannel() {
   byId("live-refund").hidden = false;
   byId("live-stop").hidden = false;
   byId("live-stop").textContent = "Continue with simulation";
-  byId("reset").disabled = true;
   byId("pay").disabled = liveCalls >= countLimit || payerSecret.length !== 32;
   byId("quote").textContent = `Restored live channel · channel id ${liveChannel.channelId} (off-chain identifier, not a transaction) · ${liveCalls}/${countLimit} calls · ${liveAccepted} µT accepted`;
+  // The call log is not kept across reloads; show the restored total instead of 0 µT (QA UI audit #3).
+  byId("total").textContent = `${liveAccepted} µT`;
+  if (liveCalls > 0) {
+    const restored = document.createElement("li");
+    restored.textContent = `${liveCalls} accepted live ${liveCalls === 1 ? "call" : "calls"} restored from this tab · ${liveAccepted} µT cumulative`;
+    byId("calls").replaceChildren(restored);
+  }
   showChainPanelMode();
+  refreshControls();
   byId("live-note").textContent = payerSecret.length === 32
     ? "Restored this tab’s live channel. Its voucher key remains local; settlement/refund status is checked with the relay."
     : "The live channel was restored, but this tab no longer has its voucher key. You can still request its expiry refund after expiry.";
@@ -206,11 +260,15 @@ async function restoreLiveChannel() {
     const current = await relayJson(`/demo/status?channel=${encodeURIComponent(liveChannel.channelId)}`);
     if (current.state === "Finalized") {
       showLiveEvidence(current.explorerUrl, current.settlementTransactionId);
+      byId("quote").textContent = `Restored your finished live run · ${liveCalls}/${countLimit} calls · ${liveAccepted} µT accepted. Start a new live run or continue with simulation.`;
+      status("This tab’s live run already settled. Its result is shown on the right; use “Start a new live run” to begin again.");
     } else if (current.state === "Refunded") {
       liveRefundPending = false;
+      liveResult = { kind: "refunded" };
       byId("live-refund").hidden = true;
       byId("live-stop").hidden = false;
-      status("This live channel was already refunded.");
+      byId("quote").textContent = "Restored a live channel that was already refunded. Start a new live run or continue with simulation.";
+      status("This live channel was already refunded. Use “Start a new live run” to begin again.");
     } else if (current.state === "RefundPending") {
       liveRefundPending = true;
       status("The expiry refund has started. Waiting for the private transfer to Sapient to finalize.");
@@ -254,7 +312,26 @@ function renderCall(fortune, callNumber, voucher) {
   byId("total").textContent = `${voucher.amount.toString()} µT`;
 }
 
+// Reset is never a dead end: it resets the simulation, starts over after a finished live run,
+// and only refuses while a live channel still holds an open deposit (QA UI audit #2 and #3).
+function refreshResetControl() {
+  const button = byId("reset");
+  const finishedLive = Boolean(liveChannel && liveResult);
+  const openLive = Boolean(liveChannel && !liveResult && !simulationMode);
+  button.disabled = openLive;
+  button.textContent = finishedLive ? "Start a new live run" : openLive ? "Reset (finish the live channel first)" : "Reset simulation";
+  if (finishedLive) {
+    button.classList.add("button-primary");
+    button.classList.remove("button-quiet");
+  } else {
+    button.classList.add("button-quiet");
+    button.classList.remove("button-primary");
+  }
+}
+
 function refreshControls() {
+  refreshResetControl();
+  byId("settle").hidden = Boolean(liveChannel && liveResult && !simulationMode);
   if (liveChannel && !simulationMode) {
     byId("pay").disabled = liveRefundPending || liveCalls >= countLimit;
     byId("pay").textContent = liveCalls >= countLimit ? "Five live calls complete" : `Send live call ${liveCalls + 1} of ${countLimit} · sign voucher`;
@@ -276,9 +353,12 @@ function refreshControls() {
     : remaining > 0 ? `Finish the remaining ${remaining} calls` : "Simulation complete";
   byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted.${paywall.calls === countLimit ? " Recorded settlement evidence is now shown on the right." : " Run the next call or finish the remaining calls in one click."}`;
   byId("settle").disabled = paywall.calls !== countLimit;
-  byId("settle").textContent = paywall.calls === countLimit
-    ? "Show recorded settlement evidence · separate run"
-    : `Complete ${countLimit} calls to unlock recorded evidence`;
+  byId("settle").textContent = settlementShown
+    ? "Recorded evidence shown"
+    : paywall.calls === countLimit
+      ? "Show recorded settlement evidence · separate run"
+      : `Complete ${countLimit} calls to unlock recorded evidence`;
+  if (settlementShown) byId("settle").disabled = true;
 }
 
 function askForQuote() {
@@ -699,7 +779,8 @@ async function connectAndOpenLive() {
     byId("live-stop").hidden = false;
     byId("live-stop").textContent = "Continue with simulation";
     byId("live-refund").hidden = false;
-    byId("reset").disabled = true;
+    liveResult = undefined;
+    hideResult();
     showChainPanelMode();
     refreshControls();
     status("Channel finalized. Each click now sends a real signed voucher to the relay.");
@@ -840,14 +921,9 @@ async function requestLiveRefund() {
     }
     saveLiveChannel();
     liveRefundPending = false;
-    const link = byId("explorer-link");
-    link.href = result.explorerUrl;
-    link.textContent = "Inspect the private refund transfer ↗";
-    byId("recorded-tx-id").textContent = result.refundTransactionId;
-    byId("chain-empty").hidden = true;
-    byId("chain-result").hidden = false;
-    byId("record-summary").textContent = `The relay refunded the unspent ${liveChannel.deposit} µT channel privately to the connected Sapient wallet. Refund transaction ${result.refundTransactionId}.`;
-    byId("chain-result").querySelector(".result-label").textContent = "LIVE TESTNET REFUND · FINALIZED";
+    liveResult = { kind: "refunded", url: result.explorerUrl, transactionId: result.refundTransactionId };
+    showLiveRefund();
+    refreshControls();
     status("The channel expired and the private refund transfer finalized. Check Sapient for the returned testnet funds.");
     byId("live-refund").hidden = true;
     byId("live-stop").hidden = false;
@@ -862,24 +938,45 @@ async function requestLiveRefund() {
   }
 }
 
+function showLiveRefund() {
+  if (!liveResult?.transactionId) {
+    hideResult();
+    return;
+  }
+  showResult({
+    label: "YOUR LIVE RUN · REFUND FINALIZED",
+    summary: `The relay returned the unspent ${liveChannel.deposit} µT channel deposit privately to your Sapient wallet.`,
+    txLabel: "Refund transaction",
+    transactionId: liveResult.transactionId,
+    url: liveResult.url,
+    linkText: "Inspect the private refund transfer ↗",
+    openTransactionId: liveChannel.openTransactionId,
+    note: "Your live channel created this refund after expiry. The relay indexer reports it finalized; check Sapient for the returned testnet funds.",
+  });
+}
+
+function showLiveSettlement() {
+  const openTx = liveChannel.openTransactionId;
+  showResult({
+    label: "YOUR LIVE RUN · SETTLEMENT FINALIZED",
+    summary: `Your live run: ${liveCalls} paid calls · ${liveAccepted} µT cumulative${openTx ? ` · open ${shortTxId(openTx)}` : ""} · settlement ${shortTxId(liveResult.transactionId)}.`,
+    txLabel: "Settlement transaction",
+    transactionId: liveResult.transactionId,
+    url: liveResult.url,
+    linkText: "Inspect your live Esmeralda settlement ↗",
+    openTransactionId: openTx,
+    openLinkText: "Inspect your channel-open transaction ↗",
+    note: `Your browser and Sapient created this channel, these calls and this settlement on Esmeralda. The service knows the requests, prices and vouchers; observers can still see transaction metadata and fees. The chain does not publish the off-chain call count.${liveResult.sapientUnconfirmed ? " Sapient has not independently reported finality yet; the relay indexer reports Finalized." : ""}`,
+  });
+}
+
 function showLiveEvidence(url, transactionId) {
   liveRefundPending = false;
   byId("chain-panel").classList.remove("is-settling");
-  byId("chain-empty").hidden = true;
-  byId("chain-result").hidden = false;
-  const openTx = liveChannel.openTransactionId;
-  byId("record-summary").textContent = `Live run: ${liveCalls} paid calls · ${liveAccepted} µT cumulative${openTx ? ` · open ${openTx}` : ""} · settlement ${transactionId}.`;
-  const openLink = byId("open-explorer-link");
-  openLink.hidden = !openTx;
-  if (openTx) openLink.href = explorerTxUrl(openTx);
-  const link = byId("explorer-link");
-  link.href = url;
-  byId("recorded-tx-id").textContent = transactionId;
-  link.textContent = "Inspect this live Esmeralda settlement ↗";
-  byId("chain-result").querySelector(".result-label").textContent = "LIVE TESTNET SETTLEMENT · FINALIZED";
-  byId("chain-result").querySelector(".fine-print").textContent = "This run created these calls and this settlement. The service knows the requests, prices, and vouchers; observers can still see transaction metadata and fees. The on-chain record does not publish the off-chain call count.";
+  liveResult = { kind: "settled", url, transactionId };
+  showLiveSettlement();
   void verifySapientFinality(transactionId);
-  byId("settle").hidden = true;
+  refreshControls();
   byId("live-refund").hidden = true;
   byId("live-stop").hidden = false;
   byId("live-stop").textContent = "Continue with simulation";
@@ -891,8 +988,9 @@ async function verifySapientFinality(transactionId) {
     const capabilities = await tariRequest("tari_getCapabilities");
     if (!capabilities.transactionResultLookup) return;
     const result = await tariRequest("tari_getTransactionResult", { transactionId });
-    if (!(result?.Finalized || result?.result?.Finalized)) {
-      byId("chain-result").querySelector(".fine-print").textContent += " Sapient has not independently reported finality yet; the relay indexer reports Finalized.";
+    if (!(result?.Finalized || result?.result?.Finalized) && liveResult?.transactionId === transactionId) {
+      liveResult.sapientUnconfirmed = true;
+      if (!simulationMode) showLiveSettlement();
     }
   } catch {
     // The relay indexer already checked finality; this wallet lookup is an optional cross-check.
@@ -917,10 +1015,16 @@ function returnToSimulation() {
     accepted = 0n;
     byId("calls").replaceChildren();
     byId("total").textContent = "0 µT";
+    byId("quote").textContent = "Ask for a quote to receive a simulated HTTP 402.";
+    // The simulation must not sit next to the live result (QA UI audit #4, run 17 step 7).
+    settlementShown = false;
+    hideResult();
     byId("service-subtitle").textContent = "Separate browser simulation · the saved live channel was not changed";
-    byId("live-stop").textContent = "Return to live session";
+    byId("live-stop").textContent = liveResult ? "Return to your live result" : "Return to live session";
     byId("live-stop").hidden = false;
-    status("Simulation is separate. Your live channel, recovery receipt, and local voucher key are still saved; settle it or claim the expiry refund later.");
+    status(liveResult
+      ? "Simulation is separate from your finished live run, which stays saved in this tab."
+      : "Simulation is separate. Your live channel, recovery receipt, and local voucher key are still saved; settle it or claim the expiry refund later.");
   } else {
     params = {
       networkTag: liveChannel.networkTag,
@@ -933,6 +1037,13 @@ function returnToSimulation() {
     serviceKey = hexToBytes(liveChannel.servicePublicKey);
     byId("live-stop").textContent = "Continue with simulation";
     byId("service-subtitle").textContent = "Live Esmeralda relay · each accepted call has a real signed voucher";
+    accepted = liveAccepted;
+    byId("total").textContent = `${liveAccepted} µT`;
+    byId("calls").replaceChildren();
+    byId("quote").textContent = `Live channel · ${liveCalls}/${countLimit} calls · ${liveAccepted} µT accepted`;
+    if (liveResult?.kind === "settled") showLiveSettlement();
+    else if (liveResult?.kind === "refunded") showLiveRefund();
+    else hideResult();
     status("Back in the live session. Its channel and local voucher key remain saved.");
   }
   showChainPanelMode();
@@ -969,15 +1080,15 @@ async function refundPendingFunding() {
     }
     clearPendingFunding();
     showPendingFundingControls();
-    const link = byId("explorer-link");
-    link.href = result.explorerUrl;
-    link.textContent = "Inspect pending-deposit refund ↗";
-    byId("recorded-tx-id").textContent = result.refundTransactionId;
-    byId("record-summary").textContent = `The relay returned the un-opened ${result.deposit} µT deposit privately to the Sapient address bound to this session.`;
-    byId("chain-result").querySelector(".result-label").textContent = "LIVE TESTNET REFUND · FINALIZED";
-    byId("chain-result").querySelector(".fine-print").textContent = "The relay indexer reports this private refund as finalized. Check Sapient for the returned testnet funds.";
-    byId("chain-empty").hidden = true;
-    byId("chain-result").hidden = false;
+    showResult({
+      label: "YOUR DEPOSIT · REFUND FINALIZED",
+      summary: `The relay returned the un-opened ${result.deposit} µT deposit privately to the Sapient address bound to this session.`,
+      txLabel: "Refund transaction",
+      transactionId: result.refundTransactionId,
+      url: result.explorerUrl,
+      linkText: "Inspect the pending-deposit refund ↗",
+      note: "No channel was opened from this deposit. The relay indexer reports the private refund as finalized; check Sapient for the returned testnet funds.",
+    });
     status("The pending deposit was privately returned to the Sapient wallet. Check the wallet after finality.");
   } catch (error) {
     button.textContent = "Retry pending deposit refund";
@@ -995,16 +1106,21 @@ function showRecordedEvidence() {
     return;
   }
   settlementShown = true;
-  byId("open-explorer-link").hidden = true;
   const chain = evidence.chainRecord;
-  byId("record-summary").textContent = "This is a separate recorded transaction from an earlier Esmeralda run. The browser clicks did not create or submit it.";
-  const link = byId("explorer-link");
-  link.href = chain.settlementTransactionUrl;
-  byId("recorded-tx-id").textContent = chain.settlementTransactionId;
-  link.setAttribute("aria-label", `Try historical Esmeralda transaction ${chain.settlementTransactionId} in Tari explorer`);
+  const service = evidence.serviceRecord || {};
+  const runDate = formatRunDate(evidence.runDate);
+  showResult({
+    label: "RECORDED RUN · NOT CREATED BY THESE CLICKS",
+    summary: `Recorded command-line run, ${runDate}: ${service.successfulCalls ?? countLimit} paid calls · ${service.acceptedTotalMicroTari ?? Number(PRICE) * countLimit} µT cumulative · one settlement on Esmeralda.`,
+    txLabel: "Recorded settlement transaction",
+    transactionId: chain.settlementTransactionId,
+    url: chain.settlementTransactionUrl,
+    linkText: "Inspect the recorded settlement ↗",
+    openTransactionId: chain.openTransactionId,
+    openLinkText: "Inspect the recorded channel-open transaction ↗",
+    note: `Your simulated clicks did not create or submit this transaction. It comes from a separate ${runDate} command-line run: its service ledger recorded the calls, and the chain shows only the open and the settlement.`,
+  });
   byId("chain-panel").classList.add("is-settling");
-  byId("chain-empty").hidden = true;
-  byId("chain-result").hidden = false;
   status(`Separate recorded evidence: ${chain.settlementFinality}. The simulated run did not submit it.`);
   if (window.matchMedia("(max-width: 760px)").matches) {
     byId("chain-panel").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
@@ -1042,24 +1158,45 @@ function abandonPendingFunding() {
   status("Saved funding transfer discarded locally. The instant simulation is available. If the deposit is still at the relay, use the original refund control before abandoning, or contact the operator.");
 }
 
+// A settled or refunded channel holds no deposit, so its saved state can be dropped and live
+// mode offered again; the explorer keeps the transactions.
+function forgetFinishedLiveChannel() {
+  try { sessionStorage.removeItem(LIVE_CHANNEL_KEY); } catch { /* Storage may be restricted. */ }
+  try { sessionStorage.removeItem("ghostline-live-payer-secret"); } catch { /* Storage may be restricted. */ }
+  liveChannel = undefined;
+  liveResult = undefined;
+  liveCalls = 0;
+  liveAccepted = 0n;
+  liveRefundPending = false;
+  simulationMode = false;
+  byId("live-open").hidden = false;
+  byId("live-open").textContent = "Connect Sapient and open channel";
+  byId("live-refund").hidden = true;
+  byId("live-stop").hidden = true;
+  byId("settle").hidden = false;
+  byId("service-subtitle").textContent = "Simulated local paywall record · every call and price";
+  byId("live-note").textContent = "Your previous live run is finished and was cleared from this tab. Its transactions remain on the explorer. Live mode requires Sapient and your approval for a new 51 µT private testnet transfer and wallet fee.";
+}
+
 function reset() {
-  if (liveChannel && !simulationMode) {
+  const startingOver = Boolean(liveChannel && liveResult);
+  if (liveChannel && !liveResult && !simulationMode) {
     status("This live channel is still open. Finish settlement or wait until expiry to request its private refund before resetting.");
     return;
   }
+  if (startingOver) forgetFinishedLiveChannel();
   accepted = 0n;
   begin();
   byId("calls").replaceChildren();
   byId("total").textContent = "0 µT";
   byId("quote").textContent = "Ask for a quote to receive a simulated HTTP 402.";
-  byId("chain-empty").hidden = false;
-  byId("chain-result").hidden = true;
-  byId("chain-panel").classList.remove("is-settling");
+  hideResult();
   showChainPanelMode();
   settlementShown = false;
-  byId("settle").textContent = "Show recorded settlement evidence";
   refreshControls();
-  status("Reset complete. Fresh temporary keys were generated in this page session.");
+  status(startingOver
+    ? "Ready for a new run. Try the simulation, or connect Sapient below to open a new live channel."
+    : "Reset complete. Fresh temporary keys were generated in this page session.");
 }
 
 byId("pay").addEventListener("click", payToll);
@@ -1074,6 +1211,15 @@ byId("run-simulation").addEventListener("click", runRemainingSimulation);
   else showRecordedEvidence();
 });
 byId("reset").addEventListener("click", reset);
+byId("copy-tx").addEventListener("click", async () => {
+  const transactionId = byId("recorded-tx-id").textContent;
+  try {
+    await navigator.clipboard.writeText(transactionId);
+    status("Transaction ID copied.");
+  } catch {
+    status(`Copy is unavailable in this browser. Transaction ID: ${transactionId}`);
+  }
+});
 byId("live-open").addEventListener("click", () => void connectAndOpenLive());
 byId("refund-pending-funding").addEventListener("click", () => void refundPendingFunding());
 byId("abandon-pending-funding").addEventListener("click", abandonPendingFunding);

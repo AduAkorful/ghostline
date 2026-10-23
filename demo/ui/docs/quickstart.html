@@ -19,15 +19,18 @@
         <a href="../play.html">Try the demo</a>
         <a href="../index.html#story">How it works</a>
         <a href="../index.html#evidence">Proof</a>
-        <a href="../index.html#capabilities">CLI map</a>
-        <a class="nav-cta" href="install.html">Install <span aria-hidden="true">↗</span></a>
+        <a href="../index.html#privacy">Privacy</a>
+        <a href="install.html" aria-current="page">Docs</a>
+        <a class="nav-cta" href="../index.html#start">Get Ghostline <span aria-hidden="true">→</span></a>
         <details class="mobile-nav">
           <summary>Explore <span aria-hidden="true">+</span></summary>
           <div class="mobile-nav-panel">
             <a href="../play.html">Try the demo</a>
-            <a href="../index.html#story">How it works</a><a href="../index.html#evidence">Proof</a>
-            <a href="../index.html#capabilities">CLI map</a><a href="install.html">Installation guide</a>
-            <a href="interfaces.html">Interfaces and tools</a>
+            <a href="../index.html#story">How it works</a>
+            <a href="../index.html#evidence">Proof</a>
+            <a href="../index.html#privacy">Privacy</a>
+            <a href="install.html" aria-current="page">Docs</a>
+            <a href="../index.html#start">Get Ghostline</a>
           </div>
         </details>
       </nav>
@@ -153,7 +156,7 @@
               <div class="guide-command-head"><span>EXPIRED, UNSPENT OUTPUT ONLY</span><button class="guide-copy" type="button" data-copy="channel-refund">Copy commands</button></div>
               <pre><code id="channel-refund">ghostline channel refund --file /secure/path/channel.json --submit --dry-run --max-fee 10000 --seal-key-id-file /secure/path/payer-key-id.json&#10;# Submit only after confirming expiry, output state, and reviewed fee cap:&#10;ghostline channel refund --file /secure/path/channel.json --submit --max-fee 10000 --seal-key-id-file /secure/path/payer-key-id.json</code></pre>
             </div>
-            <div class="guide-actions"><a href="interfaces.html">See CLI, API, and MCP interfaces ↗</a><a href="../index.html#evidence">Inspect the historical run ↗</a></div>
+            <div class="guide-actions"><a href="interfaces.html">See CLI, API, and MCP interfaces →</a><a href="../index.html#evidence">Inspect the historical run →</a></div>
             <div class="guide-callout">Need every deployment-specific flag? <a href="https://github.com/AduAkorful/ghostline/blob/main/docs/quickstart.md" target="_blank" rel="noopener noreferrer">Open the full quickstart reference ↗</a></div>
           </section>
           <section id="batch" class="guide-section">
@@ -161,7 +164,7 @@
             <h2>One transaction for multiple channels.</h2>
             <p>An experimental SDK path can settle multiple channels into a pooled service output. The Esmeralda prototype finalized a transaction spending two channel inputs and creating three stealth outputs; each channel's local service ledger recorded 20 paid calls.</p>
             <div class="guide-callout warning"><strong>Not coordinator-private or production-ready.</strong> The local builder received every participant's deposit value and mask, and observers can see which channels were grouped in the transaction. Use individual settlement unless a reviewed multi-party proof protocol is available.</div>
-            <div class="guide-actions"><a href="https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f" target="_blank" rel="noopener noreferrer">Inspect pooled Esmeralda transaction ↗</a><a href="https://github.com/AduAkorful/ghostline/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Read full privacy notes ↗</a></div>
+            <div class="guide-actions"><a href="../evidence.html">Pooled settlement record (no longer indexed by the explorer) →</a><a href="https://github.com/AduAkorful/ghostline/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Read full privacy notes ↗</a></div>
           </section>
         </article>
       </div>

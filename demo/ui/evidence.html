@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b13" />
+    <meta name="description" content="Every recorded Ghostline Esmeralda run, its transactions, and whether the public explorer still serves them." />
+    <title>Recorded runs — Ghostline</title>
+    <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
+    <link rel="stylesheet" href="play.css" />
+    <link rel="stylesheet" href="evidence-view.css" />
+    <script type="module" src="evidence-view.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to the records</a>
+    <header class="topbar">
+      <a class="wordmark" href="index.html" aria-label="Ghostline home"><img src="ghostline-mark.svg" alt="" width="32" height="32" /><span>ghost<span>line</span></span></a>
+      <nav aria-label="Main navigation">
+        <a href="play.html">Try the demo</a>
+        <a href="index.html#story">How it works</a>
+        <a href="index.html#evidence" aria-current="page">Proof</a>
+        <a href="index.html#privacy">Privacy</a>
+        <a href="docs/install.html">Docs</a>
+        <a class="nav-cta" href="index.html#start">Get Ghostline <span aria-hidden="true">→</span></a>
+        <details class="mobile-nav">
+          <summary>Explore <span aria-hidden="true">+</span></summary>
+          <div class="mobile-nav-panel">
+            <a href="play.html">Try the demo</a>
+            <a href="index.html#story">How it works</a>
+            <a href="index.html#evidence" aria-current="page">Proof</a>
+            <a href="index.html#privacy">Privacy</a>
+            <a href="docs/install.html">Docs</a>
+            <a href="index.html#start">Get Ghostline</a>
+          </div>
+        </details>
+      </nav>
+    </header>
+    <main id="main" class="shell evidence-view">
+      <p class="crumb"><a href="index.html#evidence">← Back to the proof section</a></p>
+      <p class="eyebrow">RECORDED RUNS · ESMERALDA TESTNET</p>
+      <h1>Every recorded run.</h1>
+      <p class="lede">Each run below lists its transactions and whether the public explorer still served them on the check date. Call counts come from service ledgers; the chain records only opens, settlements and refunds. Amounts are in µT (micro-TARI, one millionth of a test TARI).</p>
+      <p id="availability-note" class="disclosure">Loading the evidence record…</p>
+      <div id="runs" class="runs" aria-live="polite"></div>
+      <section class="notes" aria-labelledby="notes-title"><h2 id="notes-title">Notes from the record</h2><ul id="notes"></ul></section>
+      <p class="fine-print">Source data: <a href="evidence.json">evidence.json</a> (machine-readable).</p>
+    </main>
+    <footer class="footer shell"><a href="index.html">Ghostline</a><span>MIT licensed · Esmeralda testnet evidence · unaudited software</span><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer">Source ↗</a></footer>
+  </body>
+</html>

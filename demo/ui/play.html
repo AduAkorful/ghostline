@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#090b13" />
-    <meta name="description" content="Summon a ghost payment: simulate pay-per-call voucher signing in your browser and inspect a separate recorded Esmeralda transaction." />
-    <title>Summon a ghost payment — Ghostline</title>
+    <meta name="description" content="Try Ghostline: simulate pay-per-call voucher signing in your browser, or fund a small live Esmeralda channel with the Sapient wallet." />
+    <title>Ghostline demo: simulate or run live</title>
     <link rel="icon" type="image/svg+xml" href="ghostline-mark.svg" />
     <link rel="stylesheet" href="play.css" />
     <script src="relay-config.js"></script>
@@ -16,30 +16,49 @@
     <a class="skip-link" href="#main">Skip to the demo</a>
     <header class="topbar">
       <a class="wordmark" href="index.html" aria-label="Ghostline home"><img src="ghostline-mark.svg" alt="" width="32" height="32" /><span>ghost<span>line</span></span></a>
-      <nav aria-label="Main navigation"><a href="index.html#story">How it works</a><a href="index.html#evidence">Proof</a><a href="docs/quickstart.html">CLI guide</a><a class="nav-cta" href="index.html">Back to Ghostline</a></nav>
+      <nav aria-label="Main navigation">
+        <a href="play.html" aria-current="page">Try the demo</a>
+        <a href="index.html#story">How it works</a>
+        <a href="index.html#evidence">Proof</a>
+        <a href="index.html#privacy">Privacy</a>
+        <a href="docs/install.html">Docs</a>
+        <a class="nav-cta" href="index.html#start">Get Ghostline <span aria-hidden="true">→</span></a>
+        <details class="mobile-nav">
+          <summary>Explore <span aria-hidden="true">+</span></summary>
+          <div class="mobile-nav-panel">
+            <a href="play.html" aria-current="page">Try the demo</a>
+            <a href="index.html#story">How it works</a>
+            <a href="index.html#evidence">Proof</a>
+            <a href="index.html#privacy">Privacy</a>
+            <a href="docs/install.html">Docs</a>
+            <a href="index.html#start">Get Ghostline</a>
+          </div>
+        </details>
+      </nav>
     </header>
     <main id="main">
       <section class="intro shell">
         <p class="eyebrow">GHOST PAYMENTS · SIMULATE OR RUN LIVE</p>
         <h1>Whisper a toll.<br /><em>Close the séance.</em></h1>
         <p class="lede">Try the flow instantly in simulation, or connect a Tari wallet to fund a small Esmeralda testnet channel and watch real calls settle on-chain.</p>
-        <p class="disclosure"><strong>Whisper = signed voucher.</strong> What is real: the voucher cryptography and the separate recorded Esmeralda run. What is simulated: this browser session’s calls and séance receipt (settlement). Historical explorer records may not resolve; the evidence section explains the limitation.</p>
+        <p class="disclosure"><strong>Whisper = signed voucher. Séance receipt = the one on-chain settlement.</strong> <strong>Simulation</strong> (no wallet): calls, vouchers and the paywall run only in this browser and nothing reaches a chain; after five calls the right panel shows a separate recorded run, clearly labelled. <strong>Live mode</strong> (Sapient): your private test transfer funds a real Esmeralda channel, and the right panel shows your own open and settlement transactions. Amounts are in µT (micro-TARI, one millionth of a test TARI).</p>
       </section>
       <section class="demo shell" aria-labelledby="demo-title">
-        <div class="demo-head"><div><p class="eyebrow">FIVE CALLS · ONE RECORDED PROOF</p><h2 id="demo-title">A small guided run.</h2></div><button id="reset" class="button button-quiet" type="button">Reset</button></div>
+        <div class="demo-head"><div><p class="eyebrow">FIVE CALLS · ONE RECORDED PROOF</p><h2 id="demo-title">A small guided run.</h2></div><button id="reset" class="button button-quiet" type="button">Reset simulation</button></div>
         <div class="panels">
           <section class="panel service-panel" aria-labelledby="service-title">
             <div class="panel-heading"><span class="panel-dot mint"></span><div><h3 id="service-title">What the service sees</h3><p id="service-subtitle">Simulated local paywall record · every call and price</p></div></div>
             <div class="actions"><button id="pay" class="button button-primary" type="button">Ask and pay the toll · sign voucher</button><button id="run-simulation" class="button button-quiet" type="button">Run all 5 simulated calls</button></div>
             <p id="demo-progress" class="fine-print" role="status" aria-live="polite">0 of 5 calls complete · run one call at a time or play the full simulation.</p>
             <p id="quote" class="quote" role="status" aria-live="polite">Ask for a quote to receive a simulated HTTP 402.</p>
+            <p id="quote-note" class="fine-print" hidden>Each live call first receives HTTP 402 Payment Required: that is the price quote, not a failure. Browsers list it in the developer console as a failed request.</p>
             <ol id="calls" class="calls" aria-label="Accepted simulated calls"></ol>
             <p class="total"><span>Accepted cumulative</span><strong id="total">0 µT</strong></p>
           </section>
           <section id="chain-panel" class="panel chain-panel" aria-labelledby="chain-title">
             <div class="panel-heading"><span class="panel-dot lilac"></span><div><h3 id="chain-title">What the living can verify</h3><p id="chain-subtitle">Recorded Esmeralda proof, separate from these clicks</p></div></div>
             <div id="chain-empty" class="chain-empty"><span aria-hidden="true">◇</span><strong id="chain-empty-title">No transaction was created by this demo.</strong><p id="chain-empty-text">The browser simulation never connects to a wallet or sends a transaction. After five calls, this panel shows a separate recorded Esmeralda run.</p><a id="open-tx-link" class="button button-secondary" target="_blank" rel="noopener noreferrer" hidden>Inspect the channel-open transaction ↗</a></div>
-            <div id="chain-result" class="chain-result" hidden><p class="result-label">ARCHIVED RUN RECORD · FINALITY REPORTED</p><p id="record-summary"></p><p class="fine-print">Transaction ID: <code id="recorded-tx-id"></code></p><a id="explorer-link" class="button button-secondary" target="_blank" rel="noopener noreferrer">Try this historical transaction in Tari explorer ↗</a><a id="open-explorer-link" class="fine-print" target="_blank" rel="noopener noreferrer" hidden>Inspect the channel-open transaction ↗</a><p class="fine-print">This is evidence from a 22 Oct 2026 CLI run (5 calls, one settle). Simulation clicks do not create it. <a href="evidence.json">Open the run data</a>.</p></div>
+            <div id="chain-result" class="chain-result" hidden><p id="result-label" class="result-label"></p><p id="record-summary" class="result-summary"></p><p class="fine-print tx-row"><span id="recorded-tx-label">Settlement transaction</span>: <code id="recorded-tx-id"></code> <button id="copy-tx" class="copy-inline" type="button" aria-label="Copy transaction ID">Copy ID</button></p><a id="explorer-link" class="button button-secondary" target="_blank" rel="noopener noreferrer"></a><a id="open-explorer-link" class="fine-print" target="_blank" rel="noopener noreferrer" hidden>Inspect the channel-open transaction ↗</a><p id="result-note" class="fine-print"></p><p class="fine-print"><a href="evidence.html">All recorded runs and their explorer status →</a></p></div>
             <button id="settle" class="button button-primary settle-button" type="button" disabled>Complete 5 calls to unlock recorded evidence</button>
           </section>
         </div>
@@ -54,8 +73,8 @@
         <p id="live-note" class="fine-print" role="status" aria-live="polite">The static site has no wallet secrets. Live mode requires Sapient and your approval for the 51 µT private testnet transfer and wallet fee.</p>
         <p class="fine-print"><a id="pending-funding-link" target="_blank" rel="noopener noreferrer" hidden>Inspect pending Sapient funding transaction ↗</a></p>
       </section>
-      <section class="limits shell"><p class="eyebrow">READ THE BOUNDARY</p><p>The service sees each request, price, and voucher. Outside observers can still see transaction existence, fees, timing, branch, metadata, and commitments. The recorded Esmeralda settlement hid the deposit and exact output amounts in the inspected public fields. This demo does not prove the call count on-chain.</p><a href="index.html#privacy">Full privacy limits ↗</a></section>
+      <section class="limits shell"><p class="eyebrow">READ THE BOUNDARY</p><p>The service sees each request, price, and voucher. Outside observers can still see transaction existence, fees, timing, branch, metadata, and commitments. The recorded Esmeralda settlement hid the deposit and exact output amounts in the inspected public fields. This demo does not prove the call count on-chain.</p><a href="index.html#privacy">Full privacy limits →</a></section>
     </main>
-    <footer class="footer shell"><a href="index.html">Ghostline</a><span>MIT licensed · Esmeralda testnet evidence · unaudited software</span><a href="https://github.com/AduAkorful/ghostline">Source ↗</a></footer>
+    <footer class="footer shell"><a href="index.html">Ghostline</a><span>MIT licensed · Esmeralda testnet evidence · unaudited software</span><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer">Source ↗</a></footer>
   </body>
 </html>

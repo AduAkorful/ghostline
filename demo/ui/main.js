@@ -234,6 +234,30 @@ document.querySelectorAll(".mobile-nav").forEach((navigation) => {
   });
 });
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatRunDate(isoDate) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ""));
+  if (!match || !MONTHS[Number(match[2]) - 1]) return "date not recorded";
+  return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
+}
+
+// Explorer links age out of the public indexer, so each one carries its last checked status
+// instead of a promise that it loads (QA UI audit #10).
+function markExplorerStatus(link, evidence, transactionId) {
+  const availability = evidence.explorerAvailability;
+  const state = availability?.transactions?.[transactionId];
+  if (!link || !state) return;
+  link.parentElement.querySelector(`.explorer-status[data-for="${link.id}"]`)?.remove();
+  const badge = document.createElement("span");
+  badge.className = state === "loads" ? "explorer-status is-live" : "explorer-status";
+  badge.dataset.for = link.id;
+  badge.textContent = state === "loads"
+    ? `explorer: loads (checked ${formatRunDate(availability.checkedOn)})`
+    : `explorer: no longer indexed (checked ${formatRunDate(availability.checkedOn)})`;
+  link.after(badge);
+}
+
 async function loadEvidence() {
   const response = await fetch("evidence.json");
   if (!response.ok) throw new Error("Evidence record could not be loaded.");
@@ -259,7 +283,24 @@ async function loadEvidence() {
   document.querySelector("#deposit-total").textContent = "Hidden";
   document.querySelector("#settlement-fee").textContent = chain.settlementFeeMicroTari == null ? "Public · see explorer" : `${number.format(chain.settlementFeeMicroTari)} µT`;
   document.querySelector("#output-status").textContent = chain.channelOutputAfterSettlement;
-  document.querySelector("#evidence-date").textContent = evidence.runDate ? `Run date: ${evidence.runDate}. Static evidence; not a live network read.` : "Run date not recorded in the published evidence.";
+  const live = evidence.liveRunRecord;
+  const checked = evidence.explorerAvailability?.checkedOn;
+  document.querySelector("#evidence-date").textContent = `Command-line run: ${formatRunDate(evidence.runDate)}${live ? ` · hosted run: ${formatRunDate(live.runDate)}` : ""}${checked ? ` · explorer status checked ${formatRunDate(checked)}` : ""}. Static evidence, not a live network read.`;
+  const statusLinks = [
+    ["#open-tx-link", chain.openTransactionId],
+    ["#settle-tx-link", chain.settlementTransactionId],
+    ["#refund-open-tx-link", evidence.refundRecord.channelOpenTransactionId],
+    ["#refund-tx-link", evidence.refundRecord.refundTransactionId],
+    ["#template-tx-link", evidence.templateRecord.publishTransactionId],
+    ["#batch-tx-link", evidence.batchRecord.settlementTransactionId],
+  ];
+  if (live) {
+    statusLinks.push(["#live-funding-link", live.fundingTransactionId], ["#live-open-link", live.openTransactionId], ["#live-settle-link", live.settlementTransactionId]);
+    for (const [selector, key] of [["#live-funding-link", "funding"], ["#live-open-link", "open"], ["#live-settle-link", "settlement"]]) {
+      document.querySelector(selector).href = live[`${key}TransactionUrl`];
+    }
+  }
+  for (const [selector, transactionId] of statusLinks) markExplorerStatus(document.querySelector(selector), evidence, transactionId);
   document.querySelectorAll(".finality").forEach((element, index) => {
     const reportedFinality = index === 0 ? chain.openFinality : chain.settlementFinality;
     element.textContent = `RUN LOG · ${reportedFinality.toUpperCase()}`;

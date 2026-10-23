@@ -64,7 +64,7 @@ ghostline indexer result \
   --transaction-id 6a44670272ee5cb5528c8b7bfac3ce89170b6885afb6cfdf1ae1cd0952424e17
 ```
 
-The recorded result is `Finalized`. To verify the pooled settlement, use transaction ID `0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f`. These commands perform read-only checks. The evidence file is a static record, not a live network read; current indexer availability and retention can affect whether an old transaction remains queryable.
+The recorded result is `Finalized`. To verify the pooled settlement, use transaction ID `0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f`. These commands perform read-only checks. As of 23 Oct 2026 the public indexer no longer serves this transaction (HTTP 404, “not known to this indexer” on the explorer) because it is outside the indexer’s retention window; the check only works against an indexer that still holds it. The evidence file is a static record, not a live network read; current indexer availability and retention can affect whether an old transaction remains queryable.
 
 ## Suggested narration
 

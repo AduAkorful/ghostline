@@ -1,7 +1,8 @@
 {
-  "label": "Verified Esmeralda deposit-masking runs",
+  "label": "Verified Esmeralda Ghostline runs",
   "network": "Esmeralda",
   "runDate": "2026-10-22",
+  "runDateNote": "runDate is the date of chainRecord, the recorded command-line run. liveRunRecord has its own date.",
   "templateRecord": {
     "address": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
     "publishTransactionId": "59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741",
@@ -45,7 +46,28 @@
         1,
         1
       ]
-    }
+    },
+    "runKind": "command-line run (local CLI and reference paid API)"
+  },
+  "liveRunRecord": {
+    "runKind": "hosted Sapient run (play page, opt-in custodial testnet relay)",
+    "runDate": "2026-10-23",
+    "source": "QA run 17 on the deployed play page; finality checked on Esmeralda indexer-a",
+    "depositMicroTari": 51,
+    "successfulCalls": 5,
+    "unitPriceMicroTari": 10,
+    "acceptedTotalMicroTari": 50,
+    "fundingTransactionId": "4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829",
+    "fundingTransactionUrl": "https://explorer.tari.mw/tx/4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829",
+    "openTransactionId": "87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69",
+    "openTransactionUrl": "https://explorer.tari.mw/tx/87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69",
+    "openFinality": "Finalized",
+    "openFeeMicroTari": 9487,
+    "settlementTransactionId": "f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9",
+    "settlementTransactionUrl": "https://explorer.tari.mw/tx/f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9",
+    "settlementFinality": "Finalized",
+    "settlementFeeMicroTari": 17952,
+    "custody": "The relay received the 51 µT private deposit, opened the channel and settled it. The browser kept the voucher-signing key."
   },
   "batchRecord": {
     "status": "Trusted-local prototype; not coordinator-private",
@@ -106,14 +128,15 @@
   },
   "notes": [
     "The current template was published and finalized before the fresh standard, pooled-batch, and expiry-refund runs.",
-    "The current clickable proof is the 2026-10-22 CLI run: open 9986c19d…, five HTTP /fortune calls at 10 µT (50 µT cumulative) in a local ledger, then settle 1684aad9…. Indexer-a reported Finalized Commit; explorer.tari.mw still loads both IDs. The chain does not prove the call count or exact service amount.",
+    "The current clickable proof is the 2026-10-22 CLI run: open 9986c19d…, five HTTP /fortune calls at 10 µT (50 µT cumulative) in a local ledger, then settle 1684aad9…. Indexer-a reported Finalized Commit at the time. On 2026-10-23 explorer.tari.mw still loaded both IDs, although indexer-a no longer served their results. The chain does not prove the call count or exact service amount.",
+    "The latest hosted run (2026-10-23, liveRunRecord) used the play page with a Sapient wallet: one private 51 µT deposit, relay open 87b2e645…, five 10 µT calls (50 µT), then settle f5dafe5c…. All three transactions were Finalized on indexer-a.",
     "An earlier 2026-10-19 20-call run (open 1ea836af…, settle 6a446702…) is outside the public indexer’s 50-epoch transaction-body window and returns “not known to this indexer” on explorer. Those IDs remain in notes only.",
     "The standard settlement used a claim-free confidential transfer with zero revealed input amount, no revealed output, and exactly two stealth outputs. The deposit, service amount, and payer remainder were not readable in public transaction fields.",
     "The batch run accepted 20 calls in each of two local service ledgers, then finalized one two-input pooled settlement. Its three outputs were one pooled service output and two payer-change outputs; the pooled value was confirmed locally with the one-time payout key, but the amount is omitted from this public evidence file.",
     "The batch prototype is trusted-local only: its builder received both deposit masks and values. Observers can see the two channels are grouped in one transaction, and the coordinator can learn the deposits.",
     "The fresh current-template expiry refund finalized with a zero revealed input amount, no revealed output, one stealth output, and no covenant claims. The wallet confirmed the channel output is down. The dry-run estimated a 9,510 µT fee; the finalized transaction paid 9,498 µT from the payer-side fee account.",
-    "Fees are public. Standard open fee: 15,200 µT; standard settlement fee: 17,744 µT. Each batch open fee: 15,199 µT; pooled settlement fee: 38,409 µT.",
-    "The 20-call totals are local-ledger evidence, not chain proof. This is a static evidence record; use the linked Esmeralda explorer transactions to inspect chain data."
+    "Call counts and accepted totals are service-ledger evidence, not chain proof. This is a static evidence record; use the linked Esmeralda explorer transactions to inspect chain data.",
+    "Fees are public. The recorded CLI run's fees are in chainRecord, the hosted run's in liveRunRecord, and the pooled prototype's in batchRecord."
   ],
   "historicalPreviousTemplateRefundRecord": {
     "testDescription": "Historical previous-template refund retained for reference; see refundRecord above for the fresh latest-template refund proof.",
@@ -129,5 +152,25 @@
     "revealedOutput": false,
     "outputCount": 1,
     "channelOutputAfterRefund": "down"
+  },
+  "explorerAvailability": {
+    "checkedOn": "2026-10-23",
+    "explorer": "https://explorer.tari.mw",
+    "note": "The public indexer keeps transaction bodies for a limited window (about 50 epochs), so older records stop loading on the explorer. A record that is not known any more was still finalized when it was recorded; its id stays here for reference. Newer records will age out the same way.",
+    "transactions": {
+      "9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1": "loads",
+      "1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc": "loads",
+      "4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829": "loads",
+      "87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69": "loads",
+      "f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9": "loads",
+      "59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741": "not known to the public indexer",
+      "0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f": "not known to the public indexer",
+      "68e064b6a8ad868c7565a432469ebd61aa54fb91ddf5952bd97b4eb269982f0a": "not known to the public indexer",
+      "dd66ceb4c9965793d4e5eb417bac0e75c4993a2102827d7d4061e28e958038d5": "not known to the public indexer",
+      "3411459ed95199a041fb289df5a24037acff0557769a280c607f3f5c87e6bdf3": "not known to the public indexer",
+      "050dc1cb38803875deb5bcbba7f124086c62f40a5ae82e902a780f3c171cd2a2": "not known to the public indexer",
+      "9fafd105e83788ff169b5aa557b5a8230e71834fb4c238daf7ee0a449c23b7fc": "not known to the public indexer",
+      "73a0277ef980a890aed17a44e69e8d0f0bc373d3320376c421077d19e57a3b47": "not known to the public indexer"
+    }
   }
 }

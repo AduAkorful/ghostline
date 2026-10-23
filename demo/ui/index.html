@@ -18,17 +18,17 @@
         <a href="play.html">Try the demo</a>
         <a href="#story">How it works</a>
         <a href="#evidence">Proof</a>
-        <a href="#capabilities">CLI map</a>
         <a href="#privacy">Privacy</a>
-        <a class="nav-cta" href="#start">Get Ghostline <span aria-hidden="true">↗</span></a>
+        <a href="docs/install.html">Docs</a>
+        <a class="nav-cta" href="#start">Get Ghostline <span aria-hidden="true">→</span></a>
         <details class="mobile-nav">
           <summary>Explore <span aria-hidden="true">+</span></summary>
           <div class="mobile-nav-panel">
-            <a href="play.html">Try the browser demo</a>
+            <a href="play.html">Try the demo</a>
             <a href="#story">How it works</a>
             <a href="#evidence">Proof</a>
-            <a href="#capabilities">CLI map</a>
             <a href="#privacy">Privacy</a>
+            <a href="docs/install.html">Docs</a>
             <a href="#start">Get Ghostline</a>
           </div>
         </details>
@@ -42,10 +42,10 @@
           <h1 id="hero-title">Many whispers.<br /><span>One séance receipt.</span></h1>
           <p class="hero-lede">An AI agent pays a service request by request. Signed vouchers stay off-chain; one masked settlement closes the channel on Tari Ootle.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="play.html">Summon a ghost payment <span aria-hidden="true">↗</span></a>
-            <a class="text-link" href="#evidence">Inspect finalized proof <span aria-hidden="true">↗</span></a>
+            <a class="button button-primary" href="play.html">Try the 5-call simulation (no wallet) <span aria-hidden="true">→</span></a>
+            <a class="text-link" href="#evidence">Inspect the recorded proof <span aria-hidden="true">↓</span></a>
           </div>
-          <p class="hero-note"><strong>Start with a no-install browser simulation.</strong> You can also inspect recorded Esmeralda proof or run the CLI with your own wallet.</p>
+          <p class="hero-note"><strong>Mediums, start here:</strong> 1. <a href="play.html">try the simulation</a> (a live Esmeralda run with the Sapient wallet is optional) · 2. <a href="#evidence">inspect the recorded proof</a> · 3. <a href="docs/install.html">read the docs</a>. New terms are in the <a href="#terms">glossary</a>.</p>
         </div>
         <div class="hero-art" role="group" aria-label="Illustration of many off-chain calls collapsing into one on-chain settlement">
           <div class="art-stamp"><span>GHOSTLINE / TRANSACTION TRACE</span><span>NO. 001</span></div>
@@ -74,7 +74,7 @@
           </svg>
           <div class="art-legend"><span><i class="legend-dot dot-payer"></i>PAYER</span><span><i class="legend-dot dot-service"></i>SERVICE</span><span><i class="legend-dot dot-chain"></i>OOTLE</span></div>
           <div class="art-caption"><span>OFF-CHAIN · MANY</span><span>ON-CHAIN · ONE</span></div>
-          <p class="art-footnote">Schematic flow. Latest recorded proof: 20 paid calls and one settlement. Motion is illustrative, not a live transaction feed.</p>
+          <p class="art-footnote">Schematic flow. Recorded proof: 5 paid calls and one settlement, in a 22 Oct 2026 command-line run and a 23 Oct 2026 hosted run. Motion is illustrative, not a live transaction feed.</p>
         </div>
         <div class="hero-index" aria-hidden="true"><span>01 — 08</span><span>SCROLL TO FOLLOW THE TRACE ↓</span></div>
       </section>
@@ -82,30 +82,30 @@
       <section class="judge-path" id="judge-path" aria-labelledby="judge-path-title">
         <div class="shell">
           <div class="judge-path-heading">
-            <div><p class="eyebrow">START HERE · EXPLORE</p><h2 id="judge-path-title">See proof.<br /><span>Then try it.</span></h2></div>
-            <p>Ghostline is not a hosted wallet demo. Pick the level you want: inspect the archived Esmeralda records, run the no-funds local flow, or make your own testnet run.</p>
+            <div><p class="eyebrow">MEDIUMS: START HERE · ABOUT TEN MINUTES</p><h2 id="judge-path-title">Try it.<br /><span>Then check the proof.</span></h2></div>
+            <p>Three steps, in order. The first needs no wallet; an optional live run needs the Sapient wallet and free Esmeralda test funds.</p>
           </div>
           <div class="judge-options">
             <article class="judge-option judge-option-proof">
-              <p class="judge-option-index">01 <span>NO SETUP</span></p>
-              <h3>Inspect the chain proof</h3>
-              <p>Try the recorded channel and settlement transaction IDs in Tari’s explorer. The accompanying service ledger records 20 paid calls. These historical records may no longer be indexed by the public explorer.</p>
+              <p class="judge-option-index">01 <span>BROWSER · NO WALLET</span></p>
+              <h3>Run the 5-call simulation</h3>
+              <p>Sign five vouchers in your browser against a simulated paywall, then see a recorded settlement. With Sapient on Esmeralda you can instead fund a real channel and watch your own open and settlement finalize.</p>
+              <a href="play.html">Open the demo <span aria-hidden="true">→</span></a>
+            </article>
+            <article class="judge-option">
+              <p class="judge-option-index">02 <span>NO SETUP</span></p>
+              <h3>Inspect the recorded proof</h3>
+              <p>Two recorded runs, each with 5 paid calls and one settlement: a command-line run and a hosted Sapient run. Each explorer link shows whether the public indexer still serves it.</p>
               <a href="#evidence">Open the evidence <span aria-hidden="true">↓</span></a>
             </article>
             <article class="judge-option">
-              <p class="judge-option-index">02 <span>LOCAL · NO FUNDS</span></p>
-              <h3>Try the safe smoke run</h3>
-              <p>Build the CLI and reference API, make three local paid requests with temporary keys, and see the flow work without a wallet or transaction.</p>
-              <a href="#start">Find the local command <span aria-hidden="true">↓</span></a>
-            </article>
-            <article class="judge-option">
-              <p class="judge-option-index">03 <span>ESMERALDA · YOUR WALLET</span></p>
-              <h3>Run the guided testnet flow</h3>
-              <p>Use the guided runner to check your wallet, set up a local service, make paid calls, and settle once. You still need your own test funds and confirm both transactions.</p>
-              <a href="docs/quickstart.html#guided-demo">Open the guided Esmeralda steps <span aria-hidden="true">↗</span></a>
+              <p class="judge-option-index">03 <span>LOCAL · LINUX x86-64</span></p>
+              <h3>Run it yourself</h3>
+              <p>A no-funds local smoke run makes three paid requests with temporary keys. The guided Esmeralda flow then uses your own wallet and test funds.</p>
+              <a href="#start">Find the commands <span aria-hidden="true">↓</span></a>
             </article>
           </div>
-          <p class="judge-path-note">The motion graphics are illustrative. They are not a live transaction feed; the linked transaction IDs are historical and may no longer resolve in the public explorer.</p>
+          <p class="judge-path-note">The motion graphics are illustrative, not a live transaction feed. Explorer links to older records stop loading after the public indexer drops them; <a href="evidence.html">every record and its status</a> is listed separately.</p>
         </div>
       </section>
 
@@ -114,6 +114,7 @@
           <p class="eyebrow">The CLI, in motion</p>
           <h2 id="story-title">One channel.<br /><span>Several deliberate steps.</span></h2>
           <p>Follow the path from installation to close. As you move through it, the same trace changes to show what each command actually does.</p>
+          <ol class="story-steps" aria-label="Steps in this section"><li><a href="#step-install"><span>01</span> Install</a></li><li><a href="#step-service"><span>02</span> Service</a></li><li><a href="#step-prepare"><span>03</span> Channel terms</a></li><li><a href="#step-open"><span>04</span> Open</a></li><li><a href="#step-pay"><span>05</span> Pay per call</a></li><li><a href="#step-inspect"><span>06</span> Check records</a></li><li><a href="#step-settle"><span>07</span> Settle</a></li><li><a href="#step-refund"><span>↳</span> Refund</a></li></ol>
         </div>
         <div class="story-grid shell" id="story-app" data-scene="install">
           <aside class="story-visual" aria-label="Illustrative Ghostline payment flow; not a live view">
@@ -151,7 +152,7 @@
           </aside>
 
           <div class="story-chapters">
-            <article class="story-chapter is-active" data-scene="install" aria-labelledby="chapter-install">
+            <article class="story-chapter is-active" id="step-install" data-scene="install" aria-labelledby="chapter-install">
               <p class="chapter-index"><span>01</span><i></i> GET THE TOOLS</p>
               <h3 id="chapter-install">Install locally.<br /><em>Keep control.</em></h3>
               <p>One command downloads the CLI, reference API, and MCP server. Wallet setup and funding stay on your machine.</p>
@@ -159,7 +160,7 @@
               <p class="chapter-aside">The installer verifies the release checksum. It does not create or fund a wallet.</p>
             </article>
 
-            <article class="story-chapter" data-scene="service" aria-labelledby="chapter-service">
+            <article class="story-chapter" id="step-service" data-scene="service" aria-labelledby="chapter-service">
               <p class="chapter-index"><span>02</span><i></i> START THE OTHER SIDE</p>
               <h3 id="chapter-service">A provider names<br /><em>its terms.</em></h3>
               <p>Run the reference paid API, or connect an agent to a compatible provider. The service sets its price and accepted channel terms.</p>
@@ -168,7 +169,7 @@ ghostline-paid-api serve --bind 127.0.0.1:8787 --price 10 …</code></pre></div>
               <p class="chapter-aside">Use a fresh service authorization key per channel. A separate one-time payout key is optional; both keys are still visible in that channel's settlement.</p>
             </article>
 
-            <article class="story-chapter" data-scene="prepare" aria-labelledby="chapter-prepare">
+            <article class="story-chapter" id="step-prepare" data-scene="prepare" aria-labelledby="chapter-prepare">
               <p class="chapter-index"><span>03</span><i></i> DEFINE A CHANNEL</p>
               <h3 id="chapter-prepare">Choose the terms<br /><em>before funding.</em></h3>
               <p>Compute the payer root and channel id, then write a channel file using your real deployment parameters. This step stays offline.</p>
@@ -177,7 +178,7 @@ ghostline channel init --out /private/channel.json …</code></pre></div>
               <p class="chapter-aside">Never use invented template hashes or service keys. The channel file becomes sensitive after it stores a deposit mask.</p>
             </article>
 
-            <article class="story-chapter" data-scene="open" aria-labelledby="chapter-open">
+            <article class="story-chapter" id="step-open" data-scene="open" aria-labelledby="chapter-open">
               <p class="chapter-index"><span>04</span><i></i> OPEN ONCE</p>
               <h3 id="chapter-open">Review the fee.<br /><em>Then open.</em></h3>
               <p>Dry-run through your local wallet first. A live channel open requires a reviewed, explicit fee cap and spends the deposit.</p>
@@ -187,7 +188,7 @@ ghostline channel open --file /private/channel.json --max-fee &lt;reviewed-cap&g
               <p class="chapter-aside">The channel output is visible on the network; its stealth conditions protect some output details.</p>
             </article>
 
-            <article class="story-chapter" data-scene="pay" aria-labelledby="chapter-pay">
+            <article class="story-chapter" id="step-pay" data-scene="pay" aria-labelledby="chapter-pay">
               <p class="chapter-index"><span>05</span><i></i> PAY PER REQUEST</p>
               <h3 id="chapter-pay">Accept a quote.<br /><em>Sign the next total.</em></h3>
               <p>For each HTTP 402 quote, Ghostline checks the channel terms and spending policy, then signs a cumulative voucher. No per-call transaction is sent to the chain.</p>
@@ -197,7 +198,7 @@ ghostline channel open --file /private/channel.json --max-fee &lt;reviewed-cap&g
               <p class="chapter-aside">A cumulative voucher is an off-chain service record, not proof that every request was made.</p>
             </article>
 
-            <article class="story-chapter" data-scene="inspect" aria-labelledby="chapter-inspect">
+            <article class="story-chapter" id="step-inspect" data-scene="inspect" aria-labelledby="chapter-inspect">
               <p class="chapter-index"><span>06</span><i></i> CHECK BOTH RECORDS</p>
               <h3 id="chapter-inspect">Local totals tell<br /><em>only half the story.</em></h3>
               <p>Read the channel state and export call accounting. Check the indexer separately for transaction results and output state.</p>
@@ -206,7 +207,7 @@ ghostline channel calls --dir /private/channels --out calls.csv</code></pre></di
               <p class="chapter-aside">Call details come from the service ledger. The latest claim-free Esmeralda settlement used the deployed fixed-output rule: two stealth outputs and a 1 µT payer reserve. The deposit and service amount remained unrevealed.</p>
             </article>
 
-            <article class="story-chapter" data-scene="settle" aria-labelledby="chapter-settle">
+            <article class="story-chapter" id="step-settle" data-scene="settle" aria-labelledby="chapter-settle">
               <p class="chapter-index"><span>07</span><i></i> CLOSE AND VERIFY</p>
               <h3 id="chapter-settle">Many accepted calls.<br /><em>One settlement.</em></h3>
               <p>Review the result, choose to submit, then ask the indexer for finality. The latest Esmeralda test finalized one settlement while hiding the service amount from observers.</p>
@@ -218,7 +219,7 @@ ghostline indexer result --url &lt;indexer-url&gt; --transaction-id &lt;tx-id&gt
               <p class="chapter-aside">The live settlement finalized on Esmeralda with no covenant claim or plaintext amounts. The latest template's fixed two-output rule was also exercised on Esmeralda. Fees and timing remain public.</p>
             </article>
 
-            <article class="story-chapter refund-chapter" data-scene="refund" aria-labelledby="chapter-refund">
+            <article class="story-chapter refund-chapter" id="step-refund" data-scene="refund" aria-labelledby="chapter-refund">
               <p class="chapter-index"><span>↳</span><i></i> AN ALTERNATE ENDING</p>
               <h3 id="chapter-refund">If it expires<br /><em>without settlement.</em></h3>
               <p>When the channel remains unspent through expiry, the payer can take the refund branch. This path cannot follow a successful settlement.</p>
@@ -234,15 +235,15 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
 
       <section class="evidence-section" id="evidence" aria-labelledby="evidence-title">
         <div class="shell">
-          <div class="evidence-heading"><div><p class="eyebrow">THE RECEIPT HAS TWO SIDES</p><h2 id="evidence-title">Service log.<br /><span>Chain finality.</span></h2></div><p>This historical Esmeralda record covers 20 paid HTTP calls and one settlement using the fixed-output template. The service ledger records calls; the original run record reports on-chain finality.</p></div>
+          <div class="evidence-heading"><div><p class="eyebrow">THE RECEIPT HAS TWO SIDES</p><h2 id="evidence-title">Service log.<br /><span>Chain finality.</span></h2></div><p>Two recorded runs, each with 5 paid HTTP calls and one settlement: a command-line run on 22 Oct 2026 and a hosted Sapient run on 23 Oct 2026. The service ledger records the calls; the chain records the open and the settlement.</p></div>
           <aside class="evidence-availability" role="note">
-            <strong>Historical explorer records may be unavailable.</strong>
-            <span>The evidence links below are the 22 Oct 2026 CLI open and settle, which still load on explorer.tari.mw. Older 19 Oct IDs are past the public indexer’s 50-epoch transaction-body window and return “not known to this indexer.”</span>
+            <strong>Explorer links age out.</strong>
+            <span>The public indexer keeps transaction bodies for about 50 epochs; after that the explorer says “not known to this indexer”. On 23 Oct 2026 both runs below still loaded. The refund, the pooled settlement and the template publish no longer did. Each link shows its last checked status, and <a href="evidence.html">every record</a> is listed with its status.</span>
           </aside>
           <div class="evidence-grid" id="evidence-grid" aria-live="polite">
             <article class="evidence-panel service-panel">
               <div class="panel-top"><span class="source-tag"><span aria-hidden="true">01 /</span> Service-side call record</span><span class="source-kind">OFF-CHAIN</span></div>
-              <p class="panel-description">Recorded by the reference HTTP paywall during the historical run.</p>
+              <p class="panel-description">Recorded by the reference HTTP paywall during the 22 Oct 2026 command-line run.</p>
               <div class="call-count"><strong id="call-count">—</strong><span>successful<br /><code>/fortune</code> calls</span></div>
               <div class="metric-row"><div><span>Price per call</span><strong id="unit-price">—</strong></div><div><span>Accepted total</span><strong id="accepted-total">—</strong></div></div>
               <div class="mini-receipt"><p><strong>One cumulative voucher</strong><br /><span>Each accepted call updates the off-chain total.</span></p><span class="receipt-status">RECORDED</span></div>
@@ -250,17 +251,27 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
             <div class="evidence-bridge" aria-hidden="true"><span>same run</span><b>⇢</b></div>
             <article class="evidence-panel chain-panel">
               <div class="panel-top"><span class="source-tag"><span aria-hidden="true">02 /</span> Esmeralda chain record</span><span class="source-kind">INDEXER / CHAIN</span></div>
-              <p class="panel-description">The 22 Oct 2026 CLI run reports a finalized channel open and spend that the public explorer still serves. The service amount was hidden from the inspected public transaction fields. Template: <a id="template-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">—</code></a></p>
+              <p class="panel-description">The 22 Oct 2026 command-line run: a finalized channel open and settlement. The service amount was hidden in the inspected public transaction fields. Template: <a id="template-tx-link" href="https://explorer.tari.mw/tx/59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">template_61b…0d7157a1</code></a></p>
               <div class="chain-events">
-                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened</strong><span class="finality">RUN LOG</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">—</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
-                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Voucher settled</strong><span class="finality">RUN LOG</span></div><div class="tx-line"><a class="tx-link" id="settle-tx-link" target="_blank" rel="noopener noreferrer" aria-label="View settlement transaction in Tari explorer"><code id="settle-tx">—</code></a><button class="copy-button" type="button" data-copy="settle-tx" aria-label="Copy settlement transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened</strong><span class="finality">RUN LOG</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" href="https://explorer.tari.mw/tx/9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Voucher settled</strong><span class="finality">RUN LOG</span></div><div class="tx-line"><a class="tx-link" id="settle-tx-link" href="https://explorer.tari.mw/tx/1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc" target="_blank" rel="noopener noreferrer" aria-label="View settlement transaction in Tari explorer"><code id="settle-tx">1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc</code></a><button class="copy-button" type="button" data-copy="settle-tx" aria-label="Copy settlement transaction ID">Copy ID</button></div></div></div>
               </div>
-              <p class="refund-proof"><span>SEPARATE EXPIRY REFUND · RUN LOG</span><span class="refund-links"><a id="refund-open-tx-link" target="_blank" rel="noopener noreferrer" aria-label="Open the channel used in the separate expiry refund test in Tari explorer">Open refund channel ↗</a><a id="refund-tx-link" target="_blank" rel="noopener noreferrer" aria-label="Open the payer expiry refund transaction in Tari explorer">Payer refund ↗</a></span></p>
+              <p class="refund-proof"><span>SEPARATE EXPIRY REFUND · RUN LOG</span><span class="refund-links"><a id="refund-open-tx-link" href="https://explorer.tari.mw/tx/3411459ed95199a041fb289df5a24037acff0557769a280c607f3f5c87e6bdf3" target="_blank" rel="noopener noreferrer" aria-label="Open the channel used in the separate expiry refund test in Tari explorer">Open refund channel ↗</a><a id="refund-tx-link" href="https://explorer.tari.mw/tx/050dc1cb38803875deb5bcbba7f124086c62f40a5ae82e902a780f3c171cd2a2" target="_blank" rel="noopener noreferrer" aria-label="Open the payer expiry refund transaction in Tari explorer">Payer refund ↗</a></span></p>
               <p class="chapter-aside">The latest-template refund finalized and spent the channel output. Its public output amount is hidden; the recipient output was not locally unblinded to verify the amount received.</p>
               <div class="metric-row chain-metrics"><div><span>Service amount</span><strong id="settled-total">—</strong></div><div><span>Channel deposit</span><strong id="deposit-total">—</strong></div><div><span>Settlement fee</span><strong id="settlement-fee">—</strong><small class="fee-payer">Paid by service-side fee account</small></div></div>
               <p class="output-state">OUTPUT AFTER SETTLEMENT <strong id="output-status">—</strong></p>
             </article>
           </div>
+          <article class="batch-proof live-run-proof" aria-labelledby="live-run-title">
+            <div><p class="eyebrow">HOSTED SAPIENT RUN · 23 OCT 2026</p><h3 id="live-run-title">The same flow,<br /><span>from the demo page.</span></h3></div>
+            <div class="batch-proof-copy"><p>A Sapient wallet sent one private 51 µT deposit to the opt-in testnet relay, which opened the channel. Five 10 µT calls (50 µT) were paid with vouchers signed in the browser, then the relay settled once. The relay held the deposit; the browser kept the voucher key. This is a different run from the command-line record above.</p>
+              <ul class="live-run-links">
+                <li><span>Private funding</span><a id="live-funding-link" href="https://explorer.tari.mw/tx/4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829" target="_blank" rel="noopener noreferrer" data-tx="4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829"><code>4dad1dcf…6829</code> ↗</a></li>
+                <li><span>Channel open</span><a id="live-open-link" href="https://explorer.tari.mw/tx/87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69" target="_blank" rel="noopener noreferrer" data-tx="87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69"><code>87b2e645…9a69</code> ↗</a></li>
+                <li><span>Settlement</span><a id="live-settle-link" href="https://explorer.tari.mw/tx/f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9" target="_blank" rel="noopener noreferrer" data-tx="f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9"><code>f5dafe5c…f9b9</code> ↗</a></li>
+              </ul>
+            </div>
+          </article>
           <div class="proof-comparison" aria-label="Side-by-side explorer comparison">
             <article>
               <p class="eyebrow">PUBLIC TRANSFER · ETHEREUM</p>
@@ -272,16 +283,16 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
               <p class="eyebrow">GHOSTLINE · ESMERALDA</p>
               <h3>Calls settle once</h3>
               <p>The recorded claim-free settlement has no plaintext deposit, service amount, or payer remainder in public transaction fields.</p>
-              <a id="comparison-settlement-link" target="_blank" rel="noopener noreferrer">Inspect Ghostline settlement ↗</a>
+              <a id="comparison-settlement-link" href="https://explorer.tari.mw/tx/1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc" target="_blank" rel="noopener noreferrer">Inspect Ghostline settlement ↗</a>
             </article>
           </div>
           <p class="comparison-note">These are examples of different transaction designs, not matched payments on the same network. Other chains can also support private payment designs.</p>
           <article class="batch-proof" aria-labelledby="batch-proof-title">
             <div><p class="eyebrow">EXPERIMENTAL · TRUSTED-LOCAL PROTOTYPE</p><h3 id="batch-proof-title">Two channels.<br /><span>One pooled close.</span></h3></div>
-            <div class="batch-proof-copy"><p>On Esmeralda, two channels each recorded 20 paid calls locally, then finalized one pooled settlement with two channel inputs and three stealth outputs. The service amount was opened locally with its one-time payout key; it was not readable in the public transaction fields.</p><p><strong>This is not coordinator-private.</strong> The local builder received both deposit values and masks, and observers can see the channels were grouped in one transaction. It is a research prototype, not a hosted or recommended production flow.</p><a id="batch-tx-link" href="https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f" target="_blank" rel="noopener noreferrer">Inspect pooled settlement ↗</a></div>
+            <div class="batch-proof-copy"><p>On Esmeralda, two channels each recorded 20 paid calls locally, then finalized one pooled settlement with two channel inputs and three stealth outputs. The service amount was opened locally with its one-time payout key; it was not readable in the public transaction fields.</p><p><strong>This is not coordinator-private.</strong> The local builder received both deposit values and masks, and observers can see the channels were grouped in one transaction. It is a research prototype, not a hosted or recommended production flow.</p><a id="batch-tx-link" href="https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f" target="_blank" rel="noopener noreferrer">Pooled settlement 0e192d7b…2e2f ↗</a></div>
           </article>
-          <p class="evidence-caveat">The transaction IDs link to Tari’s public explorer, which did not recognize these historical records during QA on 2026-10-22. The 20-call count and accepted total come from the local service ledger. The recorded standard settlement transfer statement had zero covenant claims, no revealed channel amounts, and exactly two stealth outputs; separate fee instructions and fee amounts remain public, along with timing, branch, channel id, authorization data, and output commitments.</p>
-          <p class="evidence-footnote" id="evidence-date"></p>
+          <p class="evidence-caveat">Call counts and accepted totals come from the service ledgers; the chain does not attest to them. The recorded standard settlement transfer statement had zero covenant claims, no revealed channel amounts, and exactly two stealth outputs; separate fee instructions and fee amounts remain public, along with timing, branch, channel id, authorization data, and output commitments.</p>
+          <p class="evidence-footnote" id="evidence-date">Command-line run: 22 Oct 2026 · hosted run: 23 Oct 2026 · explorer status checked 23 Oct 2026. Static evidence, not a live network read.</p>
         </div>
       </section>
 
@@ -311,21 +322,37 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
       </section>
 
       <section class="start-section shell" id="start" aria-labelledby="start-title">
-        <div class="start-copy"><p class="eyebrow">NO HOSTED SIGNER · NO BACKEND</p><h2 id="start-title">Try it locally.<br />Keep your keys.</h2><p>The website is a static explainer. Ghostline commands run on your machine; your wallet keys and credentials stay with you. Start with a no-funds local demo, then follow the Esmeralda guide if you want to make a testnet transaction.</p></div>
+        <div class="start-copy"><p class="eyebrow">YOUR MACHINE · YOUR KEYS</p><h2 id="start-title">Try it locally.<br />Keep your keys.</h2><p>The website is static; only the optional live demo uses a testnet relay. Ghostline commands run on your machine, and your wallet keys and credentials stay with you. Start with a no-funds local demo, then follow the Esmeralda guide if you want to make a testnet transaction.</p></div>
         <div class="start-resources">
           <div class="command-card install-command"><div class="command-head"><span>SAFE FIRST TRY · LOCAL ONLY</span><button class="copy-command" type="button">Copy</button></div><pre><code>git clone https://github.com/AduAkorful/ghostline.git
 cd ghostline
 bash scripts/quickstart-smoke.sh</code></pre></div>
           <p class="install-note">This builds the reference CLI and API, uses temporary test keys, pays three local requests, then removes its temporary files. It does not contact a wallet, use Esmeralda, or submit a transaction. The first build may take a few minutes.</p>
-          <p class="install-platform"><span>LINUX · x86-64 · glibc</span><span>NO ROOT REQUIRED</span></p>
+          <p class="install-platform"><span>LINUX · x86-64 · glibc · NO macOS OR WINDOWS BUILDS</span><span>NO ROOT REQUIRED</span></p>
           <div class="command-card install-command"><div class="command-head"><span>INSTALL THE CLI, API &amp; MCP SERVER</span><button class="copy-command" type="button">Copy</button></div><pre><code>curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh</code></pre></div>
           <p class="install-note"><a href="https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0" target="_blank" rel="noopener noreferrer">Ghostline v0.4.0 release.</a> This installs the CLI, API, and MCP server to <code>~/.local/bin</code> and verifies the release checksum. Try <code>ghostline demo</code> for the local quote → voucher → paid-call run. It does not set up or fund a wallet.</p>
-          <div class="start-links"><a href="docs/install.html"><span><small>01 / DETAILS</small><strong>Installation guide</strong></span><b aria-hidden="true">↗</b></a><a href="docs/quickstart.html"><span><small>02 / CLI</small><strong>Esmeralda quickstart</strong></span><b aria-hidden="true">↗</b></a><a href="docs/interfaces.html"><span><small>03 / MCP + API</small><strong>Interfaces and tools</strong></span><b aria-hidden="true">↗</b></a><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer"><span><small>04 / SOURCE</small><strong>Browse the code</strong></span><b aria-hidden="true">↗</b></a></div>
+          <div class="start-links"><a href="docs/install.html"><span><small>01 / DETAILS</small><strong>Installation guide</strong></span><b aria-hidden="true">→</b></a><a href="docs/quickstart.html"><span><small>02 / CLI</small><strong>Esmeralda quickstart</strong></span><b aria-hidden="true">→</b></a><a href="docs/interfaces.html"><span><small>03 / MCP + API</small><strong>Interfaces and tools</strong></span><b aria-hidden="true">→</b></a><a href="https://github.com/AduAkorful/ghostline" target="_blank" rel="noopener noreferrer"><span><small>04 / SOURCE</small><strong>Browse the code</strong></span><b aria-hidden="true">↗</b></a></div>
         </div>
       </section>
-      <section class="limits-section" aria-labelledby="limits-title"><div class="shell limits-inner"><div><p class="eyebrow">KNOW THE LIMITS</p><h2 id="limits-title">Early development.<br />Testnet only.</h2></div><ul><li>Ghostline is unaudited. Do not use real funds.</li><li>Fees are public and may exceed small-call totals.</li><li>The tested claim-free close hides deposit, exact service amount, and remainder; branch and output commitments remain visible.</li><li>Call counts are service records, not chain-attested receipts.</li><li>Ootle mainnet target: Nov 11, 2026. A mainnet release is planned, not live or guaranteed.</li></ul></div></section>
+      <section class="terms-section" id="terms" aria-labelledby="terms-title">
+        <div class="shell">
+          <div class="section-heading"><div><p class="eyebrow">GLOSSARY</p><h2 id="terms-title">Terms used here.</h2></div><p class="section-intro">The site uses a little ghost vocabulary and some Tari Ootle terms. Here is what each one means.</p></div>
+          <dl class="terms-list">
+            <div><dt>Whisper · voucher</dt><dd>A signed off-chain message that raises the service’s claimable total. Paying for a call sends a voucher, not a transaction.</dd></div>
+            <div><dt>Séance receipt · settlement</dt><dd>The one on-chain transaction that pays the service the latest voucher total and closes the channel.</dd></div>
+            <div><dt>Channel</dt><dd>An on-chain output that holds the payer’s deposit until it is settled, or refunded after expiry.</dd></div>
+            <div><dt>Stealth UTXO</dt><dd>An Ootle output whose amount is a confidential commitment and whose owner key is used once, so observers cannot read the amount or reuse the address to link payments.</dd></div>
+            <div><dt>Claim-free close · covenant claim</dt><dd>An earlier design spent the channel through an explicit covenant claim, which revealed the deposit. The claim-free settlement and refund spend it without one, so the deposit and amounts stay hidden in public transaction fields.</dd></div>
+            <div><dt>Fixed-output rule</dt><dd>The channel template accepts a settlement only with exactly two stealth outputs: the service payment and the payer’s change, which keeps at least 1 µT. A fixed shape avoids leaking information through the output count.</dd></div>
+            <div><dt>Template · template address</dt><dd>The channel’s published Ootle contract code. Its <code>template_…</code> address (a hash) identifies exactly which code every channel uses.</dd></div>
+            <div><dt>Epoch · 50-epoch window</dt><dd>An epoch is Ootle’s unit of network time, used for channel expiry. The public indexer keeps transaction bodies for about 50 epochs, so older explorer links stop loading.</dd></div>
+            <div><dt>Units: µT, TARI, tTARI, XTR</dt><dd>µT is micro-TARI, one millionth of a TARI. On the Esmeralda testnet the coin is free test TARI: the explorer shows it as tTARI and wallets as TARI or XTR. It has no value.</dd></div>
+          </dl>
+        </div>
+      </section>
+      <section class="limits-section" aria-labelledby="limits-title"><div class="shell limits-inner"><div><p class="eyebrow">KNOW THE LIMITS</p><h2 id="limits-title">Early development.<br />Testnet only.</h2></div><ul><li>Ghostline is unaudited. Do not use real funds.</li><li>Fees are public and may exceed small-call totals.</li><li>The tested claim-free close hides deposit, exact service amount, and remainder; branch and output commitments remain visible.</li><li>Call counts are service records, not chain-attested receipts.</li><li>Ootle mainnet target: 11 Nov 2026. A mainnet release is planned, not live or guaranteed.</li></ul></div></section>
     </main>
-    <footer class="footer shell"><a class="wordmark" href="#top"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a><p>Agent payment privacy on Tari Ootle · MIT licensed · Work started Oct 12, 2026 · <a href="https://github.com/AduAkorful/ghostline/commit/e4701ea48731d117f3eda1620f60c0c6a193edef">first commit</a></p><a href="#top" class="back-top">Back to top ↑</a></footer>
+    <footer class="footer shell"><a class="wordmark" href="#top"><img class="wordmark-mark" src="ghostline-mark.svg" alt="" width="32" height="32" /><span class="wordmark-name">ghost<span>line</span></span></a><p>Agent payment privacy on Tari Ootle · MIT licensed · Work started 12 Oct 2026 · <a href="https://github.com/AduAkorful/ghostline/commit/e4701ea48731d117f3eda1620f60c0c6a193edef" target="_blank" rel="noopener noreferrer">first commit ↗</a></p><a href="#top" class="back-top">Back to top ↑</a></footer>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

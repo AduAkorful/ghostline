@@ -1,0 +1,21 @@
+/* SPDX-License-Identifier: MIT */
+.evidence-view { padding:56px 0 72px; }
+.evidence-view h1 { margin:18px 0 16px; font:500 clamp(44px,7vw,88px)/.95 var(--display); letter-spacing:-.06em; }
+.crumb a { color:var(--lime); font:11px var(--mono); }
+.runs { display:grid; gap:18px; margin-top:30px; }
+.run { min-width:0; padding:22px 24px; border:1px solid rgba(197,186,255,.2); background:#0d1019; }
+.run h2 { margin:0 0 10px; font:500 22px/1.2 var(--display); letter-spacing:-.03em; }
+.run > p { margin:0 0 14px; color:#c3c5d4; font-size:13px; line-height:1.65; }
+.run-transactions { display:grid; gap:10px; margin:0; padding:0; list-style:none; }
+.run-transactions li { display:grid; grid-template-columns:minmax(150px,.7fr) minmax(0,2fr) auto; gap:6px 14px; align-items:center; padding:10px 0; border-top:1px solid rgba(197,186,255,.12); font-size:12px; }
+.run-transactions li > span:first-child { color:#d7d8e3; }
+.run-transactions a { min-width:0; color:var(--lime); font:11px/1.5 var(--mono); word-break:break-all; }
+.badge { justify-self:start; padding:3px 7px; border:1px solid rgba(197,186,255,.35); color:#d2d0e1; font:10px var(--mono); }
+.badge-ok { border-color:rgba(154,246,238,.5); color:var(--lime); }
+.notes { margin-top:34px; }
+.notes h2 { font:500 22px var(--display); }
+.notes li { margin-bottom:8px; color:#c3c5d4; font-size:13px; line-height:1.65; }
+@media (max-width:760px) {
+  .run { padding:18px 16px; }
+  .run-transactions li { grid-template-columns:1fr; }
+}
