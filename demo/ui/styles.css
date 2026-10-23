@@ -538,3 +538,6 @@ h1 span { display:inline-block; margin-top:.12em; color:#c5baff; font-style:ital
 }
 .refund-links { flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
 .refund-proof .explorer-status { margin-left:0; white-space:normal; }
+/* Read as a link at every width, with the arrow spaced from the label (QA UI retest). */
+.text-link { gap:8px; color:var(--lime); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:4px; }
+.text-link span { text-decoration:none; }
