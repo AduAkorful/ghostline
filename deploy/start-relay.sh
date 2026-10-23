@@ -182,20 +182,38 @@ claim_fee_faucet() {
             ;;
     esac
     claim_error="$wallet_base/.ghostline-faucet-claim-error.$$"
-    if "$cli_bin" wallet faucet-claim --url "$GHOSTLINE_WALLET_URL" \
-        --name "$1" --max-fee "$fee_claim_cap" 2>"$claim_error"; then
+    claim_attempts=0
+    while :; do
+        if "$cli_bin" wallet faucet-claim --url "$GHOSTLINE_WALLET_URL" \
+            --name "$1" --max-fee "$fee_claim_cap" 2>"$claim_error"; then
+            rm -f "$claim_error"
+            return 0
+        fi
+        if grep -F 'already claimed' "$claim_error" >/dev/null; then
+            echo 'fee account has already claimed the faucet; waiting for its component' >&2
+            rm -f "$claim_error"
+            return 0
+        fi
+        # The wallet is already serving other RPC calls during its UTXO scan. One
+        # loopback send failure must not exit the process before the claim is submitted.
+        if grep -Eiq 'could not connect|connection refused|timed out|error sending request for url' "$claim_error"; then
+            claim_attempts=$((claim_attempts + 1))
+            if [ "$claim_attempts" -ge 15 ]; then
+                echo 'fee faucet claim could not reach the wallet' >&2
+                cat "$claim_error" >&2
+                rm -f "$claim_error"
+                return 1
+            fi
+            echo 'fee faucet claim could not reach the wallet; retrying' >&2
+            rm -f "$claim_error"
+            sleep "$recovery_retry_delay"
+            continue
+        fi
+        echo 'fee faucet claim failed' >&2
+        cat "$claim_error" >&2
         rm -f "$claim_error"
-        return 0
-    fi
-    if grep -F 'already claimed' "$claim_error" >/dev/null; then
-        echo 'fee account has already claimed the faucet; waiting for its component' >&2
-        rm -f "$claim_error"
-        return 0
-    fi
-    echo 'fee faucet claim failed' >&2
-    cat "$claim_error" >&2
-    rm -f "$claim_error"
-    return 1
+        return 1
+    done
 }
 
 publish_fee_component_if_missing() {

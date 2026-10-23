@@ -37,6 +37,16 @@ case "$2" in
                 *) shift ;;
             esac
         done
+        if [ "${FAKE_FAUCET_MODE:-ok}" = transport-once ]; then
+            count=0
+            [ ! -f "$FAKE_FAUCET_ATTEMPTS" ] || count=$(cat "$FAKE_FAUCET_ATTEMPTS")
+            count=$((count + 1))
+            printf '%s\n' "$count" > "$FAKE_FAUCET_ATTEMPTS"
+            if [ "$count" -eq 1 ]; then
+                echo "indexer request failed: error sending request for url (http://127.0.0.1:5100/json_rpc)" >&2
+                exit 1
+            fi
+        fi
         printf '%s %s\n' "$name" "$max_fee" >> "$FAKE_FAUCET_CLAIMS"
         printf 'transaction_id=abc\nfee=%s\namount=1000000000\nresult=Accept\n' "$max_fee"
         exit 0
@@ -436,6 +446,34 @@ if [ -s "$FAKE_FAUCET_CLAIMS" ]; then
 fi
 if [ -f "$GHOSTLINE_DEMO_READY_FILE" ]; then
     echo "expected the relay to stay unready when the fee component is down" >&2
+    exit 1
+fi
+
+# The live claim died on one loopback send failure while walletd was still up.
+# Startup must retry that, then publish once.
+rm -f "$FAKE_FAUCET_CLAIMS" "$FAKE_CURL_URLS" "$GHOSTLINE_DEMO_READY_FILE" "$tmp_root/faucet-attempts"
+export FAKE_FAUCET_ATTEMPTS="$tmp_root/faucet-attempts"
+export FAKE_FAUCET_MODE=transport-once
+export FAKE_INDEXER_MODE=not-found
+set +e
+PATH="$tmp_root:$PATH" bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/faucet-retry.stdout" 2>"$tmp_root/faucet-retry.stderr"
+faucet_retry_status=$?
+set -e
+if [ "$faucet_retry_status" -ne 0 ]; then
+    echo "expected startup to retry a faucet claim that could not reach the wallet" >&2
+    cat "$tmp_root/faucet-retry.stderr" >&2
+    exit 1
+fi
+if ! grep -Fq 'fee faucet claim could not reach the wallet; retrying' "$tmp_root/faucet-retry.stderr"; then
+    echo "expected a faucet claim retry after the wallet send failure" >&2
+    exit 1
+fi
+if ! grep -Fxq 'relay-fees 100000' "$FAKE_FAUCET_CLAIMS"; then
+    echo "expected the faucet claim to succeed after the wallet send failure" >&2
+    exit 1
+fi
+if [ "$(cat "$FAKE_FAUCET_ATTEMPTS")" -lt 2 ]; then
+    echo "expected two faucet claim attempts" >&2
     exit 1
 fi
 
