@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/i
 After installation, run the bounded local demo. It uses the real HTTP 402 quote, voucher signing, and paid API code on loopback, then exits without wallet access or chain transactions:
 
 ```sh
-ghostline demo --show-chain-evidence
+ghostline demo
 ```
 
 Set `GHOSTLINE_INSTALL_DIR` on the `sh` process to choose a different directory. To update, rerun the installer. It replaces the three executables; keep your wallet profiles and channel state in their own directories. The checksum checks the archive against the release's checksum file; it is not an independent publisher signature.

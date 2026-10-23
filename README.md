@@ -12,7 +12,7 @@ Ghostline lets an agent pay a service request by request while keeping the indiv
 - **Run the prebuilt local demo** after installing Ghostline on Linux x86-64:
 
   ```sh
-  curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh && ghostline demo --show-chain-evidence
+  curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh && ghostline demo
   ```
 
   This runs the real local HTTP 402 → voucher → paid-call path. It does not contact a wallet or submit a transaction.
