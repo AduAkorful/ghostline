@@ -38,6 +38,7 @@ const GET_DEFAULT: &str = "accounts.get_default";
 const ACCOUNTS_GET: &str = "accounts.get";
 const ACCOUNTS_GET_BALANCES: &str = "accounts.get_balances";
 const ACCOUNTS_CREATE: &str = "accounts.create";
+const CREATE_FREE_TEST_COINS: &str = "accounts.create_free_test_coins";
 const ACCOUNTS_CREATE_OR_GET: &str = "accounts.create_or_get";
 const ACCOUNTS_RENAME: &str = "accounts.rename";
 const ACCOUNTS_SET_DEFAULT: &str = "accounts.set_default";
@@ -531,6 +532,13 @@ fn json_amount_is_zero(value: Option<&Value>) -> bool {
     }
 }
 
+pub fn faucet_claim_request(account: &str, max_fee: u64) -> Value {
+    serde_json::json!({
+        "account": account_name(account),
+        "max_fee": max_fee,
+    })
+}
+
 fn json_u64(value: Option<&Value>) -> Option<u64> {
     match value {
         Some(Value::Number(number)) => number.as_u64(),
@@ -724,6 +732,19 @@ impl WalletClient {
     pub async fn default_account_address(&self) -> Result<String, NetError> {
         let resp: AccountDefaultResponse = self.rpc(GET_DEFAULT, serde_json::json!({})).await?;
         Ok(resp.address)
+    }
+
+    /// `accounts.create_free_test_coins` for an account that is not on chain.
+    ///
+    /// walletd 0.47 builds `create_account` plus the Esmeralda faucet `take` in the fee
+    /// instructions, then `pay_fee` from that new account. `accounts.create_or_get` does not
+    /// publish the component. The handler waits until the transaction finalizes.
+    pub async fn claim_faucet(&self, account: &str, max_fee: u64) -> Result<Value, NetError> {
+        self.rpc(
+            CREATE_FREE_TEST_COINS,
+            faucet_claim_request(account, max_fee),
+        )
+        .await
     }
 
     pub async fn account_get(&self, name: &str) -> Result<AccountWithAddress, NetError> {
@@ -1290,7 +1311,7 @@ mod tests {
             "address": funding_address.clone(),
             "value": "51"
         })];
-        let addresses = funding_key_path_addresses(&utxos, &[funding.clone()]).unwrap();
+        let addresses = funding_key_path_addresses(&utxos, std::slice::from_ref(&funding)).unwrap();
         assert_eq!(addresses, vec![funding_address]);
 
         let mut extra = utxos.clone();
@@ -1300,7 +1321,7 @@ mod tests {
             "auth": { "Key": "bb" },
             "value": "51"
         }));
-        assert!(funding_output_spend_gate(&extra, &[funding.clone()]).is_ok());
+        assert!(funding_output_spend_gate(&extra, std::slice::from_ref(&funding)).is_ok());
 
         let mut script_leftover = utxos.clone();
         script_leftover.push(serde_json::json!({
@@ -1309,21 +1330,25 @@ mod tests {
             "auth": { "Script": "5a91af49" },
             "value": "51"
         }));
-        assert!(funding_output_spend_gate(&script_leftover, &[funding.clone()]).is_ok());
+        assert!(
+            funding_output_spend_gate(&script_leftover, std::slice::from_ref(&funding)).is_ok()
+        );
 
         let script_funding = vec![serde_json::json!({
             "status": "Unspent",
             "address": { "id": funding },
             "auth": { "Script": "5a91af49" },
         })];
-        let error = funding_output_spend_gate(&script_funding, &[funding.clone()]).unwrap_err();
+        let error =
+            funding_output_spend_gate(&script_funding, std::slice::from_ref(&funding)).unwrap_err();
         assert!(error.contains("not key-path spendable"));
 
         let missing = vec![serde_json::json!({
             "status": "Spent",
             "address": { "id": funding }
         })];
-        let error = funding_output_spend_gate(&missing, &[funding.clone()]).unwrap_err();
+        let error =
+            funding_output_spend_gate(&missing, std::slice::from_ref(&funding)).unwrap_err();
         assert!(error.contains("has not discovered"));
     }
 
@@ -1336,7 +1361,7 @@ mod tests {
             "addr",
             51,
             &serde_json::json!({ "Conditions": [["leaf"]] }),
-            &[address.clone()],
+            std::slice::from_ref(&address),
         );
         let body = &request["requests"][0];
         assert_eq!(body["sender_account"]["Name"], "ghostline-demo-opener");
@@ -1360,7 +1385,9 @@ mod tests {
                 "revealed_output": null
             }
         });
-        assert!(pinned_statement_matches_funding(&statement, &[commitment.clone()]).is_ok());
+        assert!(
+            pinned_statement_matches_funding(&statement, std::slice::from_ref(&commitment)).is_ok()
+        );
         let revealed = serde_json::json!({
             "inputs_statement": {
                 "inputs": [{ "commitment": commitment }],
@@ -1368,6 +1395,15 @@ mod tests {
             },
             "outputs_statement": { "outputs": [{}] }
         });
-        assert!(pinned_statement_matches_funding(&revealed, &[commitment]).is_err());
+        assert!(
+            pinned_statement_matches_funding(&revealed, std::slice::from_ref(&commitment)).is_err()
+        );
+    }
+
+    #[test]
+    fn faucet_claim_names_the_account_and_fee_cap() {
+        let request = faucet_claim_request("ghostline-demo-fees", 100_000);
+        assert_eq!(request["account"]["Name"], "ghostline-demo-fees");
+        assert_eq!(request["max_fee"], 100_000);
     }
 }

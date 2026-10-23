@@ -44,9 +44,14 @@ wallet that holds valuable assets.
    `GHOSTLINE_CLAIM_SECRET`; verify the index and network before saving it.
    This CLI displays secret key material locally, so do not run it in a shared
    terminal or paste its output into chat.
-3. Copy the `account_address=` value for `ghostline-demo-fees` from the Render
-   startup logs and fund that account with Esmeralda test XTR for open,
-   settlement, and refund fees. The demo's private deposits arrive at the
+3. Startup prints the public `account_address=` for `ghostline-demo-fees`.
+   `wallet account-ensure` only writes the wallet database; it does not publish
+   the account component. When that component is missing on the indexer, startup
+   claims the Esmeralda faucet once (`accounts.create_free_test_coins`, 1,000
+   TARI) and pays the fee from the new account, capped at
+   `GHOSTLINE_DEMO_OPEN_MAX_FEE` (100000 µT). That claim is public. A stealth
+   transfer to the printed address does not create the component, and a second
+   claim on the same key fails. The demo's private deposits arrive at the
    separate `ghostline-demo-opener` account from each user's Sapient wallet.
    These are derived accounts (indices 3 and 2 respectively) in the dedicated
    relay wallet. Each 51 µT user deposit covers five 10 µT calls and the
@@ -76,9 +81,9 @@ wallet that holds valuable assets.
 After each relay open, settlement, and refund, the service refreshes the dedicated
 fee account's wallet balance. It logs a warning when revealed native XTR falls
 below 0.1 XTR (100,000 µT), and a separate warning if walletd cannot provide the
-balance. Confidential balance is not counted as fee float. Top up the fee account
-from the Esmeralda faucet when the warning appears; do not expose walletd outside
-the container.
+balance. Confidential balance is not counted as fee float. The one-time faucet
+claim runs at startup. A later low-balance warning needs a transfer of revealed
+test XTR to the printed fee address; do not expose walletd outside the container.
 
 Never paste seed words or private keys into the site, a browser console, a
 GitHub file, or a shared terminal. Enter secret values directly in Render's

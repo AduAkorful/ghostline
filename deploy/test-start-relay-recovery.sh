@@ -20,9 +20,26 @@ case "$2" in
         done
         if [ -n "$name" ] && [ -f "$FAKE_ACCOUNT_DIR/$name" ]; then
             printf 'address=%s\n' "$name"
+            if [ -n "${FAKE_COMPONENT_ADDRESS:-}" ]; then
+                printf 'component_address=%s\n' "$FAKE_COMPONENT_ADDRESS"
+            fi
             exit 0
         fi
         exit 1
+        ;;
+    faucet-claim)
+        name=
+        max_fee=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --name) name=$2; shift 2 ;;
+                --max-fee) max_fee=$2; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        printf '%s %s\n' "$name" "$max_fee" >> "$FAKE_FAUCET_CLAIMS"
+        printf 'transaction_id=abc\nfee=%s\namount=1000000000\nresult=Accept\n' "$max_fee"
+        exit 0
         ;;
     account-create|account-ensure)
         name=
@@ -303,6 +320,122 @@ set -e
 if [ "$relay_indexes_status" -ne 0 ]; then
     echo "expected startup to reuse relay keys already restored under recovered account names" >&2
     cat "$tmp_root/relay-indexes.stderr" >&2
+    exit 1
+fi
+
+write_fake_curl() {
+    cat > "$tmp_root/curl" <<'FAKE'
+#!/bin/sh
+output=
+url=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) output=$2; shift 2 ;;
+        --write-out|--max-time) shift 2 ;;
+        --silent|--show-error) shift ;;
+        *) url=$1; shift ;;
+    esac
+done
+printf '%s\n' "$url" >> "$FAKE_CURL_URLS"
+mode=${FAKE_INDEXER_MODE:-not-found}
+if [ "$mode" = not-found ] && [ -s "$FAKE_FAUCET_CLAIMS" ]; then
+    mode=up
+fi
+case "$mode" in
+    up)
+        printf '%s\n' '{"substate":"up"}' > "$output"
+        printf '200'
+        ;;
+    down)
+        printf '%s\n' '{"error":"Input substate (v0) is down"}' > "$output"
+        printf '404'
+        ;;
+    *)
+        printf '%s\n' '{"error":"Substate not found"}' > "$output"
+        printf '404'
+        ;;
+esac
+FAKE
+    chmod +x "$tmp_root/curl"
+}
+
+# A reported fee component that the indexer has never seen is published once.
+# An already-up component is left alone. A down component is not claimed again.
+write_fake_curl
+export FAKE_CURL_URLS="$tmp_root/curl-urls"
+export FAKE_FAUCET_CLAIMS="$tmp_root/faucet-claims"
+export FAKE_COMPONENT_ADDRESS=component_7d3d8a5535d6087e3f27eb65c844dc3bb84fa8c7e67219af57361c7a1771e64f
+export GHOSTLINE_FEE_COMPONENT_POLL_DELAY_SECS=0
+export GHOSTLINE_FEE_COMPONENT_POLL_LIMIT=3
+export FAKE_INDEXER_MODE=not-found
+rm -rf "$TARI_BASE_DIR" "$FAKE_ACCOUNT_DIR"
+mkdir -p "$FAKE_ACCOUNT_DIR"
+rm -f "$FAKE_FAUCET_CLAIMS" "$FAKE_CURL_URLS" "$GHOSTLINE_DEMO_READY_FILE"
+export FAKE_WALLETD_MODE=running
+export FAKE_CREATE_MODE=recovered
+set +e
+PATH="$tmp_root:$PATH" bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/faucet.stdout" 2>"$tmp_root/faucet.stderr"
+faucet_status=$?
+set -e
+if [ "$faucet_status" -ne 0 ]; then
+    echo "expected startup to claim the faucet when the fee component is missing" >&2
+    cat "$tmp_root/faucet.stderr" >&2
+    exit 1
+fi
+if ! grep -Fxq 'relay-fees 100000' "$FAKE_FAUCET_CLAIMS"; then
+    echo "expected one faucet claim for the fee account at the reviewed fee cap" >&2
+    cat "$FAKE_FAUCET_CLAIMS" >&2
+    exit 1
+fi
+if [ "$(wc -l < "$FAKE_FAUCET_CLAIMS")" -ne 1 ]; then
+    echo "expected the faucet to be claimed once" >&2
+    exit 1
+fi
+if ! grep -Fq "/substates/$FAKE_COMPONENT_ADDRESS" "$FAKE_CURL_URLS"; then
+    echo "expected an indexer substate check for the fee component" >&2
+    exit 1
+fi
+if ! grep -Fq 'claiming the Esmeralda faucet' "$tmp_root/faucet.stderr"; then
+    echo "expected startup to say it is claiming the faucet" >&2
+    exit 1
+fi
+if [ ! -f "$GHOSTLINE_DEMO_READY_FILE" ]; then
+    echo "expected the relay to become ready after the fee component is up" >&2
+    exit 1
+fi
+
+rm -f "$FAKE_FAUCET_CLAIMS" "$FAKE_CURL_URLS" "$GHOSTLINE_DEMO_READY_FILE"
+export FAKE_INDEXER_MODE=up
+set +e
+PATH="$tmp_root:$PATH" bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/faucet-up.stdout" 2>"$tmp_root/faucet-up.stderr"
+faucet_up_status=$?
+set -e
+if [ "$faucet_up_status" -ne 0 ]; then
+    echo "expected startup to skip the faucet when the fee component is already up" >&2
+    cat "$tmp_root/faucet-up.stderr" >&2
+    exit 1
+fi
+if [ -s "$FAKE_FAUCET_CLAIMS" ]; then
+    echo "expected no faucet claim when the fee component is already up" >&2
+    exit 1
+fi
+
+rm -f "$FAKE_FAUCET_CLAIMS" "$FAKE_CURL_URLS" "$GHOSTLINE_DEMO_READY_FILE"
+export FAKE_INDEXER_MODE=down
+set +e
+PATH="$tmp_root:$PATH" bash "$repo_root/deploy/start-relay.sh" >"$tmp_root/faucet-down.stdout" 2>"$tmp_root/faucet-down.stderr"
+faucet_down_status=$?
+set -e
+if [ "$faucet_down_status" -eq 0 ]; then
+    echo "expected startup to stop when the fee component is down" >&2
+    exit 1
+fi
+if [ -s "$FAKE_FAUCET_CLAIMS" ]; then
+    echo "expected no faucet claim when the fee component is down" >&2
+    exit 1
+fi
+if [ -f "$GHOSTLINE_DEMO_READY_FILE" ]; then
+    echo "expected the relay to stay unready when the fee component is down" >&2
     exit 1
 fi
 

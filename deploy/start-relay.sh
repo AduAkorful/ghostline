@@ -141,6 +141,117 @@ account_address() {
     "$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" \
         --name "$1" | sed -n 's/^address=/account_address=/p'
 }
+
+# `accounts.create_or_get` writes the wallet database only. walletd 0.47
+# `accounts.create_free_test_coins` publishes the component and takes the Esmeralda
+# faucet (1,000 TARI), paying the fee from that new account. A stealth transfer to
+# the public address does not create the component. One claim per account key.
+fee_component_presence() {
+    component=$1
+    body_file="$wallet_base/.ghostline-fee-substate.$$"
+    indexer=${GHOSTLINE_INDEXER_URL%/}
+    http_code=$(curl --silent --show-error --max-time 30 \
+        --output "$body_file" --write-out '%{http_code}' \
+        "$indexer/substates/$component" || true)
+    if [ "$http_code" = 200 ]; then
+        rm -f "$body_file"
+        printf 'up\n'
+        return 0
+    fi
+    if [ "$http_code" = 404 ] && grep -q 'is down' "$body_file"; then
+        rm -f "$body_file"
+        printf 'down\n'
+        return 0
+    fi
+    if [ "$http_code" = 404 ] && grep -q 'not found' "$body_file"; then
+        rm -f "$body_file"
+        printf 'missing\n'
+        return 0
+    fi
+    echo "indexer substate check for the fee component failed (HTTP ${http_code:-none})" >&2
+    rm -f "$body_file"
+    return 1
+}
+
+claim_fee_faucet() {
+    fee_claim_cap=${GHOSTLINE_DEMO_OPEN_MAX_FEE:-100000}
+    case "$fee_claim_cap" in
+        ''|*[!0-9]*|0)
+            echo 'GHOSTLINE_DEMO_OPEN_MAX_FEE must be a positive integer of micro-units' >&2
+            return 1
+            ;;
+    esac
+    claim_error="$wallet_base/.ghostline-faucet-claim-error.$$"
+    if "$cli_bin" wallet faucet-claim --url "$GHOSTLINE_WALLET_URL" \
+        --name "$1" --max-fee "$fee_claim_cap" 2>"$claim_error"; then
+        rm -f "$claim_error"
+        return 0
+    fi
+    if grep -F 'already claimed' "$claim_error" >/dev/null; then
+        echo 'fee account has already claimed the faucet; waiting for its component' >&2
+        rm -f "$claim_error"
+        return 0
+    fi
+    echo 'fee faucet claim failed' >&2
+    cat "$claim_error" >&2
+    rm -f "$claim_error"
+    return 1
+}
+
+publish_fee_component_if_missing() {
+    account_text=$("$cli_bin" wallet account-get --url "$GHOSTLINE_WALLET_URL" --name "$1") || return 1
+    if ! printf '%s\n' "$account_text" | grep -q '^component_address='; then
+        # Test doubles that only print address= have no on-chain component to publish.
+        echo 'wallet account-get did not report component_address; skipping faucet publish' >&2
+        return 0
+    fi
+    component=$(printf '%s\n' "$account_text" | sed -n 's/^component_address=//p')
+    if ! printf '%s\n' "$component" | grep -Eq '^component_[0-9a-fA-F]{64}$'; then
+        echo 'fee account component address is not an Ootle component id' >&2
+        return 1
+    fi
+    claimed=no
+    attempts=0
+    poll_limit=${GHOSTLINE_FEE_COMPONENT_POLL_LIMIT:-60}
+    poll_delay=${GHOSTLINE_FEE_COMPONENT_POLL_DELAY_SECS:-2}
+    case "$poll_limit" in
+        ''|*[!0-9]*|0) echo 'GHOSTLINE_FEE_COMPONENT_POLL_LIMIT must be a positive integer' >&2; return 1 ;;
+    esac
+    case "$poll_delay" in
+        ''|*[!0-9]*) echo 'GHOSTLINE_FEE_COMPONENT_POLL_DELAY_SECS must be a nonnegative integer' >&2; return 1 ;;
+    esac
+    while :; do
+        presence=$(fee_component_presence "$component") || return 1
+        case "$presence" in
+            up)
+                echo "fee component is on chain" >&2
+                return 0
+                ;;
+            down)
+                echo 'fee component is down; refusing another faucet claim' >&2
+                return 1
+                ;;
+            missing)
+                if [ "$claimed" != yes ]; then
+                    echo 'fee component is not on chain; claiming the Esmeralda faucet' >&2
+                    claim_fee_faucet "$1" || return 1
+                    claimed=yes
+                    continue
+                fi
+                ;;
+            *)
+                echo 'fee component indexer check returned an unknown result' >&2
+                return 1
+                ;;
+        esac
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge "$poll_limit" ]; then
+            echo 'fee component was still missing after the faucet claim' >&2
+            return 1
+        fi
+        sleep "$poll_delay"
+    done
+}
 account_ensure() {
     if [ "${3:-}" = yes ]; then
         "$cli_bin" wallet account-ensure --url "$GHOSTLINE_WALLET_URL" \
@@ -251,6 +362,10 @@ if [ -z "$fee_address" ]; then
     echo 'wallet account-get did not return a public fee-account address' >&2
     exit 1
 fi
+
+# Do not mark the relay ready while pay_fee would 404. A missing component_address
+# line is the startup-test double; the real CLI always prints one.
+publish_fee_component_if_missing "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME"
 
 # Atomically tell the HTTP health route that both named wallet accounts are ready.
 ready_file_tmp="$ready_file.tmp.$$"

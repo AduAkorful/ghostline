@@ -666,6 +666,20 @@ enum WalletCommand {
         #[arg(long)]
         is_default: bool,
     },
+    /// Publish an account that is not on chain and fund it from the Esmeralda faucet.
+    ///
+    /// Calls walletd 0.47 `accounts.create_free_test_coins`. The handler creates the
+    /// component, takes the faucet's fixed 1,000 TARI, and pays `max_fee` from that new
+    /// account. One claim per account key. The claim and its fee are public.
+    FaucetClaim {
+        #[arg(long, default_value = "http://127.0.0.1:5100")]
+        url: String,
+        #[arg(long)]
+        name: String,
+        /// Maximum µT fee paid from the new account. The hosted relay uses 100000.
+        #[arg(long)]
+        max_fee: u64,
+    },
     /// Print a wallet account and its `owner_key_id` (`accounts.get`).
     AccountGet {
         #[arg(long, default_value = "http://127.0.0.1:5100")]
@@ -1181,6 +1195,20 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|e| e.to_string())?;
                 println!("derived_keys={index}");
                 println!("associated_resource={resource}");
+            }
+            WalletCommand::FaucetClaim { url, name, max_fee } => {
+                if name.trim().is_empty() {
+                    return Err("faucet claim requires an account name".into());
+                }
+                if max_fee == 0 {
+                    return Err("faucet claim max fee must be greater than zero".into());
+                }
+                let wallet = connect_wallet(&url).await?;
+                let claimed = wallet
+                    .claim_faucet(name.trim(), max_fee)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                print_faucet_claim(&claimed)?;
             }
             WalletCommand::AccountGet { url, name } => {
                 let wallet = connect_wallet(&url).await?;
@@ -3087,6 +3115,39 @@ fn load_utxo(
     ))
 }
 
+fn print_faucet_claim(value: &serde_json::Value) -> Result<(), String> {
+    let transaction_id = value
+        .get("transaction_id")
+        .ok_or("faucet claim response has no transaction_id")?;
+    let transaction_id = match transaction_id {
+        serde_json::Value::String(text) if !text.is_empty() => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        _ => return Err("faucet claim transaction_id is not a transaction id".into()),
+    };
+    println!("transaction_id={transaction_id}");
+    if let Some(fee) = value.get("fee").and_then(serde_json::Value::as_u64) {
+        println!("fee={fee}");
+    }
+    match value.get("amount") {
+        Some(serde_json::Value::String(amount)) => println!("amount={amount}"),
+        Some(serde_json::Value::Number(amount)) => println!("amount={amount}"),
+        Some(_) => return Err("faucet claim amount is not a number".into()),
+        None => {}
+    }
+    let result = value.get("result").unwrap_or(&serde_json::Value::Null);
+    if execution_accepted(result) {
+        println!("result=Accept");
+        Ok(())
+    } else {
+        let label = result
+            .get("result")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|map| map.keys().next().cloned())
+            .unwrap_or_else(|| "missing".to_string());
+        Err(format!("faucet claim did not Accept ({label})"))
+    }
+}
+
 fn print_wallet_account(got: &ghostline_net::AccountWithAddress) {
     if let Some(name) = &got.account.name {
         println!("name={name}");
@@ -3227,6 +3288,7 @@ async fn submit_channel_open(
     Ok(submitted.transaction_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn submit_pinned_channel_open(
     wallet: &WalletClient,
     record: &channel_file::ChannelFile,
@@ -3658,6 +3720,26 @@ fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn faucet_claim_accepts_only_an_accept_finalize() {
+        let accepted = serde_json::json!({
+            "transaction_id": "abc",
+            "fee": 100000,
+            "amount": "1000000000",
+            "result": { "result": { "Accept": { "up_substates": [] } } }
+        });
+        assert!(print_faucet_claim(&accepted).is_ok());
+        let rejected = serde_json::json!({
+            "transaction_id": "abc",
+            "result": { "result": { "Reject": "nope" } }
+        });
+        assert!(
+            print_faucet_claim(&rejected)
+                .unwrap_err()
+                .contains("did not Accept")
+        );
+    }
 
     struct AccountRpcState {
         name: String,
