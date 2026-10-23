@@ -307,6 +307,27 @@ fn keys_list_has_index(entries: &[Value], index: u64) -> bool {
     })
 }
 
+fn keys_list_max_index(entries: &[Value]) -> Option<u64> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Value::Array(row) => row.first().and_then(derived_key_index),
+            other => derived_key_index(other),
+        })
+        .max()
+}
+
+/// `KeysCreateResponse` is `{ "id": <index>, "public_key": "<hex>" }`.
+fn derived_public_key_response(resp: &Value, index: u64) -> Option<String> {
+    if resp.get("id").and_then(Value::as_u64) != Some(index) {
+        return None;
+    }
+    resp.get("public_key")
+        .and_then(Value::as_str)
+        .filter(|key| key.len() == 64 && key.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(str::to_owned)
+}
+
 fn derived_key_index(key_id: &Value) -> Option<u64> {
     key_id
         .get("Derived")
@@ -904,13 +925,39 @@ impl WalletClient {
             .await
     }
 
+    /// `keys.create` with `specific_index`: the public key derived at `index` on `branch`.
+    ///
+    /// walletd 0.47 (`handlers/keys.rs` `handle_create`) only derives for a specific index;
+    /// it does not add a key-manager row or move the branch's next index.
+    pub async fn derived_public_key(&self, branch: &str, index: u64) -> Result<String, NetError> {
+        let resp: Value = self
+            .rpc(
+                KEYS_CREATE,
+                serde_json::json!({ "branch": branch, "specific_index": index }),
+            )
+            .await?;
+        derived_public_key_response(&resp, index).ok_or_else(|| NetError::Decode {
+            path: KEYS_CREATE.into(),
+            details: format!("keys.create did not return the {branch} key at index {index}"),
+        })
+    }
+
     /// Derive `account` / `view_only_key` through `index` so the wallet can scan and spend.
     ///
     /// `accounts.create --key-index 1` does not allocate those key-manager rows. A faucet
     /// stealth UTXO to that Ootle address stays invisible until this runs.
     pub async fn ensure_derived_key(&self, branch: &str, index: u64) -> Result<(), NetError> {
         for _ in 0..=index {
-            if keys_list_has_index(&self.keys_list(branch).await?, index) {
+            let keys = self.keys_list(branch).await?;
+            if keys_list_has_index(&keys, index) {
+                return Ok(());
+            }
+            // `keys.create` allocates one past the highest row. Seed recovery can leave only a
+            // later row (Render 2026-10-23: active account key 3, no row 2), so allocating would
+            // never reach `index`. Recovery already scans restored accounts without these rows;
+            // confirm the key derives instead of burning indices.
+            if keys_list_max_index(&keys).is_some_and(|max| max > index) {
+                self.derived_public_key(branch, index).await?;
                 return Ok(());
             }
             self.keys_create(branch).await?;
@@ -1162,6 +1209,29 @@ mod tests {
         assert!(keys_list_has_index(&keys, 1));
         assert!(!keys_list_has_index(&keys, 2));
         assert_eq!(derived_key_index(&keys[1].as_array().unwrap()[0]), Some(1));
+        assert_eq!(keys_list_max_index(&keys), Some(1));
+        assert_eq!(keys_list_max_index(&[]), None);
+    }
+
+    #[test]
+    fn recovered_branch_with_only_a_later_row_is_detected() {
+        // Render 2026-10-23: seed recovery set the active account key to 3 with no row 2.
+        let keys: Vec<Value> = serde_json::from_value(serde_json::json!([
+            [{"Derived":{"index":3,"key_branch":"account"}}, "dd", true]
+        ]))
+        .unwrap();
+        assert!(!keys_list_has_index(&keys, 2));
+        assert!(keys_list_max_index(&keys).is_some_and(|max| max > 2));
+    }
+
+    #[test]
+    fn specific_index_key_response_must_match_the_requested_index() {
+        let key = "ab".repeat(32);
+        let ok = serde_json::json!({ "id": 2, "public_key": key });
+        assert_eq!(derived_public_key_response(&ok, 2), Some(key.clone()));
+        assert_eq!(derived_public_key_response(&ok, 4), None);
+        let short = serde_json::json!({ "id": 2, "public_key": "abcd" });
+        assert_eq!(derived_public_key_response(&short, 2), None);
     }
 
     #[test]

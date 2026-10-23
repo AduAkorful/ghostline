@@ -3967,6 +3967,135 @@ mod tests {
         task.abort();
     }
 
+    /// walletd 0.47 key manager: one row per (branch, index); plain `keys.create` adds
+    /// highest + 1; `specific_index` only derives (`handlers/keys.rs` `handle_create`).
+    async fn key_rpc_fixture(
+        rows: Vec<(&'static str, u64)>,
+    ) -> (
+        WalletClient,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use axum::{Json, Router, routing::post};
+        use std::sync::{Arc, Mutex};
+
+        let rows = Arc::new(Mutex::new(rows));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let rpc_calls = Arc::clone(&calls);
+        let app = Router::new().route(
+            "/json_rpc",
+            post(move |Json(request): Json<serde_json::Value>| {
+                let rows = Arc::clone(&rows);
+                let calls = Arc::clone(&rpc_calls);
+                async move {
+                    let mut rows = rows.lock().unwrap();
+                    let method = request["method"].as_str().unwrap();
+                    let params = &request["params"];
+                    let branch = params["branch"].as_str().unwrap_or_default().to_owned();
+                    let key = |index: u64| format!("{index:02x}").repeat(32);
+                    let result = match method {
+                        "keys.list" => {
+                            calls.lock().unwrap().push(format!("list {branch}"));
+                            let keys: Vec<_> = rows
+                                .iter()
+                                .filter(|(b, _)| *b == branch)
+                                .map(|(b, i)| {
+                                    serde_json::json!([
+                                        {"Derived": {"index": i, "key_branch": b}},
+                                        key(*i),
+                                        false
+                                    ])
+                                })
+                                .collect();
+                            serde_json::json!({ "keys": keys })
+                        }
+                        "keys.create" => match params["specific_index"].as_u64() {
+                            Some(index) => {
+                                calls
+                                    .lock()
+                                    .unwrap()
+                                    .push(format!("derive {branch} {index}"));
+                                serde_json::json!({ "id": index, "public_key": key(index) })
+                            }
+                            None => {
+                                let next = rows
+                                    .iter()
+                                    .filter(|(b, _)| *b == branch)
+                                    .map(|(_, i)| i + 1)
+                                    .max()
+                                    .unwrap_or(0);
+                                let stored: &'static str = if branch == "account" {
+                                    "account"
+                                } else {
+                                    "view_only_key"
+                                };
+                                rows.push((stored, next));
+                                calls
+                                    .lock()
+                                    .unwrap()
+                                    .push(format!("create {branch} {next}"));
+                                serde_json::json!({ "id": next, "public_key": key(next) })
+                            }
+                        },
+                        other => panic!("unexpected wallet RPC {other}"),
+                    };
+                    Json(serde_json::json!({"jsonrpc":"2.0", "id":1, "result":result}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (
+            WalletClient::connect(format!("http://{address}")).unwrap(),
+            calls,
+            task,
+        )
+    }
+
+    #[tokio::test]
+    async fn recovered_branch_past_the_index_is_confirmed_without_allocating_keys() {
+        // Render 2026-10-23 deploy 7b19077: recovery left only account row 3; the opener is 2.
+        let (wallet, calls, task) = key_rpc_fixture(vec![("account", 3)]).await;
+        wallet
+            .ensure_derived_key(ghostline_net::ACCOUNT_KEY_BRANCH, 2)
+            .await
+            .unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["list account", "derive account 2"]);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn missing_branch_rows_are_still_allocated_up_to_the_index() {
+        let (wallet, calls, task) = key_rpc_fixture(Vec::new()).await;
+        wallet
+            .ensure_derived_key(ghostline_net::VIEW_ONLY_KEY_BRANCH, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [
+                "list view_only_key",
+                "create view_only_key 0",
+                "list view_only_key",
+                "create view_only_key 1",
+                "list view_only_key",
+                "create view_only_key 2",
+                "list view_only_key",
+            ]
+        );
+        assert_eq!(
+            wallet
+                .derived_public_key(ghostline_net::VIEW_ONLY_KEY_BRANCH, 2)
+                .await
+                .unwrap(),
+            "02".repeat(32)
+        );
+        task.abort();
+    }
+
     #[test]
     fn channel_settle_accepts_reviewed_fee_cap() {
         let cli = Cli::try_parse_from([

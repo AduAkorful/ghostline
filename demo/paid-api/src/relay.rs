@@ -2062,10 +2062,24 @@ async fn relay_funding_account(
         .account_get(&config.opener_account)
         .await
         .map_err(|error| error.to_string())?;
-    let view_keys = wallet
-        .keys_list(ghostline_net::VIEW_ONLY_KEY_BRANCH)
+    // Seed recovery may leave no view_only_key row at the opener's index (only a later one), so
+    // derive that exact key rather than searching `keys.list`.
+    let index = account
+        .account
+        .owner_key_id
+        .as_ref()
+        .and_then(|key| key.pointer("/Derived/index"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("relay opener account omitted its key index")?;
+    let view_public = wallet
+        .derived_public_key(ghostline_net::VIEW_ONLY_KEY_BRANCH, index)
         .await
         .map_err(|error| error.to_string())?;
+    let view_keys = [serde_json::json!([
+        { "Derived": { "index": index, "key_branch": ghostline_net::VIEW_ONLY_KEY_BRANCH } },
+        view_public,
+        false,
+    ])];
     validate_relay_claim_key(&account, &view_keys, &config.claim_secret)?;
     Ok(account)
 }
