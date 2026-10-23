@@ -22,5 +22,6 @@ pub use wallet::{
     DEFAULT_ACCOUNT_SIGNER_JSON, StealthTransfer, StealthTransferRequest, TransferFeeParams,
     UtxoInputSelection, VIEW_ONLY_KEY_BRANCH, WalletAccount, WalletClient, WalletDryRunResponse,
     WalletStealthUtxo, WalletSubmitRequest, WalletSubmitResponse, account_name, channel_open_utxo,
-    derived_account_key_id, execution_accepted, settle_fee_signers, stealth_utxos_from_wallet_tx,
+    derived_account_key_id, execution_accepted, funding_output_spend_gate, settle_fee_signers,
+    stealth_utxos_from_wallet_tx,
 };

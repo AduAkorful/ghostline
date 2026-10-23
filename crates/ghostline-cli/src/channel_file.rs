@@ -46,6 +46,10 @@ pub struct ChannelFile {
     /// View-key mask of the channel output. Not a wallet seed, but enough to build settle and refund.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deposit_mask_hex: Option<String>,
+    /// Wallet transaction id, written as soon as `accounts.stealth_transfer` accepts the open.
+    /// A later retry resumes this transaction instead of creating another output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_transaction_id: Option<String>,
 }
 
 impl ChannelFile {
@@ -514,6 +518,7 @@ mod tests {
             session: None,
             utxo_json: None,
             deposit_mask_hex: None,
+            open_transaction_id: None,
         };
         file.save(&path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
@@ -547,6 +552,7 @@ mod tests {
             session: None,
             utxo_json: None,
             deposit_mask_hex: Some("55".repeat(32)),
+            open_transaction_id: None,
         };
         let row = ChannelListRow::identity("due.file.json", "aa".repeat(32), &record);
         let text = serde_json::to_string(&row).unwrap();
@@ -624,6 +630,7 @@ mod tests {
             session: None,
             utxo_json: None,
             deposit_mask_hex: Some("55".repeat(32)),
+            open_transaction_id: None,
         }
     }
 }

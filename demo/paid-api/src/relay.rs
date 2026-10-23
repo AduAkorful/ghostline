@@ -14,8 +14,8 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use ghostline_core::{from_hex, to_hex};
 use ghostline_net::{
     IndexerClient, StealthTransfer, StealthTransferRequest, TransactionId, TransferFeeParams,
-    UtxoInputSelection, WalletClient, account_name, execution_accepted, indexed_receipt_status,
-    indexed_transaction_status,
+    UtxoInputSelection, WalletClient, account_name, execution_accepted, funding_output_spend_gate,
+    indexed_receipt_status, indexed_transaction_status,
 };
 use ghostline_paywall::{ChannelStore, PaymentTerms};
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,9 @@ struct RelayRegistryState {
     #[serde(default)]
     refunding_funding: HashSet<String>,
     sessions: HashMap<String, RelaySession>,
+    /// One prepared channel per Sapient funding transaction. A retry resumes it.
+    #[serde(default)]
+    open_attempts: HashMap<String, OpenAttempt>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -82,6 +85,23 @@ pub struct RelayRecord {
     pub channel_refund_tx: Option<String>,
     pub refund_tx: Option<String>,
     pub expiry_epoch: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAttempt {
+    channel_file: PathBuf,
+    ledger_file: PathBuf,
+    service_signer_file: PathBuf,
+    service_output_signer_file: PathBuf,
+    refund_signer_file: PathBuf,
+    service_public_key: String,
+    service_output_public_key: String,
+    refund_public_key: String,
+    refund_address: String,
+    expiry_epoch: u64,
+    payer_root: String,
+    nonce: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,7 +325,7 @@ async fn refund_funding_inner(
     let config = RelayConfig::load()?;
     let (session, received) =
         load_funding_session(state, &config, funding_tx, &request.session_id).await?;
-    if received != config.deposit {
+    if received.amount != config.deposit {
         return Err("the finalized transaction does not contain the exact demo deposit; the relay will not move its funds".into());
     }
     let wallet = connect_wallet(&config).await?;
@@ -732,7 +752,7 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
                 .into(),
         );
     }
-    let (session, _) =
+    let (session, verified) =
         load_funding_session(state, &config, funding_tx, &request.session_id).await?;
     let payer = RistrettoPublicKeyBytes::from_hex(session.payer_public_key.trim())
         .map_err(|error| format!("invalid payer public key: {error}"))?;
@@ -750,6 +770,18 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     if config.expiry_epochs == 0 || config.expiry_epochs > 100 {
         return Err("demo expiry must be between 1 and 100 epochs".into());
     }
+    if let Some(attempt) = state.relay_registry.open_attempt(&funding_id).await {
+        return continue_saved_open(
+            state,
+            &config,
+            &request.session_id,
+            &funding_id,
+            attempt,
+            &verified.commitments,
+        )
+        .await;
+    }
+    require_funding_outputs_spendable(&config, &verified.commitments).await?;
     let max_epoch = current_epoch.checked_add(100).ok_or("max epoch overflow")?;
     let nonce = random_nonce_hex()?;
 
@@ -862,22 +894,94 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     ];
     let init_args = open_args.iter().map(String::as_str).collect::<Vec<_>>();
     run_cli(&config, &init_args).await?;
-    // Persist the spend intent before the money-moving CLI call. If the process exits after
-    // submission but before recording its channel, refund must fail closed rather than spend
-    // another visitor's relay balance to compensate.
+    let attempt = OpenAttempt {
+        channel_file: channel_file.clone(),
+        ledger_file,
+        service_signer_file,
+        service_output_signer_file: output_signer_file,
+        refund_signer_file,
+        service_public_key: service.public_key_hex,
+        service_output_public_key: service_output.public_key_hex,
+        refund_public_key: refund.public_key_hex,
+        refund_address,
+        expiry_epoch,
+        payer_root,
+        nonce,
+    };
+    // The channel file is fixed before the wallet call. A retry resumes this attempt.
+    state
+        .relay_registry
+        .save_open_attempt(&funding_id, attempt.clone())
+        .await?;
     state.relay_registry.mark_opening(&funding_id).await?;
-    let output = run_cli(
+    let output = match run_channel_open(&config, &channel_file, &verified.commitments).await {
+        Ok(output) => output,
+        Err(error) => {
+            return note_open_cli_failure(state, &funding_id, &channel_file, error).await;
+        }
+    };
+    finish_registered_open(
+        state,
         &config,
-        &[
-            "channel",
-            "open",
-            "--file",
-            channel_file.to_str().ok_or("invalid channel file path")?,
-            "--max-fee",
-            &config.open_max_fee.to_string(),
-        ],
+        &request.session_id,
+        &funding_id,
+        &attempt,
+        &output,
     )
-    .await?;
+    .await
+}
+
+async fn continue_saved_open(
+    state: &AppState,
+    config: &RelayConfig,
+    session_id: &str,
+    funding_id: &str,
+    attempt: OpenAttempt,
+    commitments: &[String],
+) -> Result<OpenResponse, String> {
+    let existing = channel_open_tx_id(&attempt.channel_file)?;
+    let output = if let Some(tx) = existing {
+        match indexed_open_outcome(config, &tx).await? {
+            SavedOpen::Finalized => {
+                run_channel_open(config, &attempt.channel_file, commitments).await?
+            }
+            SavedOpen::Rejected(reason) => {
+                state.relay_registry.release_opening(funding_id).await?;
+                return Err(format!(
+                    "channel open {tx} was rejected ({reason}). Refusing to create another output for this funding transaction."
+                ));
+            }
+            SavedOpen::Pending => {
+                return Err(format!(
+                    "channel open {tx} is still pending. Retry this funding transaction without sending another deposit."
+                ));
+            }
+        }
+    } else {
+        if let Err(error) = require_funding_outputs_spendable(config, commitments).await {
+            state.relay_registry.release_opening(funding_id).await?;
+            return Err(error);
+        }
+        state.relay_registry.mark_opening(funding_id).await?;
+        match run_channel_open(config, &attempt.channel_file, commitments).await {
+            Ok(output) => output,
+            Err(error) => {
+                return note_open_cli_failure(state, funding_id, &attempt.channel_file, error)
+                    .await;
+            }
+        }
+    };
+    finish_registered_open(state, config, session_id, funding_id, &attempt, &output).await
+}
+
+async fn finish_registered_open(
+    state: &AppState,
+    config: &RelayConfig,
+    session_id: &str,
+    funding_id: &str,
+    attempt: &OpenAttempt,
+    output: &str,
+) -> Result<OpenResponse, String> {
     let channel_id = output
         .lines()
         .find_map(|line| line.strip_prefix("channel_id="))
@@ -890,9 +994,9 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
         .ok_or("channel open completed without a transaction id")?
         .trim()
         .to_owned();
-    let file_json = std::fs::read(&channel_file).map_err(|error| error.to_string())?;
+    let file_json = std::fs::read(&attempt.channel_file).map_err(|error| error.to_string())?;
     let file: ChannelCliFile = serde_json::from_slice(&file_json).map_err(|e| e.to_string())?;
-    let ledger = ChannelStore::open(&ledger_file).map_err(|error| error.to_string())?;
+    let ledger = ChannelStore::open(&attempt.ledger_file).map_err(|error| error.to_string())?;
     let terms = PaymentTerms::new(
         RistrettoPublicKeyBytes::from_hex(&file.service_hex).map_err(|e| e.to_string())?,
         file.expiry_epoch,
@@ -900,7 +1004,7 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
     )
     .map_err(|error| error.to_string())?
     .with_service_output_key(
-        RistrettoPublicKeyBytes::from_hex(&service_output.public_key_hex)
+        RistrettoPublicKeyBytes::from_hex(&attempt.service_output_public_key)
             .map_err(|error| error.to_string())?,
     );
     state
@@ -912,50 +1016,156 @@ async fn open_inner(state: &AppState, request: OpenRequest) -> Result<OpenRespon
         .insert(
             channel_id.clone(),
             RelayRecord {
-                channel_file,
-                service_signer_file,
-                service_output_signer_file: output_signer_file,
-                refund_signer_file,
+                channel_file: attempt.channel_file.clone(),
+                service_signer_file: attempt.service_signer_file.clone(),
+                service_output_signer_file: attempt.service_output_signer_file.clone(),
+                refund_signer_file: attempt.refund_signer_file.clone(),
                 refund_public_key: file
                     .refund_hex
                     .clone()
                     .ok_or("channel file omitted refund key")?,
                 service_public_key: file.service_hex.clone(),
-                service_output_public_key: service_output.public_key_hex.clone(),
-                refund_address,
+                service_output_public_key: attempt.service_output_public_key.clone(),
+                refund_address: attempt.refund_address.clone(),
                 settlement_tx: None,
                 channel_refund_tx: None,
                 refund_tx: None,
-                expiry_epoch,
+                expiry_epoch: attempt.expiry_epoch,
             },
         )
         .await?;
     let response = OpenResponse {
         channel_id,
-        payer_root,
-        nonce,
+        payer_root: attempt.payer_root.clone(),
+        nonce: attempt.nonce.clone(),
         network_tag: config.network_tag,
         deposit: config.deposit,
-        expiry_epoch,
+        expiry_epoch: attempt.expiry_epoch,
         service_public_key: file.service_hex,
-        service_output_public_key: service_output.public_key_hex,
-        funding_transaction_id: funding_id.clone(),
+        service_output_public_key: attempt.service_output_public_key.clone(),
+        funding_transaction_id: funding_id.to_owned(),
         open_transaction_id: open_tx_id,
         custody: "Custodial testnet relay: the relay receives the deposit and controls the expiry-refund key.".into(),
         recovery_receipt: None,
     };
     state
         .relay_registry
-        .mark_funding(&funding_id, response.clone())
+        .mark_funding(funding_id, response.clone())
         .await?;
-    state
-        .relay_registry
-        .remove_session(&request.session_id)
-        .await?;
-
-    warn_if_fee_float_low(&config).await;
-
+    state.relay_registry.remove_session(session_id).await?;
+    warn_if_fee_float_low(config).await;
     Ok(response)
+}
+
+async fn note_open_cli_failure(
+    state: &AppState,
+    funding_id: &str,
+    channel_file: &Path,
+    error: String,
+) -> Result<OpenResponse, String> {
+    if channel_open_tx_id(channel_file).ok().flatten().is_none() {
+        state.relay_registry.release_opening(funding_id).await?;
+    }
+    Err(error)
+}
+
+fn channel_open_tx_id(path: &Path) -> Result<Option<String>, String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("channel file: {error}"))?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| format!("channel file: {error}"))?;
+    Ok(value
+        .get("open_transaction_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|tx| !tx.is_empty())
+        .map(str::to_owned))
+}
+
+enum SavedOpen {
+    Finalized,
+    Pending,
+    Rejected(String),
+}
+
+async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpen, String> {
+    let transaction_id = TransactionId::from_hex(tx).map_err(|error| error.to_string())?;
+    let indexer = IndexerClient::connect(&config.indexer_url).map_err(|error| error.to_string())?;
+    match indexer.transaction(transaction_id).await {
+        Ok(entry) => match indexed_transaction_status(&entry) {
+            "Finalized" => Ok(SavedOpen::Finalized),
+            "Pending" | "Unknown" => Ok(SavedOpen::Pending),
+            "FinalizedAbort" | "Rejected" => Ok(SavedOpen::Rejected(open_rejection_reason(&entry))),
+            other => Err(format!(
+                "indexer returned an unrecognized transaction status: {other}"
+            )),
+        },
+        Err(error) if indexer_lookup_missing(&error) => {
+            match indexer.transaction_receipt(transaction_id).await {
+                Ok(receipt) => match indexed_receipt_status(&receipt) {
+                    "Finalized" => Ok(SavedOpen::Finalized),
+                    "FinalizedAbort" | "Rejected" => {
+                        Ok(SavedOpen::Rejected("Ootle rejected the transaction".into()))
+                    }
+                    _ => Ok(SavedOpen::Pending),
+                },
+                Err(error) if indexer_lookup_missing(&error) => Ok(SavedOpen::Pending),
+                Err(error) => Err(error.to_string()),
+            }
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn open_rejection_reason(entry: &serde_json::Value) -> String {
+    let reason = entry
+        .get("transaction")
+        .unwrap_or(entry)
+        .get("rejected_reason");
+    match reason {
+        Some(serde_json::Value::String(text)) if !text.is_empty() => text.clone(),
+        Some(other) if !other.is_null() => other.to_string(),
+        _ => "Ootle rejected the transaction".to_string(),
+    }
+}
+
+async fn require_funding_outputs_spendable(
+    config: &RelayConfig,
+    commitments: &[String],
+) -> Result<(), String> {
+    let wallet = connect_wallet(config).await?;
+    let utxos = wallet
+        .stealth_utxos_list(
+            &config.opener_account,
+            &STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
+        )
+        .await
+        .map_err(|error| format!("could not list opener stealth outputs: {error}"))?;
+    funding_output_spend_gate(&utxos, commitments)
+}
+
+async fn run_channel_open(
+    config: &RelayConfig,
+    channel_file: &Path,
+    commitments: &[String],
+) -> Result<String, String> {
+    let file = channel_file
+        .to_str()
+        .ok_or("invalid channel file path")?
+        .to_owned();
+    let fee = config.open_max_fee.to_string();
+    let mut args = vec![
+        "channel".to_string(),
+        "open".into(),
+        "--file".into(),
+        file,
+        "--max-fee".into(),
+        fee,
+    ];
+    for commitment in commitments {
+        args.push("--funding-commitment".into());
+        args.push(commitment.clone());
+    }
+    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    run_cli(config, &refs).await
 }
 
 async fn restore_bundle(
@@ -1166,6 +1376,7 @@ struct FundingBinding {
 struct VerifiedFunding {
     amount: u64,
     binding: FundingBinding,
+    commitments: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -1223,7 +1434,7 @@ async fn load_funding_session(
     config: &RelayConfig,
     funding_tx: TransactionId,
     session_id: &str,
-) -> Result<(RelaySession, u64), String> {
+) -> Result<(RelaySession, VerifiedFunding), String> {
     let verified = verify_relay_funding(config, funding_tx, session_id).await?;
     if let Some(session) = state.relay_registry.session(session_id).await {
         if let Some(payer) = verified.binding.payer_public_key.as_deref()
@@ -1236,15 +1447,17 @@ async fn load_funding_session(
         {
             return Err("funding memo refund address does not match the relay session".into());
         }
-        return Ok((session, verified.amount));
+        return Ok((session, verified));
     }
     let payer = verified
         .binding
         .payer_public_key
+        .clone()
         .ok_or_else(|| MISSING_SESSION_HINT.to_owned())?;
     let refund = verified
         .binding
         .refund_address
+        .clone()
         .ok_or_else(|| MISSING_SESSION_HINT.to_owned())?;
     let session = RelaySession {
         payer_public_key: payer,
@@ -1255,7 +1468,7 @@ async fn load_funding_session(
         .relay_registry
         .create_session(session_id.to_owned(), session.clone())
         .await?;
-    Ok((session, verified.amount))
+    Ok((session, verified))
 }
 
 fn indexer_lookup_missing(error: &impl std::fmt::Display) -> bool {
@@ -1319,7 +1532,11 @@ fn verify_funding_from_listed_utxos(
         ));
     }
     let (amount, binding) = matches.pop().expect("exactly one matching unspent deposit");
-    Ok(VerifiedFunding { amount, binding })
+    Ok(VerifiedFunding {
+        amount,
+        binding,
+        commitments: Vec::new(),
+    })
 }
 
 fn verify_unblinded_funding_outputs(
@@ -1328,6 +1545,7 @@ fn verify_unblinded_funding_outputs(
     session_id: &str,
 ) -> Result<VerifiedFunding, String> {
     let mut relay_values = Vec::new();
+    let mut commitments = Vec::new();
     let mut candidate_count = 0usize;
     let mut binding = None;
     for output in outputs.iter().filter(|output| output.auth != "Script") {
@@ -1341,6 +1559,7 @@ fn verify_unblinded_funding_outputs(
         candidate_count += 1;
         if let Ok(recovered) = unblind_wallet_output(output, config, session_id) {
             relay_values.push(recovered.recovered.value);
+            commitments.push(output.commitment.clone());
             if binding.is_none() {
                 binding = Some(recovered.binding);
             }
@@ -1376,6 +1595,7 @@ fn verify_unblinded_funding_outputs(
             "Sapient funding is finalized, but the relay could not decrypt a session-binding memo"
                 .to_owned()
         })?,
+        commitments,
     })
 }
 
@@ -2067,6 +2287,27 @@ impl RelayRegistry {
         self.0.lock().await.opening_funding.contains(tx)
     }
 
+    async fn open_attempt(&self, tx: &str) -> Option<OpenAttempt> {
+        self.0.lock().await.open_attempts.get(tx).cloned()
+    }
+
+    async fn save_open_attempt(&self, tx: &str, attempt: OpenAttempt) -> Result<(), String> {
+        let mut state = self.0.lock().await;
+        if state.funding_refunds.contains_key(tx) || state.refunding_funding.contains(tx) {
+            return Err(
+                "this funding transaction is being refunded or has already been refunded".into(),
+            );
+        }
+        state.open_attempts.insert(tx.to_owned(), attempt);
+        self.persist_locked(&state)
+    }
+
+    async fn release_opening(&self, tx: &str) -> Result<(), String> {
+        let mut state = self.0.lock().await;
+        state.opening_funding.remove(tx);
+        self.persist_locked(&state)
+    }
+
     async fn mark_opening(&self, tx: &str) -> Result<(), String> {
         let mut state = self.0.lock().await;
         if state.funding_refunds.contains_key(tx) || state.refunding_funding.contains(tx) {
@@ -2591,6 +2832,60 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[test]
+    fn open_rejection_reason_keeps_the_indexer_text() {
+        let entry = serde_json::json!({
+            "transaction": {
+                "summary": null,
+                "rejected_reason": "Failed to lock inputs: output already exists"
+            }
+        });
+        assert_eq!(
+            open_rejection_reason(&entry),
+            "Failed to lock inputs: output already exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_attempt_survives_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "ghostline-open-attempt-{}-{}",
+            std::process::id(),
+            unix_now()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state_path = root.join("relay-state.json");
+        let registry = RelayRegistry::open(state_path.clone()).await.unwrap();
+        let attempt = OpenAttempt {
+            channel_file: root.join("channel.json"),
+            ledger_file: root.join("channel.ledger.json"),
+            service_signer_file: root.join("service.json"),
+            service_output_signer_file: root.join("output.json"),
+            refund_signer_file: root.join("refund.json"),
+            service_public_key: "aa".into(),
+            service_output_public_key: "bb".into(),
+            refund_public_key: "cc".into(),
+            refund_address: "otl_esm_1refund".into(),
+            expiry_epoch: 9,
+            payer_root: "dd".into(),
+            nonce: "ee".into(),
+        };
+        registry
+            .save_open_attempt("funding", attempt.clone())
+            .await
+            .unwrap();
+        registry.mark_opening("funding").await.unwrap();
+        let restored = RelayRegistry::open(state_path).await.unwrap();
+        let loaded = restored.open_attempt("funding").await.unwrap();
+        assert_eq!(loaded.channel_file, attempt.channel_file);
+        assert_eq!(loaded.payer_root, attempt.payer_root);
+        assert!(restored.is_opening("funding").await);
+        restored.release_opening("funding").await.unwrap();
+        assert!(!restored.is_opening("funding").await);
+        assert!(restored.open_attempt("funding").await.is_some());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

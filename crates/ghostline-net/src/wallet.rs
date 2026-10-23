@@ -372,6 +372,65 @@ impl WalletStealthUtxo {
     }
 }
 
+/// Refuse a hosted open unless `commitments` are the only unspent stealth outputs.
+///
+/// walletd 0.47 `accounts.stealth_transfer` selects inputs with an enum. For a TARI
+/// transfer it merges the fee into that selection, so `ConfidentialOnly` would require
+/// confidential inputs for the deposit and the fee. `PreferConfidential` spends revealed
+/// funds for whatever the stealth outputs do not cover. The hosted relay therefore
+/// submits only when the verified Sapient commitments are the account's entire unspent
+/// stealth set: the deposit input has to be one of those outputs, and another output
+/// cannot be chosen instead.
+pub fn funding_output_spend_gate(utxos: &[Value], commitments: &[String]) -> Result<(), String> {
+    let wanted: Vec<String> = commitments
+        .iter()
+        .map(|commitment| commitment.trim().to_ascii_lowercase())
+        .filter(|commitment| !commitment.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return Err("Sapient funding verification did not record an output commitment".to_string());
+    }
+    if wanted.iter().any(|commitment| {
+        commitment.len() != 64 || !commitment.chars().all(|c| c.is_ascii_hexdigit())
+    }) {
+        return Err("Sapient funding commitment is not 32-byte hex".to_string());
+    }
+    let mut found = vec![false; wanted.len()];
+    let mut other_unspent = 0u64;
+    for utxo in utxos {
+        let status = utxo
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !status.eq_ignore_ascii_case("unspent") {
+            continue;
+        }
+        let blob = serde_json::to_string(utxo)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if let Some(index) = wanted
+            .iter()
+            .position(|commitment| blob.contains(commitment))
+        {
+            found[index] = true;
+        } else {
+            other_unspent = other_unspent.saturating_add(1);
+        }
+    }
+    if found.iter().any(|present| !present) {
+        return Err(
+            "the opener wallet has not discovered this Sapient funding output yet. Retry without sending another deposit."
+                .to_string(),
+        );
+    }
+    if other_unspent > 0 {
+        return Err(format!(
+            "the opener wallet holds {other_unspent} other unspent stealth output(s), so this open could spend those instead of the Sapient deposit. Refusing to broadcast."
+        ));
+    }
+    Ok(())
+}
+
 /// Channel deposit: first `Script` output (`PayTo::Conditions` is stored as Script).
 ///
 /// Wallet-built `accounts.stealth_transfer` opens put that output in `fee_instructions`
@@ -1055,5 +1114,33 @@ mod tests {
         let channel = channel_open_utxo(&utxos).unwrap();
         assert_eq!(channel.auth, "Script");
         assert_eq!(channel.commitment, "c1");
+    }
+
+    #[test]
+    fn funding_spend_gate_requires_only_the_verified_output() {
+        let funding = "ab".repeat(32);
+        let other = "cd".repeat(32);
+        let utxos = vec![serde_json::json!({
+            "status": "Unspent",
+            "address": { "id": funding },
+            "value": "51"
+        })];
+        assert!(funding_output_spend_gate(&utxos, &[funding.clone()]).is_ok());
+
+        let mut extra = utxos.clone();
+        extra.push(serde_json::json!({
+            "status": "Unspent",
+            "address": { "id": other },
+            "value": "51"
+        }));
+        let error = funding_output_spend_gate(&extra, &[funding.clone()]).unwrap_err();
+        assert!(error.contains("other unspent stealth output"));
+
+        let missing = vec![serde_json::json!({
+            "status": "Spent",
+            "address": { "id": funding }
+        })];
+        let error = funding_output_spend_gate(&missing, &[funding]).unwrap_err();
+        assert!(error.contains("has not discovered"));
     }
 }

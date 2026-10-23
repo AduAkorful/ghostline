@@ -18,7 +18,8 @@ use ghostline_net::{
     AccountsCreateRequest, ChannelOpenParams, IndexerClient, StealthTransferRequest,
     SubstatePresence, TransactionEnvelope, TransactionId, UtxoInputSelection, WalletClient,
     WalletStealthUtxo, WalletSubmitRequest, channel_open_utxo, execution_accepted,
-    indexer_result_status, settle_fee_signers, stealth_utxos_from_wallet_tx,
+    funding_output_spend_gate, indexer_result_status, settle_fee_signers,
+    stealth_utxos_from_wallet_tx,
 };
 #[cfg(test)]
 use ghostline_sdk::OutputScan;
@@ -431,6 +432,10 @@ enum ChannelCommand {
         /// Maximum µT fee. Required for a live open; dry-runs default to 100000 µT.
         #[arg(long)]
         max_fee: Option<u64>,
+        /// Commitment hex of a stealth output this open must spend. Repeat for each output.
+        /// The broadcast is refused unless these are the account's only unspent stealth outputs.
+        #[arg(long = "funding-commitment")]
+        funding_commitment: Vec<String>,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
     },
@@ -2077,6 +2082,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 session,
                 utxo_json: None,
                 deposit_mask_hex: None,
+                open_transaction_id: None,
             };
             file.save(&out)?;
             println!("wrote={}", out.display());
@@ -2091,75 +2097,11 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             file: path,
             dry_run,
             max_fee,
+            funding_commitment,
             timeout_secs,
         } => {
-            let max_fee = open_max_fee(dry_run, max_fee)?;
-            let mut record = channel_file::ChannelFile::load(&path)?;
-            let open = open_args_from(&record);
-            let channel = seal::channel(open_spec(&open)?)?;
-            if !dry_run {
-                secrets::load_secret(None, secrets::CLAIM_SECRET_ENV, "wallet claim secret")?;
-            }
-            let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
-            let resource = seal::parse_resource(None)?;
-            let wallet = connect_wallet(&record.opener_wallet_url).await?;
-            let destination = wallet
-                .default_account_address()
-                .await
-                .map_err(|e| e.to_string())?;
-            let request = StealthTransferRequest::channel_open(ChannelOpenParams {
-                account_name: record.opener_account.clone(),
-                destination_address: destination,
-                resource_address: resource.to_string(),
-                deposit: open.deposit,
-                pay_to,
-                input_selection: "PreferConfidential".parse::<UtxoInputSelection>()?,
-                fee_input_selection: "PreferRevealed".parse::<UtxoInputSelection>()?,
-                max_fee,
-                dry_run,
-            });
-            seal::print_ids(&channel);
-            let submitted = wallet
-                .stealth_transfer(&request)
-                .await
-                .map_err(|e| wallet_open_error(e.to_string()))?;
-            println!("transaction_id={}", submitted.transaction_id);
-            if dry_run {
-                print_wallet_open_fee_quote(&wallet, submitted.transaction_id).await?;
-                println!("max_fee={max_fee}");
-                println!("dry_run=true");
-                println!("utxo dump needs an Accepted live open (dry-run is not stored)");
-                return Ok(());
-            }
-            print_wait(&wallet, submitted.transaction_id, timeout_secs).await?;
-            let utxo_path = path.with_extension("utxo.json");
-            dump_wallet_utxos(&wallet, submitted.transaction_id, Some(&utxo_path)).await?;
-            let recovered = recover_utxo(RecoverUtxoArgs {
-                utxo_json: Some(utxo_path.clone()),
-                commitment_hex: None,
-                nonce_hex: None,
-                encrypted_hex: None,
-                tag: None,
-                resource_hex: None,
-                secret_hex: None,
-                ootle_network: &record.ootle_network,
-            })?;
-            if recovered.value != record.deposit {
-                return Err(format!(
-                    "unblinded value {} does not match deposit {}",
-                    recovered.value, record.deposit
-                ));
-            }
-            record.utxo_json = Some(utxo_path);
-            record.deposit_mask_hex = Some(to_hex(recovered.mask.as_bytes()));
-            record.save(&path)?;
-            println!("value={}", recovered.value);
-            println!("mask_stored=true");
-            let (session, created, cumulative) = ensure_payer_session(&path)?;
-            println!("session={}", session.display());
-            println!("session_created={created}");
-            println!("cumulative={cumulative}");
-            println!("wrote={}", path.display());
+            open_channel_from_file(&path, dry_run, max_fee, &funding_commitment, timeout_secs)
+                .await?;
         }
         ChannelCommand::Bind {
             file: path,
@@ -3159,6 +3101,194 @@ fn print_wallet_account(got: &ghostline_net::AccountWithAddress) {
     println!("address={}", got.address_display());
 }
 
+async fn open_channel_from_file(
+    path: &std::path::Path,
+    dry_run: bool,
+    max_fee: Option<u64>,
+    funding_commitments: &[String],
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let ceiling = open_max_fee(dry_run, max_fee)?;
+    let mut record = channel_file::ChannelFile::load(path)?;
+    let channel = seal::channel(open_spec(&open_args_from(&record))?)?;
+    seal::print_ids(&channel);
+    if !dry_run {
+        secrets::load_secret(None, secrets::CLAIM_SECRET_ENV, "wallet claim secret")?;
+        if let Some(existing) = record.open_transaction_id.clone() {
+            println!("transaction_id={existing}");
+            let wallet = connect_wallet(&record.opener_wallet_url).await?;
+            let transaction_id =
+                TransactionId::from_hex(&existing).map_err(|error| error.to_string())?;
+            return store_opened_channel(&mut record, path, &wallet, transaction_id, timeout_secs)
+                .await;
+        }
+    }
+    let resource = seal::parse_resource(None)?.to_string();
+    let wallet = connect_wallet(&record.opener_wallet_url).await?;
+    let destination = wallet
+        .default_account_address()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !funding_commitments.is_empty() {
+        let listed = wallet
+            .stealth_utxos_list(&record.opener_account, &resource)
+            .await
+            .map_err(|error| {
+                format!("could not list opener stealth outputs before channel open: {error}")
+            })?;
+        funding_output_spend_gate(&listed, funding_commitments)?;
+    }
+    let spend_fee = if dry_run {
+        ceiling
+    } else {
+        let quoted = submit_channel_open(
+            &wallet,
+            &record,
+            &channel,
+            &destination,
+            &resource,
+            ceiling,
+            true,
+        )
+        .await?;
+        let (estimated, required) = read_open_fee_quote(&wallet, quoted).await?;
+        println!("estimated_fee={estimated}");
+        println!("required_fee={required}");
+        let fee = capped_open_fee(required, ceiling)?;
+        println!("max_fee={fee}");
+        fee
+    };
+    if !dry_run && let Some(ledger) = &record.ledger {
+        ensure_channel_ledger(ledger, channel.params())?;
+    }
+    let submitted = submit_channel_open(
+        &wallet,
+        &record,
+        &channel,
+        &destination,
+        &resource,
+        spend_fee,
+        dry_run,
+    )
+    .await?;
+    println!("transaction_id={submitted}");
+    if dry_run {
+        print_wallet_open_fee_quote(&wallet, submitted).await?;
+        println!("max_fee={ceiling}");
+        println!("dry_run=true");
+        println!("utxo dump needs an Accepted live open (dry-run is not stored)");
+        return Ok(());
+    }
+    // Persist before wait. A retry of this file must not build a second output.
+    record.open_transaction_id = Some(submitted.to_string());
+    record.save(path)?;
+    store_opened_channel(&mut record, path, &wallet, submitted, timeout_secs).await
+}
+
+async fn submit_channel_open(
+    wallet: &WalletClient,
+    record: &channel_file::ChannelFile,
+    channel: &ghostline_sdk::Channel,
+    destination: &str,
+    resource: &str,
+    max_fee: u64,
+    dry_run: bool,
+) -> Result<TransactionId, String> {
+    let request = StealthTransferRequest::channel_open(ChannelOpenParams {
+        account_name: record.opener_account.clone(),
+        destination_address: destination.to_string(),
+        resource_address: resource.to_string(),
+        deposit: record.deposit,
+        pay_to: serde_json::json!({ "Conditions": channel.leaves_vec() }),
+        // walletd 0.47 merges the fee into a TARI stealth transfer and locks inputs for
+        // the deposit plus max_fee. ConfidentialOnly cannot pay that fee from a 51 µT
+        // stealth output. The funding-commitment gate is what keeps revealed funds from
+        // becoming the deposit.
+        input_selection: "PreferConfidential".parse()?,
+        fee_input_selection: "PreferRevealed".parse()?,
+        max_fee,
+        dry_run,
+    });
+    let submitted = wallet
+        .stealth_transfer(&request)
+        .await
+        .map_err(|error| wallet_open_error(error.to_string()))?;
+    Ok(submitted.transaction_id)
+}
+
+async fn store_opened_channel(
+    record: &mut channel_file::ChannelFile,
+    path: &std::path::Path,
+    wallet: &WalletClient,
+    transaction_id: TransactionId,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    if let Some(ledger) = &record.ledger {
+        let channel = seal::channel(open_spec(&open_args_from(record))?)?;
+        ensure_channel_ledger(ledger, channel.params())?;
+    }
+    print_wait(wallet, transaction_id, timeout_secs).await?;
+    if record.deposit_mask_hex.is_none() {
+        let utxo_path = path.with_extension("utxo.json");
+        dump_wallet_utxos(wallet, transaction_id, Some(&utxo_path)).await?;
+        let recovered = recover_utxo(RecoverUtxoArgs {
+            utxo_json: Some(utxo_path.clone()),
+            commitment_hex: None,
+            nonce_hex: None,
+            encrypted_hex: None,
+            tag: None,
+            resource_hex: None,
+            secret_hex: None,
+            ootle_network: &record.ootle_network,
+        })?;
+        if recovered.value != record.deposit {
+            return Err(format!(
+                "unblinded value {} does not match deposit {}",
+                recovered.value, record.deposit
+            ));
+        }
+        record.utxo_json = Some(utxo_path);
+        record.deposit_mask_hex = Some(to_hex(recovered.mask.as_bytes()));
+        record.save(path)?;
+        println!("value={}", recovered.value);
+        println!("mask_stored=true");
+    }
+    let (session, created, cumulative) = ensure_payer_session(path)?;
+    println!("session={}", session.display());
+    println!("session_created={created}");
+    println!("cumulative={cumulative}");
+    println!("wrote={}", path.display());
+    Ok(())
+}
+
+fn ensure_channel_ledger(path: &std::path::Path, params: &ChannelParams) -> Result<(), String> {
+    if path.exists() {
+        let store =
+            ghostline_paywall::ChannelStore::open(path).map_err(|error| error.to_string())?;
+        let existing = store.params().map_err(|error| error.to_string())?;
+        if existing != *params {
+            return Err("ledger channel does not match the channel file".into());
+        }
+        return Ok(());
+    }
+    ghostline_paywall::ChannelStore::create(path, params.clone())
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// The stealth-transfer path charges the cap. Submit the dry-run requirement when it fits.
+fn capped_open_fee(required: u64, ceiling: u64) -> Result<u64, String> {
+    if required == 0 {
+        return Err("open fee quote required_fee was zero".into());
+    }
+    if required > ceiling {
+        return Err(format!(
+            "open required fee {required} µT exceeds the reviewed cap of {ceiling} µT"
+        ));
+    }
+    Ok(required)
+}
+
 fn open_max_fee(dry_run: bool, configured: Option<u64>) -> Result<u64, String> {
     match configured {
         Some(0) => Err("max-fee must be greater than zero".into()),
@@ -3178,10 +3308,10 @@ fn wallet_open_error(message: String) -> String {
     }
 }
 
-async fn print_wallet_open_fee_quote(
+async fn read_open_fee_quote(
     wallet: &WalletClient,
     transaction_id: TransactionId,
-) -> Result<(), String> {
+) -> Result<(u64, u64), String> {
     let transaction = wallet
         .transaction_get(transaction_id)
         .await
@@ -3195,6 +3325,14 @@ async fn print_wallet_open_fee_quote(
         .and_then(|result| result.get("total_fees_required"))
         .and_then(serde_json::Value::as_u64)
         .ok_or("open fee quote is missing total_fees_required")?;
+    Ok((estimated, required))
+}
+
+async fn print_wallet_open_fee_quote(
+    wallet: &WalletClient,
+    transaction_id: TransactionId,
+) -> Result<(), String> {
+    let (estimated, required) = read_open_fee_quote(wallet, transaction_id).await?;
     println!("estimated_fee={estimated}");
     println!("required_fee={required}");
     Ok(())
@@ -3577,6 +3715,48 @@ mod tests {
     }
 
     #[test]
+    fn live_open_submits_the_quoted_fee_under_the_cap() {
+        assert_eq!(capped_open_fee(17_952, 100_000).unwrap(), 17_952);
+        assert!(capped_open_fee(0, 100_000).is_err());
+        assert!(
+            capped_open_fee(100_001, 100_000)
+                .unwrap_err()
+                .contains("exceeds the reviewed cap")
+        );
+    }
+
+    #[test]
+    fn channel_open_creates_the_ledger_before_it_can_be_read() {
+        use tari_template_lib::types::Hash32;
+        let (_, public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let params = ChannelParams {
+            network_tag: 2,
+            payer: RistrettoPublicKeyBytes::from_bytes(public.as_bytes()).unwrap(),
+            deposit: 51,
+            payer_root: Hash32::from_array([4u8; 32]),
+            nonce: [5u8; NONCE_LEN],
+        };
+        let path = std::env::temp_dir()
+            .join(format!(
+                "ghostline-open-ledger-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join("channel.ledger.json");
+        ensure_channel_ledger(&path, &params).unwrap();
+        ensure_channel_ledger(&path, &params).unwrap();
+        let loaded = ghostline_paywall::ChannelStore::open(&path).unwrap();
+        assert_eq!(loaded.params().unwrap(), params);
+        let mut other = params.clone();
+        other.deposit = 52;
+        assert!(ensure_channel_ledger(&path, &other).is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn due_close_rejects_a_transaction_max_epoch_in_the_past() {
         assert!(
             ensure_transaction_epoch_valid(12403, 12402)
@@ -3720,6 +3900,7 @@ mod tests {
             session: None,
             utxo_json: None,
             deposit_mask_hex: Some(mask.clone()),
+            open_transaction_id: None,
         }
         .save(&path)
         .unwrap();
