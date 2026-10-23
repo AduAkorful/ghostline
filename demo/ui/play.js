@@ -28,6 +28,14 @@ const LIVE_PENDING_KEY = "ghostline-live-pending";
 const LIVE_CHANNEL_KEY = "ghostline-live-channel";
 const TARI_PROVIDER_READY_EVENT = "tari#initialized";
 const TARI_PROVIDER_TIMEOUT_MS = 5_000;
+// A locked Sapient can leave a request unanswered forever, so wallet lookups are capped.
+const WALLET_LOOKUP_TIMEOUT_MS = 10_000;
+// Funding finality plus the relay open must end in an answer the user can act on.
+const LIVE_OPEN_DEADLINE_MS = 180_000;
+// Above the relay's 45 s funding-discovery wait plus a CLI open.
+const RELAY_OPEN_TIMEOUT_MS = 120_000;
+const RELAY_RETRY_MIN_MS = 10_000;
+const FUNDING_NOT_DISCOVERED = /has not discovered this Sapient funding output/i;
 const configuredRelayUrl = String(window.GHOSTLINE_CONFIG?.relayUrl || "").trim();
 
 function readPendingFunding() {
@@ -356,12 +364,16 @@ function configureLiveRelay() {
 }
 
 async function relayJson(path, options = {}) {
-  const { timeoutMs: timeoutOption, ...fetchOptions } = options;
+  const { timeoutMs: timeoutOption, deadline, ...fetchOptions } = options;
   const method = (fetchOptions.method || "GET").toUpperCase();
   const retryable = method === "GET" || ["/demo/open", "/demo/settle", "/demo/refund", "/demo/recover", "/demo/refund-funding"].some((prefix) => path.startsWith(prefix));
-  const timeoutMs = Number(timeoutOption) > 0 ? Number(timeoutOption) : 100_000;
+  const requestedTimeoutMs = Number(timeoutOption) > 0 ? Number(timeoutOption) : 100_000;
   let response;
   for (let attempt = 0; ; attempt += 1) {
+    // An overall deadline caps every attempt, so the one safe retry cannot double the wait.
+    const remainingMs = deadline ? deadline - Date.now() : requestedTimeoutMs;
+    if (remainingMs <= 0) throw new Error(`The relay did not finish ${path} in time. Retry; no extra wallet transfer was sent.`);
+    const timeoutMs = Math.min(requestedTimeoutMs, remainingMs);
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -379,6 +391,10 @@ async function relayJson(path, options = {}) {
     } finally {
       window.clearTimeout(timeout);
     }
+    if (deadline && deadline - Date.now() < RELAY_RETRY_MIN_MS) {
+      if (!response) throw new Error(`The relay did not answer ${path} in time. Retry; no extra wallet transfer was sent.`);
+      break;
+    }
     status("The relay did not answer. Retrying this safe request once in 3 seconds; your wallet transfer will not be repeated.");
     await new Promise((resolve) => window.setTimeout(resolve, 3000));
   }
@@ -387,7 +403,7 @@ async function relayJson(path, options = {}) {
   try { body = JSON.parse(text); } catch { body = text; }
   if (!response.ok) {
     const detail = typeof body === "string" ? body : body.error || body.message;
-    throw new Error(detail || `Relay returned HTTP ${response.status}`);
+    throw Object.assign(new Error(detail || `Relay returned HTTP ${response.status}`), { status: response.status });
   }
   if (typeof body === "string") throw new Error(body || "Relay returned an empty response.");
   return body;
@@ -444,20 +460,36 @@ function transactionLookupMissing(error) {
   return /not found|HTTP 404/i.test(walletError(error));
 }
 
-async function waitFinalized(transactionId) {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const result = await tariRequest("tari_getTransactionResult", { transactionId });
-      if (result?.Finalized || result?.result?.Finalized) return;
-      if (result?.Rejected || result?.result?.Rejected) throw new Error("The funding transaction was rejected by Ootle.");
-    } catch (error) {
-      if (!transactionLookupMissing(error)) throw error;
-      if (attempt === 0 || attempt === 8) {
-        status("Sapient’s transaction-result lookup 404s on Esmeralda 0.47. Checking the indexer transaction record through the relay; no second transfer.");
+function withTimeout(promise, ms, timeoutError) {
+  let timeout;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timeout = window.setTimeout(() => reject(timeoutError), ms); }),
+  ]).finally(() => window.clearTimeout(timeout));
+}
+
+// A saved transfer is already approved, so its retry asks only the relay: a locked Sapient
+// would otherwise hold the lookup open with no visible error (QA run 16 retry 7).
+async function waitFinalized(transactionId, { deadline, useWallet = true } = {}) {
+  for (let attempt = 0; Date.now() < deadline; attempt += 1) {
+    if (useWallet) {
+      try {
+        const result = await withTimeout(
+          tariRequest("tari_getTransactionResult", { transactionId }),
+          Math.min(WALLET_LOOKUP_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
+          Object.assign(new Error("Sapient did not answer the transaction lookup."), { lookupTimedOut: true }),
+        );
+        if (result?.Finalized || result?.result?.Finalized) return;
+        if (result?.Rejected || result?.result?.Rejected) throw new Error("The funding transaction was rejected by Ootle.");
+      } catch (error) {
+        if (!error?.lookupTimedOut && !transactionLookupMissing(error)) throw error;
+        if (attempt === 0 || attempt === 8) {
+          status("Checking the indexer transaction record through the relay; no second transfer.");
+        }
       }
     }
     try {
-      const indexed = await relayJson(`/demo/tx-status?id=${encodeURIComponent(transactionId)}`);
+      const indexed = await relayJson(`/demo/tx-status?id=${encodeURIComponent(transactionId)}`, { timeoutMs: 10_000, deadline });
       if (indexed.state === "Finalized") return;
       if (indexed.state === "Rejected" || indexed.state === "FinalizedAbort") {
         throw new Error("The funding transaction was rejected by Ootle.");
@@ -469,6 +501,33 @@ async function waitFinalized(transactionId) {
     await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }
   throw new Error(`Funding transaction ${transactionId} is still pending. Keep its id and retry after it finalizes.`);
+}
+
+// The relay waits briefly for its wallet to discover the deposit; keep asking until the
+// overall deadline so a slow wallet scan does not need a manual retry.
+async function openFundedChannel(pending, deadline) {
+  const started = Date.now();
+  for (;;) {
+    try {
+      return await relayJson("/demo/open", {
+        method: "POST",
+        timeoutMs: RELAY_OPEN_TIMEOUT_MS,
+        deadline,
+        body: JSON.stringify({
+          fundingTxId: pending.fundingTxId,
+          sessionId: pending.sessionId,
+        }),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!FUNDING_NOT_DISCOVERED.test(message)) throw error;
+      if (deadline - Date.now() < RELAY_RETRY_MIN_MS) {
+        throw new Error("The relay wallet has not discovered your finalized deposit yet. Esmeralda wallet scans can take up to about 10 minutes; retry opening the channel later. No second transfer will be requested");
+      }
+      status(`Deposit finalized; waiting for the relay wallet to discover it (${Math.round((Date.now() - started) / 1000)} s). No second transfer will be requested.`);
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+    }
+  }
 }
 
 async function connectAndOpenLive() {
@@ -488,6 +547,7 @@ async function connectAndOpenLive() {
     const relay = await relayJson("/demo/config");
     byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
     let pending = readPendingFunding();
+    const retryingSavedTransfer = Boolean(pending?.fundingTxId);
     if (!pending?.fundingTxId) {
       setupStage = "checking the wallet network";
       const network = await tariRequest("tari_getNetwork");
@@ -565,19 +625,15 @@ async function connectAndOpenLive() {
       showPendingFunding(pending.fundingTxId);
     }
     setupStage = "waiting for funding finality";
-    await waitFinalized(pending.fundingTxId);
+    const openDeadline = Date.now() + LIVE_OPEN_DEADLINE_MS;
+    await waitFinalized(pending.fundingTxId, { deadline: openDeadline, useWallet: !retryingSavedTransfer });
     if (liveSetupCancelled) {
       status(`Funding transaction ${pending.fundingTxId} is finalized and saved in this browser. Continue live setup later to open its channel without paying again.`);
       return;
     }
     setupStage = "opening the funded channel through the relay";
-    const opened = await relayJson("/demo/open", {
-      method: "POST",
-      body: JSON.stringify({
-        fundingTxId: pending.fundingTxId,
-        sessionId: pending.sessionId,
-      }),
-    });
+    status("Funding is finalized. The relay is opening your channel; this can take up to two minutes. No second transfer will be requested.");
+    const opened = await openFundedChannel(pending, openDeadline);
     clearPendingFunding();
     showPendingFundingControls();
     params = {

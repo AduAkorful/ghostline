@@ -13,9 +13,9 @@ use std::{
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use ghostline_core::{from_hex, to_hex};
 use ghostline_net::{
-    IndexerClient, StealthTransfer, StealthTransferRequest, TransactionId, TransferFeeParams,
-    UtxoInputSelection, WalletClient, account_name, execution_accepted, funding_output_spend_gate,
-    indexed_receipt_status, indexed_transaction_status,
+    FUNDING_NOT_DISCOVERED, IndexerClient, StealthTransfer, StealthTransferRequest, TransactionId,
+    TransferFeeParams, UtxoInputSelection, WalletClient, account_name, execution_accepted,
+    funding_output_spend_gate, indexed_receipt_status, indexed_transaction_status,
 };
 use ghostline_paywall::{ChannelStore, PaymentTerms};
 use serde::{Deserialize, Serialize};
@@ -1127,20 +1127,67 @@ fn open_rejection_reason(entry: &serde_json::Value) -> String {
     }
 }
 
+/// walletd only unblinds a new stealth output on a later scheduled scan. On Render (2026-10-23)
+/// 51 µT deposits appeared between 1 and 10 minutes after finality. Waiting inside the request
+/// lets a typical retry succeed; play.js keeps its `/demo/open` timeout above this wait.
+const FUNDING_DISCOVERY_WAIT: Duration = Duration::from_secs(45);
+const FUNDING_DISCOVERY_POLL: Duration = Duration::from_secs(5);
+
 /// The CLI then locks only these commitments. Other unspent outputs stay where they are.
 async fn require_funding_outputs_spendable(
     config: &RelayConfig,
     commitments: &[String],
 ) -> Result<(), String> {
     let wallet = connect_wallet(config).await?;
-    let utxos = wallet
-        .stealth_utxos_list(
-            &config.opener_account,
-            &STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
-        )
-        .await
-        .map_err(|error| format!("could not list opener stealth outputs: {error}"))?;
-    funding_output_spend_gate(&utxos, commitments)
+    let wallet = &wallet;
+    let started = tokio::time::Instant::now();
+    let result = wait_for_funding_discovery(
+        FUNDING_DISCOVERY_WAIT,
+        FUNDING_DISCOVERY_POLL,
+        || async move {
+            let utxos = wallet
+                .stealth_utxos_list(
+                    &config.opener_account,
+                    &STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
+                )
+                .await
+                .map_err(|error| format!("could not list opener stealth outputs: {error}"))?;
+            Ok(funding_output_spend_gate(&utxos, commitments))
+        },
+    )
+    .await;
+    tracing::info!(
+        event = "funding_discovery",
+        outcome = if result.is_ok() { "found" } else { "missing" },
+        waited_ms = started.elapsed().as_millis() as u64,
+        commitments = commitments.len(),
+    );
+    result
+}
+
+/// Re-runs `check` while it reports [`FUNDING_NOT_DISCOVERED`] and another poll fits before
+/// `wait` runs out. A listing failure (outer `Err`) or any other gate error returns at once.
+async fn wait_for_funding_discovery<F, Fut>(
+    wait: Duration,
+    poll: Duration,
+    mut check: F,
+) -> Result<(), String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Result<(), String>, String>>,
+{
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        match check().await? {
+            Err(error)
+                if error == FUNDING_NOT_DISCOVERED
+                    && tokio::time::Instant::now() + poll <= deadline =>
+            {
+                tokio::time::sleep(poll).await;
+            }
+            gate => return gate,
+        }
+    }
 }
 
 async fn run_channel_open(
@@ -3079,5 +3126,72 @@ mod tests {
         );
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn funding_discovery_waits_until_the_output_appears() {
+        let mut checks = 0;
+        let result = wait_for_funding_discovery(
+            Duration::from_millis(500),
+            Duration::from_millis(5),
+            || {
+                checks += 1;
+                let seen = checks;
+                async move {
+                    Ok(if seen < 3 {
+                        Err(FUNDING_NOT_DISCOVERED.to_string())
+                    } else {
+                        Ok(())
+                    })
+                }
+            },
+        )
+        .await;
+        assert_eq!(result, Ok(()));
+        assert_eq!(checks, 3);
+    }
+
+    #[tokio::test]
+    async fn funding_discovery_gives_up_at_the_deadline() {
+        let mut checks = 0;
+        let result = wait_for_funding_discovery(
+            Duration::from_millis(30),
+            Duration::from_millis(10),
+            || {
+                checks += 1;
+                async { Ok(Err(FUNDING_NOT_DISCOVERED.to_string())) }
+            },
+        )
+        .await;
+        assert_eq!(result, Err(FUNDING_NOT_DISCOVERED.to_string()));
+        assert!((2..=4).contains(&checks), "polled {checks} times");
+    }
+
+    #[tokio::test]
+    async fn funding_discovery_does_not_retry_other_gate_errors() {
+        let mut checks = 0;
+        let script = wait_for_funding_discovery(
+            Duration::from_millis(500),
+            Duration::from_millis(5),
+            || {
+                checks += 1;
+                async {
+                    Ok(Err(
+                        "the Sapient funding output is not key-path spendable".to_string()
+                    ))
+                }
+            },
+        )
+        .await;
+        assert!(script.unwrap_err().contains("not key-path spendable"));
+        assert_eq!(checks, 1);
+
+        let listing = wait_for_funding_discovery(
+            Duration::from_millis(500),
+            Duration::from_millis(5),
+            || async { Err("could not list opener stealth outputs: down".to_string()) },
+        )
+        .await;
+        assert!(listing.unwrap_err().contains("could not list"));
     }
 }

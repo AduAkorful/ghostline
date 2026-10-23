@@ -377,6 +377,10 @@ impl WalletStealthUtxo {
 
 /// Refuse a hosted open unless every funding commitment is an unspent key-path output.
 ///
+/// Gate error while walletd has not yet unblinded a funding output. Callers may wait and retry;
+/// every other gate error is final for that output.
+pub const FUNDING_NOT_DISCOVERED: &str = "the opener wallet has not discovered this Sapient funding output yet; retry without sending another deposit";
+
 /// Other unspent outputs are ignored. The hosted open spends only the addresses this returns,
 /// via `accounts.create_stealth_transfer_statement` `InputSelection::Specific`. Script outputs
 /// are not key-path spendable (`StealthOutputsApi::validate_output_for_specific_spend`).
@@ -423,10 +427,7 @@ pub fn funding_key_path_addresses(
         addresses[index] = Some(address);
     }
     if addresses.iter().any(Option::is_none) {
-        return Err(
-            "the opener wallet has not discovered this Sapient funding output yet. Retry without sending another deposit."
-                .to_string(),
-        );
+        return Err(FUNDING_NOT_DISCOVERED.to_string());
     }
     Ok(addresses.into_iter().flatten().collect())
 }

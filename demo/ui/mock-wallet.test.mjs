@@ -42,7 +42,7 @@ class Element {
   }
 }
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, fastTime = false, pending, txStatus = "Finalized" } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], fastTime = false, pending, txStatus = "Finalized" } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -105,6 +105,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     }
     if (url.pathname === "/demo/open") {
       if (failOpen) return json("relay cannot verify the receiver output", 422);
+      if (openFailures.length) return json(openFailures.shift(), 400);
       const payerRoot = new Uint8Array(32).fill(7);
       const nonce = new Uint8Array(32).fill(8);
       const serviceSecret = new Uint8Array(32).fill(9);
@@ -440,3 +441,63 @@ test("a new tab without the voucher key can abandon the saved transfer and start
   assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), true);
 });
 
+
+const NOT_DISCOVERED = "the opener wallet has not discovered this Sapient funding output yet; retry without sending another deposit";
+const savedTransfer = () => {
+  const payerSecret = new Uint8Array(32).fill(3);
+  return {
+    sessionId: "session-test",
+    fundingTxId: "funding-test-tx",
+    payerPublicKey: hex(publicKeyFromSecret(payerSecret)),
+    payerSecretHex: hex(payerSecret),
+  };
+};
+
+test("a saved-transfer retry never waits on Sapient, even when Sapient would never answer", async () => {
+  const h = makeHarness({ pending: savedTransfer(), walletOverrides: { tari_getTransactionResult: () => new Promise(() => {}) } });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.equal(h.walletCalls.length, 0, "the retry asks only the relay");
+});
+
+test("a fresh funding lookup that Sapient never answers falls back to the relay after a bounded wait", async () => {
+  const h = makeHarness({ fastTime: true, walletOverrides: { tari_getTransactionResult: () => new Promise(() => {}) } });
+  try {
+    await h.load();
+    await h.elements.get("live-open").click();
+    await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+    assert.match(h.elements.get("status").textContent, /Channel finalized/);
+    assert.ok(h.calls.some((call) => call.url.includes("/demo/tx-status")));
+  } finally { h.restoreClock(); }
+});
+
+test("the retry keeps asking while the relay wallet has not discovered the deposit, then opens", async () => {
+  const h = makeHarness({ fastTime: true, pending: savedTransfer(), openFailures: [NOT_DISCOVERED, NOT_DISCOVERED] });
+  try {
+    await h.load();
+    await h.elements.get("live-open").click();
+    await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+    assert.match(h.elements.get("status").textContent, /Channel finalized/);
+    assert.equal(h.calls.filter((call) => call.url.includes("/demo/open")).length, 3);
+    assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
+  } finally { h.restoreClock(); }
+});
+
+test("an undiscovered deposit ends at the deadline with the retry button usable and the transfer kept", async () => {
+  const h = makeHarness({ fastTime: true, pending: savedTransfer(), openFailures: Array(1_000).fill(NOT_DISCOVERED) });
+  try {
+    await h.load();
+    await h.elements.get("live-open").click();
+    await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
+    const message = h.elements.get("status").textContent;
+    assert.match(message, /has not discovered your finalized deposit yet/);
+    assert.doesNotMatch(message, /\.\./, "no double period");
+    assert.equal(h.elements.get("live-open").disabled, false);
+    assert.equal(h.elements.get("live-open").textContent, "Retry live setup");
+    assert.ok(h.local.has("ghostline-live-pending"), "the funded transfer stays saved for a later retry");
+    const opens = h.calls.filter((call) => call.url.includes("/demo/open")).length;
+    assert.ok(opens > 1 && opens < 60, `bounded re-posts (${opens})`);
+  } finally { h.restoreClock(); }
+});
