@@ -441,7 +441,7 @@ async function restoreLiveChannel() {
   } catch (error) {
     liveStateUnconfirmed = true;
     showRelayBanner("down");
-    status(`Live channel ${liveChannel.channelId} is saved in this tab, but the relay could not be reached: ${error instanceof Error ? error.message : String(error)} Its live actions stay paused until a reload reaches the relay; the simulation works now.`);
+    status(`Live channel ${liveChannel.channelId} is saved in this tab, but the relay could not be reached. Its live actions stay paused until a reload reaches the relay; the simulation works now.`);
   }
   refreshControls();
 }
@@ -501,7 +501,9 @@ function refreshControls() {
   if (liveChannel && !simulationMode) {
     byId("pay").disabled = liveStateUnconfirmed || liveRefundPending || liveCalls >= countLimit;
     byId("pay").textContent = liveCalls >= countLimit ? "Five live calls complete" : `Send live call ${liveCalls + 1} of ${countLimit} · sign voucher`;
-    byId("run-simulation").hidden = true;
+    // A paused restore offers the simulation, so its button stays usable (polish-fix retest).
+    byId("run-simulation").hidden = !liveStateUnconfirmed;
+    byId("run-simulation").disabled = false;
     byId("settle").disabled = liveStateUnconfirmed || liveRefundPending || liveCalls !== countLimit;
     byId("settle").textContent = liveCalls === countLimit ? "Settle live channel" : "Settlement unlocks after 5 calls";
     byId("demo-progress").textContent = `${liveCalls} of ${countLimit} live calls complete · ${liveAccepted.toString()} µT accepted.`;
@@ -989,7 +991,8 @@ async function connectAndOpenLive() {
       status("No Tari wallet became available. Reload this page in the Chrome profile where Sapient is enabled, then retry.");
     } else {
       byId("live-open").textContent = "Retry live setup";
-      const detail = walletError(error);
+      // Relay errors already end in a full stop; the sentences below add their own.
+      const detail = walletError(error).replace(/\.+$/, "");
       byId("live-note").textContent = pending
       ? `Live setup stopped while ${setupStage}: ${detail}. Your approved funding transaction is saved in this browser; retrying will not request another transfer. You can return the pending deposit to Sapient if channel opening cannot be completed.`
         : `Live setup stopped while ${setupStage}: ${detail}. No channel was opened; the instant simulation remains available.`;
@@ -1470,7 +1473,7 @@ function reset() {
 }
 
 byId("pay").addEventListener("click", payToll);
-byId("run-simulation").addEventListener("click", runRemainingSimulation);
+byId("run-simulation").addEventListener("click", () => (liveChannel && !simulationMode ? simulateFromBanner() : runRemainingSimulation()));
   byId("settle").addEventListener("click", () => {
   if (liveChannel && !simulationMode) void settleLive().catch((error) => {
     if (liveChannel && !simulationMode) returnToSimulation();

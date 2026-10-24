@@ -909,6 +909,7 @@ test("a relay that cannot be reached at all shows the waking banner, then the do
     await opening;
     assert.ok(kinds.has("waking"), "waking banner shown while retrying");
     assert.equal(h.elements.get("relay-banner").dataset.kind, "down");
+    assert.doesNotMatch(h.elements.get("status").textContent, /\.\./, "no double full stop");
   } finally { h.restoreClock(); }
 });
 
@@ -932,6 +933,12 @@ test("a restored live channel stays paused when the relay cannot confirm its sta
     assert.equal(h.elements.get("pay").disabled, true);
     assert.equal(h.elements.get("relay-banner").dataset.kind, "down");
     assert.equal(h.elements.get("relay-banner").hidden, false);
+    assert.doesNotMatch(h.elements.get("status").textContent, /Failed to fetch/, "no raw browser error mid-sentence");
+    const simulate = h.elements.get("run-simulation");
+    assert.equal(simulate.hidden, false, "the simulation is offered while paused");
+    assert.equal(simulate.disabled, false);
+    simulate.click();
+    await h.waitFor(() => /Simulation complete/.test(h.elements.get("status").textContent));
   } finally { h.restoreClock(); }
 });
 
