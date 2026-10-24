@@ -20,6 +20,11 @@
 .wallet-funding-note strong { color:var(--white); }
 .live-setup .actions { grid-column:2; padding:0; }
 .live-setup .fine-print { grid-column:2; margin:0; }
+.relay-banner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 20px; margin-block:0 18px; padding:14px 18px; border:1px solid rgba(197,186,255,.45); border-left:3px solid var(--lilac); background:#151325; color:#e7e5ef; }
+.relay-banner[data-kind="waking"] { border-left-color:var(--lime); }
+.relay-banner p { flex:1 1 320px; margin:0; font-size:14px; line-height:1.55; }
+.relay-banner-actions { display:flex; flex-wrap:wrap; gap:10px; }
+.relay-banner-actions .button { min-height:44px; display:inline-flex; align-items:center; text-decoration:none; }
 .demo-head { display:flex; align-items:end; justify-content:space-between; margin-bottom:26px; }
 .demo-head h2 { margin:8px 0 0; font:500 clamp(36px,5vw,60px)/.98 var(--display); letter-spacing:-.06em; }
 .panels { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:stretch; }
@@ -40,6 +45,9 @@
 .calls li { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:flex-start; min-width:0; padding:10px 11px; background:#121720; color:#d0d2dc; font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
 .calls li span { color:var(--lime); font:10px var(--mono); white-space:nowrap; }
 .calls li .fortune { flex:1 1 220px; min-width:0; color:#d0d2dc; font:13px/1.5 var(--sans); white-space:normal; }
+.calls li.refused { border-left:2px solid #ff8a9a; background:#1e1318; }
+.calls li.refused span { color:#ff9fae; }
+.calls li.refused .fortune { color:#f2c9cf; text-decoration:line-through; text-decoration-color:rgba(255,138,154,.6); }
 .total { display:flex; justify-content:space-between; align-items:center; padding-top:15px; border-top:1px solid rgba(197,186,255,.16); color:#a6a9b8; font-size:12px; }
 .total strong { color:var(--white); font:500 20px var(--display); }
 .chain-empty { display:grid; place-items:center; min-height:294px; padding:24px; text-align:center; color:#a9acbc; }
@@ -66,6 +74,26 @@
 .footer { display:flex; justify-content:space-between; gap:20px; padding:20px 0 30px; border-top:1px solid rgba(197,186,255,.18); color:#b3b7c8; font:10px var(--mono); }
 .skip-link { position:absolute; left:-9999px; }
 .skip-link:focus { left:16px; top:16px; z-index:100; padding:12px; background:#fff; color:#000; }
+.observer-view { margin-top:18px; padding-top:18px; border-top:1px solid rgba(197,186,255,.18); min-width:0; }
+.observer-view h4 { margin:6px 0 8px; color:#e7e5ef; font:500 20px/1.25 var(--display); }
+.observer-scroll { margin:12px 0; }
+.observer-table { width:100%; border-collapse:collapse; font-size:12px; line-height:1.5; table-layout:fixed; }
+.observer-table th,.observer-table td { padding:8px 8px 8px 0; border-bottom:1px solid rgba(197,186,255,.12); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+.observer-table thead th { color:#b4b8c9; font:10px var(--mono); letter-spacing:.06em; }
+.observer-table tbody th { color:#e7e5ef; font-weight:600; }
+.observer-table td { color:#c3c6d4; }
+.observer-table td.is-hidden { color:var(--lime); }
+.observer-table td.is-visible { color:#ffcf8a; }
+.observer-refusal { margin:10px 0; padding:10px 12px; border-left:2px solid #ff8a9a; background:#1e1318; color:#f2c9cf; font-size:12px; line-height:1.55; }
+.observer-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
+.observer-actions .button { text-decoration:none; display:inline-flex; align-items:center; }
+@media (max-width:760px) {
+  .observer-table thead { display:none; }
+  .observer-table,.observer-table tbody,.observer-table tr,.observer-table th,.observer-table td { display:block; width:100%; }
+  .observer-table tr { padding:10px 0; border-bottom:1px solid rgba(197,186,255,.16); }
+  .observer-table th,.observer-table td { padding:3px 0; border:0; }
+  .observer-table td::before { content:attr(data-label) ": "; color:#b4b8c9; font:10px var(--mono); }
+}
 @media (max-width:760px) {
   .shell { width:calc(100% - 40px); }
   .topbar { padding-inline:20px; }

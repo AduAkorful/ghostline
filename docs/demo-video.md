@@ -1,25 +1,54 @@
 # Ghostline contest video capture plan
 
-This is a recording script, not a video asset. Target length: 90–120 seconds, 1080p, captions or a short voiceover. Use the current v0.4.0 release and one newly verified Esmeralda run. Keep the terminal and explorer visible together; never show seed words, wallet credentials, secret key files, deposit masks, or voucher bodies.
+This is a recording script, not a video asset. Target length is 80 seconds, with a hard maximum of 90 seconds. Captions are burned in, because many viewers watch muted; a short voiceover is optional.
 
-## Capture sequence
+## Before recording
 
-| Time | Show | Narration |
-|---|---|---|
-| 0:00–0:10 | Landing page and browser demo CTA | “Ghostline is an agent payment rail on Tari Ootle: many signed off-chain vouchers, one channel close.” |
-| 0:10–0:25 | Browser simulation: make five quote-and-pay clicks | “This zero-install page runs the real TypeScript voucher signing and verification locally. These clicks do not submit a transaction.” |
-| 0:25–0:40 | Browser evidence panel and open the separate transaction link | “The link is a separate finalized Esmeralda run. It is evidence of the tested transaction fields, not a result of the simulation.” |
-| 0:40–1:00 | Terminal: `ghostline demo` | “The prebuilt CLI runs the HTTP 402 quote, signs cumulative vouchers, verifies paid responses, and exits without a wallet or chain transaction.” |
-| 1:00–1:25 | Show a fresh verified Esmeralda transaction and its two output commitments | “In a real channel run, the chain confirms the close. The tested fields hide the deposit and exact output amounts; fees, timing, branch, metadata, and commitments remain visible.” |
-| 1:25–1:40 | Service ledger and privacy limits | “The service sees calls, prices, vouchers, and totals. Its ledger is not chain proof of the call count.” |
-| 1:40–1:55 | End card: repo, release, MIT, testnet-only | “Ghostline is unaudited and testnet-only. Funding and timing can still link activity.” |
+- Record only after the observer view, overspend refusal and relay banner are deployed to <https://ghostline-ui.vercel.app>, and `/healthz` on the relay reports `walletReady: true`.
+- Use a Sapient wallet on Esmeralda with fresh faucet funds, a clean Chrome profile with no other extensions visible, a 1920×1080 window, browser zoom 110%, and a dark OS theme.
+- Never show seed words, passwords, the `secrets/` folder, voucher bodies, deposit masks or relay environment variables.
+- Make a fresh live run the same day. Note its open and settlement transaction IDs; the ones on screen must be those, and they go into `demo/ui/evidence.json` and the Verified runs table in [`sapient.md`](sapient.md).
 
-## Evidence to capture
+## Shot list
 
-- CLI version, source commit, template hash, and date.
-- Five successful browser simulation calls and the explicit simulation disclosure.
-- A fresh channel-open and finalized settlement from a separately run Esmeralda flow, with matching explorer links.
-- The exact public fields that were inspected, without implying that fees or all transaction metadata are hidden.
-- A visible notice that the browser simulation and historical proof are separate.
+| Time | Screen | Action | Caption (8 words or fewer) |
+|---|---|---|---|
+| 0:00–0:05 | Landing page hero | Slow scroll | Ghostline: private pay-per-call for AI agents |
+| 0:05–0:18 | Play page, simulation | Click "Run all 5 simulated calls" | 5 paid calls. Zero transactions. |
+| 0:18–0:24 | Same page, right panel | The labelled recorded run and the observer view appear | Simulation, no wallet needed |
+| 0:24–0:36 | Live section | "Connect Sapient and open channel", approve the 51 µT transfer in Sapient | Real wallet: Sapient on Esmeralda |
+| 0:36–0:46 | Service panel | Five live calls tick up to 50 µT | Vouchers signed in your browser |
+| 0:46–0:52 | Overspend button | Click "Try to overspend"; the refused row appears | Overspend? Refused. |
+| 0:52–1:02 | Settle, then the observer view | Click "Settle live channel", then "Load this settlement's public fields" | One settlement. Amounts hidden. |
+| 1:02–1:14 | Explorer, the new settlement | Show the commitments and the absent revealed amounts | Observers see commitments, not amounts |
+| 1:14–1:20 | Observer view, "What still leaks" line | Hold | Fees and timing stay visible |
+| 1:20–1:26 | End card | Static | github.com/AduAkorful/ghostline · ghostline-ui.vercel.app |
 
-Do not splice the old 1,000-call run into a newer transaction proof. Do not imply a live Sapient path exists until the full funding, open, settlement, and recovery lifecycle is implemented and tested. A public EVM transaction can be shown only as a clearly labelled illustration, not as a matched experiment.
+The overspend signs a voucher for the whole 51 µT deposit. That is 1 µT past the 50 µT spend limit, because the template keeps 1 µT for the fixed two-output settlement. The service answers "voucher exceeds channel spend limit (51 > 50)". Show that message as it appears; do not describe it as an on-chain rejection.
+
+## Export
+
+- MP4: H.264 High, 1920×1080, 30 fps, CRF 20, AAC 128 kbps or silent, `-movflags +faststart`, at most 15 MB: `demo/ui/media/ghostline-demo.mp4`.
+- Poster: 1280×720 frame from 0:52 showing the observer view: `demo/ui/media/ghostline-demo-poster.jpg`.
+- Captions: `demo/ui/media/ghostline-demo.vtt`.
+- GIF for the README and forum: 0:05–0:24 plus 0:46–1:02, at most 20 s, 960 px wide, 12 fps, at most 8 MB: `demo/ui/media/ghostline-demo.gif`.
+
+  ```sh
+  ffmpeg -i ghostline-demo.mp4 -vf "fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" ghostline-demo.gif
+  ```
+
+- Upload an unlisted YouTube copy for the forum and Reddit.
+
+## Embedding
+
+The static build copies `demo/ui/media/` as is. Once the files exist:
+
+- Landing page, first child of the `#judge-path` section:
+
+  ```html
+  <video controls muted playsinline preload="metadata" poster="media/ghostline-demo-poster.jpg"><source src="media/ghostline-demo.mp4" type="video/mp4"><track kind="captions" src="media/ghostline-demo.vtt" srclang="en" default></video>
+  ```
+
+- Play page: a "Watch the 80-second run" link under the demo heading.
+- README: the GIF directly under the title, linking to the video.
+- `demo/ui/site.test.mjs` fails if the landing page references a `media/` file that is missing.

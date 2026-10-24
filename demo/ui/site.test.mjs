@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Static checks for the site pages: shared navigation, link conventions and evidence consistency.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { describeRuns, explorerStatus, formatRunDate } from "./evidence-view.js";
 
@@ -121,4 +121,49 @@ test("play.js only looks up element ids that play.html defines", () => {
   const used = new Set([...read("play.js").matchAll(/byId\("([^"]+)"\)/g)].map((match) => match[1]));
   for (const id of used) assert.ok(ids.has(id), `play.html is missing #${id}`);
   assert.doesNotMatch(read("play.js"), /querySelector\("\.(fine-print|result-label)"\)/, "result fields are addressed by id, not by the first matching class");
+});
+
+test("the play page has the observer view, overspend control and relay banner", () => {
+  const play = html["play.html"];
+  for (const id of ["observer-view", "observer-rows", "observer-leaks", "overspend", "relay-banner", "banner-simulate"]) {
+    assert.match(play, new RegExp(`id="${id}"`), `play.html has #${id}`);
+  }
+  // Fees and timing are public; the panel must never label them hidden.
+  assert.match(read("play.js"), /\["Fees, timing, settle branch, two-output shape", live \? "Visible/);
+});
+
+test("recorded settlements carry the public fields an observer can read", () => {
+  for (const record of [evidence.chainRecord, evidence.liveRunRecord]) {
+    const fields = record.settlementPublicFields;
+    assert.ok(fields, `${record.settlementTransactionId} has public fields`);
+    assert.equal(fields.inputCommitments.length, 1);
+    assert.equal(fields.outputCommitments.length, 2, "fixed two-output settlement");
+    for (const commitment of [...fields.inputCommitments, ...fields.outputCommitments]) assert.match(commitment, /^[0-9a-f]{64}$/);
+    assert.equal(fields.revealedInputAmount, "0");
+    assert.equal(fields.revealedOutput, null);
+    assert.equal(fields.revealedInputBucket, null);
+  }
+});
+
+test("the custodial relay is described the same way on the play page and in the Sapient notes", () => {
+  const phrase = "on-chain observers see neither the deposit nor the split";
+  assert.ok(html["play.html"].includes(phrase));
+  assert.ok(readFileSync(new URL("../../docs/sapient.md", import.meta.url), "utf8").includes(phrase));
+  for (const page of PAGES) assert.doesNotMatch(html[page], /never holds (your )?funds|relay never sees/i, `${page} overstates the relay`);
+});
+
+test("any demo video the landing page embeds is in the published files", () => {
+  for (const [, path] of html["index.html"].matchAll(/(?:src|poster)="(media\/[^"]+)"/g)) {
+    assert.ok(existsSync(new URL(path, import.meta.url)), `${path} exists`);
+  }
+});
+
+test("the recorded on-chain refusal states its reason and leaves the channel unspent", () => {
+  const refusal = evidence.refusalRecord;
+  assert.equal(refusal.kind, "refused");
+  assert.equal(refusal.reason, `AfterEpoch(${refusal.refundOpensAtEpoch})`);
+  assert.ok(refusal.submittedAtEpoch < refusal.refundOpensAtEpoch, "submitted before the refund branch opened");
+  assert.equal(refusal.channelOutputAfterRefusal, "up");
+  assert.ok(refusal.feePaidMicroTari <= refusal.feeCapMicroTari);
+  assert.match(refusal.refusedTransactionId, /^[0-9a-f]{64}$/);
 });

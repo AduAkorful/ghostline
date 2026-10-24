@@ -64,6 +64,17 @@ export function describeRuns(evidence) {
       ],
     });
   }
+  const refusal = evidence.refusalRecord;
+  if (refusal) {
+    runs.push({
+      title: `On-chain refusal · ${formatRunDate(refusal.runDate)}`,
+      summary: `${refusal.description} Explorer outcome: ${refusal.explorerOutcome}; indexer result: ${refusal.indexerResult}, reason ${refusal.reason}. Fee ${number.format(refusal.feePaidMicroTari)} µT.`,
+      transactions: [
+        ["Throwaway channel open", refusal.channelOpenTransactionId, refusal.channelOpenTransactionUrl],
+        ["Refused early refund", refusal.refusedTransactionId, refusal.refusedTransactionUrl],
+      ],
+    });
+  }
   const previousRefund = evidence.historicalPreviousTemplateRefundRecord;
   if (previousRefund) {
     runs.push({

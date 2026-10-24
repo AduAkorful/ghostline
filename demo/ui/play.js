@@ -6,7 +6,8 @@ import { channelId, publicKeyFromSecret, scalarFromWide, signVoucher, voucherToB
 
 const byId = (id) => document.getElementById(id);
 const countLimit = 5;
-const deposit = 1_000n;
+// Matches the live 51 µT deposit, so the simulated spend limit and refusal match live mode.
+const deposit = 51n;
 let payerSecret;
 let serviceKey;
 let params;
@@ -22,6 +23,10 @@ let liveRefundPending = false;
 // Set once the live channel has settled or been refunded: { kind, url, transactionId, deposit }.
 let liveResult;
 let simulationMode = false;
+// One over-limit attempt per channel; a refusal never changes the accepted total.
+let simOverspendTried = false;
+let liveOverspendTried = false;
+let lastRefusal;
 let liveSetupCancelled = false;
 let abandonArmed = false;
 // While live setup is running, refund and abandon would race the relay open (QA final rerun).
@@ -112,6 +117,37 @@ function clearPendingFunding() {
 
 const status = (message) => { byId("status").textContent = message; };
 
+// A visible fallback when live mode cannot start; the #status line alone was easy to miss.
+const RELAY_BANNER_COPY = {
+  waking: "🕯️ The spirit is waking (free-tier server, up to about 75 s). The instant simulation works right now.",
+  down: "👻 The live relay isn't answering. Run the instant simulation, or inspect the recorded Esmeralda runs.",
+  "sapient-missing": "No Sapient wallet found in this browser. Install it from sapient.tari.mw and reload, or use the simulation.",
+};
+
+function showRelayBanner(kind) {
+  if (liveSetupCancelled) return;
+  byId("relay-banner-text").textContent = RELAY_BANNER_COPY[kind];
+  byId("relay-banner").dataset.kind = kind;
+  byId("relay-banner").hidden = false;
+}
+
+function hideRelayBanner() {
+  byId("relay-banner").hidden = true;
+}
+
+function simulateFromBanner() {
+  hideRelayBanner();
+  if (!liveChannel) {
+    liveSetupCancelled = true;
+    byId("live-stop").hidden = true;
+    reset();
+  } else if (!simulationMode) {
+    returnToSimulation();
+  }
+  runRemainingSimulation();
+  byId("demo-title").scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
 function randomBytes(length) {
   const out = new Uint8Array(length);
   crypto.getRandomValues(out);
@@ -164,6 +200,7 @@ function formatRunDate(isoDate) {
 // Every result state writes all of the card's fields, so no state inherits another's label,
 // provenance note or links (QA UI audit #1 and #6).
 function showResult({ label, summary, txLabel, transactionId, url, linkText, openTransactionId, openLinkText, note }) {
+  byId("observer-view").hidden = true;
   byId("result-label").textContent = label;
   byId("record-summary").textContent = summary;
   byId("recorded-tx-label").textContent = txLabel;
@@ -186,7 +223,123 @@ function showResult({ label, summary, txLabel, transactionId, url, linkText, ope
   byId("chain-result").hidden = false;
 }
 
+// The explorer reads this same indexer; a lookup only runs when the visitor asks for it, since
+// it tells the indexer operator which transaction this browser is looking at.
+const PUBLIC_INDEXER_URL = "https://ootle-indexer-a.tari.com";
+
+function shortHex(value) {
+  const hex = String(value || "");
+  return hex.length > 16 ? `${hex.slice(0, 8)}…${hex.slice(-4)}` : hex;
+}
+
+// Reads only the confidential-transfer statement of a settlement: what an observer can check
+// for amounts. Anything unexpected is reported as unreadable rather than guessed.
+function settlementPublicFields(transaction) {
+  const instructions = transaction?.transaction?.transaction?.V1?.body?.transaction?.instructions || [];
+  const transfer = instructions.map((instruction) => instruction?.StealthTransfer).find(Boolean);
+  const statement = transfer?.statement;
+  if (!statement) throw new Error("The indexer record has no confidential transfer statement.");
+  return {
+    inputCommitments: (statement.inputs_statement?.inputs || []).map((input) => input.commitment),
+    revealedInputAmount: String(statement.inputs_statement?.revealed_amount ?? "unknown"),
+    outputCommitments: (statement.outputs_statement?.outputs || []).map((output) => output.output?.commitment),
+    revealedOutput: statement.outputs_statement?.revealed_output ?? null,
+    revealedInputBucket: transfer.revealed_input_bucket ?? null,
+  };
+}
+
+function hiddenCell(label, commitments) {
+  if (!commitments?.length) return `Hidden (${label})`;
+  return `Hidden · ${commitments.map((commitment) => `c: ${shortHex(commitment)}`).join(", ")}`;
+}
+
+function observerRows({ live, fields, deposit: depositAmount, calls, paid }) {
+  const amountsHidden = fields
+    ? fields.revealedInputAmount === "0" && fields.revealedOutput === null && fields.revealedInputBucket === null
+    : true;
+  const outputsCell = fields
+    ? `${hiddenCell("two outputs", fields.outputCommitments)} (payment and change; observers can't tell which)${amountsHidden ? " · no revealed amount" : " · CHECK: an amount field is revealed"}`
+    : "Hidden (two outputs; load the public fields to see the commitments)";
+  const rows = [
+    ["Channel open and settlement", "Visible, with explorer links", "Yes", "Yes"],
+    ["Deposit (the channel input)", hiddenCell("input commitment", fields?.inputCommitments),
+      live ? `Yes: ${depositAmount} µT (it received the deposit)` : "Knows the declared deposit limit", live ? `Yes: ${depositAmount} µT` : "Yes"],
+    ["Paid to the service", outputsCell, `Yes: ${paid} µT`, `Yes: ${paid} µT`],
+    ["Number of calls and price", "Not on chain: vouchers stay off-chain", `Yes: ${calls} × ${PRICE} µT`, "Yes"],
+    ["Payer change", "Hidden (one of the two outputs above)", live ? `Yes: ${BigInt(depositAmount) - BigInt(paid)} µT` : "Yes",
+      live ? `${BigInt(depositAmount) - BigInt(paid)} µT kept for the fixed two-output shape; it stays with this browser's temporary key and is not returned to Sapient` : "Yes"],
+    ["Voucher signing key", "No", "No (public key only)", live ? "Yes, and it never leaves this browser" : "Yes, and it stays with the payer"],
+  ];
+  if (live) rows.push(["Funding transfer", "Visible as a private transfer from your wallet; the deposit amount is not revealed", "Yes", "Yes"]);
+  rows.push(["Fees, timing, settle branch, two-output shape", live ? "Visible, including that the relay's account paid the fees" : "Visible", "Yes", "Yes"]);
+  return rows;
+}
+
+function renderObserverView({ live, settlementTransactionId, fields, deposit: depositAmount, calls, paid, sourceNote }) {
+  byId("observer-service-heading").textContent = live ? "🧾 Relay (custodial service)" : "🧾 Service";
+  byId("observer-payer-heading").textContent = live ? "🔑 You (this browser)" : "🔑 Payer";
+  byId("observer-source").textContent = sourceNote;
+  byId("observer-rows").replaceChildren(...observerRows({ live, fields, deposit: depositAmount, calls, paid }).map(([fact, ...cells]) => {
+    const row = document.createElement("tr");
+    const heading = document.createElement("th");
+    heading.scope = "row";
+    heading.textContent = fact;
+    row.append(heading, ...cells.map((text, index) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      cell.dataset.label = (live ? ["Chain observer", "Relay", "You"] : ["Chain observer", "Service", "Payer"])[index];
+      if (index === 0 && /^Hidden|^Not on chain|^No$/.test(text)) cell.className = "is-hidden";
+      if (index === 0 && /^Visible/.test(text)) cell.className = "is-visible";
+      return cell;
+    }));
+    return row;
+  }));
+  byId("observer-leaks").textContent = `What still leaks: fees, timing, the settle branch, the channel id, authorization data, the output commitments and the two-output shape${live ? ", plus the funding transfer and that the relay's account paid the fees" : ""}. Call counts come from the service ledger; the chain does not prove them.`;
+  const refusal = byId("observer-refusal");
+  refusal.hidden = !lastRefusal;
+  if (lastRefusal) {
+    refusal.textContent = `Refused off-chain: a ${lastRefusal.amount} µT voucher went over the ${lastRefusal.limit} µT spend limit, so nothing reached the chain. The channel template enforces the same limit at settlement (contract test settle_amount_above_deposit_is_rejected).`;
+  }
+  const explorer = byId("observer-explorer");
+  explorer.href = explorerTxUrl(settlementTransactionId);
+  byId("observer-load").hidden = !live || Boolean(fields);
+  byId("observer-view").hidden = false;
+}
+
+function renderLiveObserverView() {
+  renderObserverView({
+    live: true,
+    settlementTransactionId: liveResult.transactionId,
+    fields: liveResult.publicFields,
+    deposit: liveChannel.deposit,
+    calls: liveCalls,
+    paid: liveAccepted.toString(),
+    sourceNote: liveResult.publicFields
+      ? `Public fields of your settlement ${shortHex(liveResult.transactionId)}, read from the Esmeralda indexer the explorer uses.`
+      : `Your settlement ${shortHex(liveResult.transactionId)}. Load its public fields to see the commitments an observer sees.`,
+  });
+}
+
+async function loadLiveObserverFields() {
+  if (!liveResult?.transactionId) return;
+  const button = byId("observer-load");
+  button.disabled = true;
+  button.textContent = "Loading public fields…";
+  try {
+    const response = await fetch(`${PUBLIC_INDEXER_URL}/transactions/${encodeURIComponent(liveResult.transactionId)}`);
+    if (!response.ok) throw new Error(`the indexer answered HTTP ${response.status}`);
+    liveResult.publicFields = settlementPublicFields(await response.json());
+    if (!simulationMode) renderLiveObserverView();
+  } catch (error) {
+    status(`Could not load the settlement's public fields: ${error instanceof Error ? error.message : String(error)}. The explorer link shows the same record.`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Load this settlement's public fields";
+  }
+}
+
 function hideResult() {
+  byId("observer-view").hidden = true;
   byId("chain-result").hidden = true;
   byId("chain-empty").hidden = false;
   byId("open-explorer-link").hidden = true;
@@ -279,11 +432,9 @@ async function restoreLiveChannel() {
       liveRefundPending = true;
       status("The expiry refund has started. Waiting for the private transfer to Sapient to finalize.");
     } else {
-      status(`Restored open channel ${liveChannel.channelId}. Continue the calls or check for expiry refund.`);
-      if (liveCalls === countLimit) {
-        refreshControls();
-        await settleLive();
-      }
+      status(liveCalls === countLimit
+        ? `Restored open channel ${liveChannel.channelId}. All five calls are paid; settle the channel when ready.`
+        : `Restored open channel ${liveChannel.channelId}. Continue the calls or check for expiry refund.`);
     }
   } catch (error) {
     status(`Live channel ${liveChannel.channelId} is saved in this tab, but the relay could not be reached: ${error instanceof Error ? error.message : String(error)}`);
@@ -337,6 +488,11 @@ function refreshResetControl() {
 
 function refreshControls() {
   refreshResetControl();
+  const callsDone = liveChannel && !simulationMode ? liveCalls === countLimit && !liveResult : paywall?.calls === countLimit;
+  const live = Boolean(liveChannel && !simulationMode);
+  byId("overspend").hidden = !callsDone || (live ? liveOverspendTried : simOverspendTried);
+  byId("overspend").disabled = liveRefundPending;
+  byId("overspend").textContent = `Try to overspend · sign ${(liveChannel && !simulationMode ? BigInt(liveChannel.deposit) : deposit).toString()} µT, past the spend limit`;
   byId("settle").hidden = Boolean(liveChannel && liveResult && !simulationMode);
   if (liveChannel && !simulationMode) {
     byId("pay").disabled = liveRefundPending || liveCalls >= countLimit;
@@ -537,13 +693,17 @@ async function relayHealth(url) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), Math.min(10_000, deadline - Date.now()));
     const wakeNotice = window.setTimeout(() => {
+      showRelayBanner("waking");
       status(`🕯️ Waking the spirit… (${Math.ceil((Date.now() - (deadline - 75_000)) / 1000)}s). You can switch to the instant simulation at any time.`);
     }, 2000);
     try {
       const response = await fetch(`${url}/healthz`, { mode: "cors", signal: controller.signal });
       if (!response.ok && response.status !== 503) throw new Error(`Relay health returned HTTP ${response.status}.`);
       const health = await response.json();
-      if (response.ok && health.ok && health.walletReady) return;
+      if (response.ok && health.ok && health.walletReady) {
+        hideRelayBanner();
+        return;
+      }
       if (response.status >= 500 && response.status !== 503) throw new Error(`Relay health returned HTTP ${response.status}.`);
       status(`Relay is waking. Check ${attempt}; the instant simulation remains available.`);
     } catch (error) {
@@ -557,6 +717,7 @@ async function relayHealth(url) {
     }
     await new Promise((resolve) => window.setTimeout(resolve, Math.min(5_000, Math.max(0, deadline - Date.now()))));
   }
+  showRelayBanner("down");
   throw new Error("The relay did not become ready within 75 seconds. Continue with the instant simulation or try live mode again later.");
 }
 
@@ -782,6 +943,8 @@ async function connectAndOpenLive() {
     liveChannel.payerPublicKey = pending.payerPublicKey;
     liveCalls = 0;
     liveAccepted = 0n;
+    liveOverspendTried = false;
+    lastRefusal = undefined;
     saveLiveChannel();
     serviceKey = hexToBytes(opened.servicePublicKey);
     byId("service-subtitle").textContent = "Live Esmeralda relay · each accepted call has a real signed voucher";
@@ -797,6 +960,7 @@ async function connectAndOpenLive() {
     status("Channel finalized. Each click now sends a real signed voucher to the relay.");
   } catch (error) {
     liveOpenInFlight = false;
+    if (setupStage === "checking relay readiness") showRelayBanner("down");
     const pending = readPendingFunding();
     const cancelled = Number(error?.code) === 4001;
     byId("live-stop").hidden = false;
@@ -811,6 +975,7 @@ async function connectAndOpenLive() {
         : "Wallet approval was cancelled. If Sapient is locked, unlock it first. No funding transaction was submitted.";
       status(walletError(error));
     } else if (!pending && isSapientUnavailable(error)) {
+      showRelayBanner("sapient-missing");
       byId("live-open").textContent = "Retry Sapient connection";
       byId("live-stop").textContent = "Start instant simulation";
       byId("live-note").textContent = "Sapient wasn't detected in this tab. Reload this page in the Chrome profile where Sapient is enabled, or open it in Tari Universe, then retry. No wallet transfer was requested.";
@@ -878,11 +1043,8 @@ async function payLiveToll() {
     renderCall(body.fortune, liveCalls, voucher);
     byId("quote").textContent = `Live voucher accepted · ${liveCalls}/5 · cumulative ${liveAccepted} µT`;
     status(`Ootle has not seen this call. The service accepted voucher ${liveCalls}/5; cumulative amount ${liveAccepted} µT.`);
-    if (liveCalls === countLimit) {
-      // Settlement takes seconds; show the fifth call as complete before waiting on it.
-      refreshControls();
-      await settleLive();
-    }
+    // Settlement waits for a click so the overspend attempt can run against the open channel.
+    if (liveCalls === countLimit) status("Five live calls complete. Settle the channel, or first try to overspend and watch the service refuse it.");
   } catch (error) {
     if (liveChannel && !simulationMode) returnToSimulation();
     byId("live-stop").hidden = false;
@@ -891,6 +1053,70 @@ async function payLiveToll() {
   } finally {
     refreshControls();
   }
+}
+
+function renderRefusal(amount, limit, reason) {
+  lastRefusal = { amount, limit, reason };
+  const item = document.createElement("li");
+  item.className = "refused";
+  const label = document.createElement("span");
+  label.textContent = `REFUSED · ${amount} µT`;
+  const text = document.createElement("span");
+  text.className = "fortune";
+  text.textContent = `✖ Refused: a voucher for ${amount} µT exceeds the ${limit} µT spend limit. Accepted total stays ${accepted} µT.`;
+  item.append(label, text);
+  byId("calls").prepend(item);
+  status(`The service refused the voucher: "${reason}". Nothing reached the chain, and the accepted total is unchanged.`);
+}
+
+// Signs the whole deposit. The browser signer refuses anything above the deposit, so the
+// smallest overspend that reaches the service is the 1 µT reserved for the fixed-shape settlement.
+function trySimulatedOverspend() {
+  simOverspendTried = true;
+  const amount = params.deposit;
+  const voucher = signVoucher(payerSecret, params, amount, serviceKey);
+  try {
+    paywall.pay(voucher);
+    status("The simulated service accepted an over-limit voucher. This is a bug; please report it.");
+  } catch (error) {
+    renderRefusal(amount, amount - 1n, error instanceof Error ? error.message : String(error));
+    if (settlementShown && evidence) renderRecordedObserverView();
+  } finally {
+    refreshControls();
+  }
+}
+
+async function tryLiveOverspend() {
+  liveOverspendTried = true;
+  byId("overspend").disabled = true;
+  try {
+    const channelHex = bytesToHex(channelId(params));
+    const quoteResponse = await fetch(`${apiBase()}/fortune`, { headers: { "ghostline-channel": channelHex } });
+    if (quoteResponse.status !== 402) throw new Error(`Expected an HTTP 402 quote, got ${quoteResponse.status}.`);
+    const quote = await quoteResponse.json();
+    if (quote.channel_id?.toLowerCase() !== channelHex.toLowerCase() || !quote.service_output_key) throw new Error("The service returned a quote for a different channel.");
+    const amount = params.deposit;
+    const voucher = signVoucher(payerSecret, params, amount, hexToBytes(quote.service_output_key));
+    const response = await fetch(`${apiBase()}/fortune`, {
+      headers: { "ghostline-channel": channelHex, "ghostline-voucher": bytesToHex(voucherToBytes(voucher)) },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) {
+      status("The live service accepted an over-limit voucher. This is a bug; do not settle, and report it.");
+      return;
+    }
+    renderRefusal(amount, amount - 1n, body.reason || `HTTP ${response.status}`);
+  } catch (error) {
+    liveOverspendTried = false;
+    status(`The overspend attempt could not reach the service: ${walletError(error)} Your five accepted calls are unchanged.`);
+  } finally {
+    refreshControls();
+  }
+}
+
+function tryOverspend() {
+  if (liveChannel && !simulationMode) void tryLiveOverspend();
+  else trySimulatedOverspend();
 }
 
 async function settleLive() {
@@ -986,6 +1212,7 @@ function showLiveSettlement() {
     openLinkText: "Inspect your channel-open transaction ↗",
     note: `Your browser and Sapient created this channel, these calls and this settlement on Esmeralda. The service knows the requests, prices and vouchers; observers can still see transaction metadata and fees. The chain does not publish the off-chain call count.${liveResult.sapientUnconfirmed ? " Sapient has not independently reported finality yet; the relay indexer reports Finalized." : ""}`,
   });
+  renderLiveObserverView();
 }
 
 function showLiveEvidence(url, transactionId) {
@@ -1027,7 +1254,9 @@ function returnToSimulation() {
     return;
   }
   simulationMode = !simulationMode;
+  lastRefusal = undefined;
   if (simulationMode) {
+    simOverspendTried = false;
     begin();
     paywall = new SimulatedPaywall(params, serviceKey);
     accepted = 0n;
@@ -1117,6 +1346,19 @@ async function refundPendingFunding() {
   }
 }
 
+function renderRecordedObserverView() {
+  const chain = evidence.chainRecord;
+  const service = evidence.serviceRecord || {};
+  renderObserverView({
+    live: false,
+    settlementTransactionId: chain.settlementTransactionId,
+    fields: chain.settlementPublicFields,
+    calls: service.successfulCalls ?? countLimit,
+    paid: String(service.acceptedTotalMicroTari ?? Number(PRICE) * countLimit),
+    sourceNote: `This is the recorded ${formatRunDate(evidence.runDate)} command-line run, not your clicks. The public fields of settlement ${shortHex(chain.settlementTransactionId)} were read from the Esmeralda indexer the explorer uses.`,
+  });
+}
+
 function showRecordedEvidence() {
   if (!evidence || settlementShown) {
     if (settlementShown) return;
@@ -1138,6 +1380,7 @@ function showRecordedEvidence() {
     openLinkText: "Inspect the recorded channel-open transaction ↗",
     note: `Your simulated clicks did not create or submit this transaction. It comes from a separate ${runDate} command-line run: its service ledger recorded the calls, and the chain shows only the open and the settlement.`,
   });
+  renderRecordedObserverView();
   byId("chain-panel").classList.add("is-settling");
   status(`Separate recorded evidence: ${chain.settlementFinality}. The simulated run did not submit it.`);
   if (window.matchMedia("(max-width: 760px)").matches) {
@@ -1203,6 +1446,8 @@ function reset() {
     return;
   }
   if (startingOver) forgetFinishedLiveChannel();
+  simOverspendTried = false;
+  lastRefusal = undefined;
   accepted = 0n;
   begin();
   byId("calls").replaceChildren();
@@ -1229,6 +1474,9 @@ byId("run-simulation").addEventListener("click", runRemainingSimulation);
   else showRecordedEvidence();
 });
 byId("reset").addEventListener("click", reset);
+byId("banner-simulate").addEventListener("click", simulateFromBanner);
+byId("overspend").addEventListener("click", tryOverspend);
+byId("observer-load").addEventListener("click", () => void loadLiveObserverFields());
 byId("copy-tx").addEventListener("click", async () => {
   const transactionId = byId("recorded-tx-id").textContent;
   try {

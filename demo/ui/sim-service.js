@@ -31,8 +31,11 @@ export class SimulatedPaywall {
     if (voucher.amount <= this.lastAccepted) {
       throw new Error("cumulative voucher must increase");
     }
-    if (voucher.amount > this.params.deposit - 1n) {
-      throw new Error("voucher exceeds the fixed-shape spend limit");
+    // Same check and wording as the Rust paywall (VoucherError::ExceedsDeposit): the template
+    // keeps 1 µT for the fixed two-output settlement, so the spend limit is deposit - 1.
+    const spendLimit = this.params.deposit - 1n;
+    if (voucher.amount > spendLimit) {
+      throw new Error(`voucher exceeds channel spend limit (${voucher.amount} > ${spendLimit})`);
     }
     if (voucher.amount - this.lastAccepted !== PRICE) {
       throw new Error("voucher does not pay the quoted price");

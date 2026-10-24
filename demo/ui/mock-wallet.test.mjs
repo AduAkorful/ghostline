@@ -17,6 +17,7 @@ class Element {
     this.value = "";
     this.textContent = "";
     this.hidden = false;
+    this.dataset = {};
     this.disabled = false;
     this.href = "";
     this.className = "";
@@ -44,6 +45,17 @@ class Element {
 const PLAY_HTML = readFileSync(new URL("./play.html", import.meta.url), "utf8");
 const PLAY_IDS = new Set([...PLAY_HTML.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
 
+const INDEXER = "https://ootle-indexer-a.tari.com";
+const SETTLEMENT_RECORD = {
+  transaction: { transaction: { V1: { body: { transaction: { instructions: [{ StealthTransfer: {
+    statement: {
+      inputs_statement: { inputs: [{ commitment: "1".repeat(64) }], revealed_amount: "0" },
+      outputs_statement: { outputs: [{ output: { commitment: "2".repeat(64) } }, { output: { commitment: "3".repeat(64) } }], revealed_output: null },
+    },
+    revealed_input_bucket: null,
+  } }] } } } } },
+};
+
 const EVIDENCE_FIXTURE = {
   runDate: "2026-10-22",
   serviceRecord: { successfulCalls: 5, unitPriceMicroTari: 10, acceptedTotalMicroTari: 50 },
@@ -52,6 +64,13 @@ const EVIDENCE_FIXTURE = {
     settlementTransactionId: "recorded-settle-tx",
     settlementTransactionUrl: "https://explorer.tari.mw/tx/recorded-settle-tx",
     settlementFinality: "Finalized",
+    settlementPublicFields: {
+      inputCommitments: ["4".repeat(64)],
+      revealedInputAmount: "0",
+      outputCommitments: ["5".repeat(64), "6".repeat(64)],
+      revealedOutput: null,
+      revealedInputBucket: null,
+    },
   },
 };
 
@@ -108,6 +127,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     const url = new URL(String(input), "https://site.test.invalid");
     if (url.pathname === "/evidence.json") return json(EVIDENCE_FIXTURE);
     calls.push({ url: url.href, method: (options.method || "GET").toUpperCase(), headers: new Headers(options.headers), body: options.body || "" });
+    if (url.origin === INDEXER && url.pathname.startsWith("/transactions/")) return json(SETTLEMENT_RECORD);
     if (url.origin !== RELAY) throw new Error(`Unexpected outbound origin: ${url.origin}`);
     if (url.pathname === "/healthz" || url.pathname === "/health" || url.pathname === "/") return failHealth ? json({ error: "missing" }, 404) : coldHealth ? json({ ok: false, walletReady: false }, 503) : json({ ok: true, walletReady: true });
     if (url.pathname === "/demo/tx-status") return json({ state: txStatus });
@@ -136,6 +156,8 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     if (url.pathname === "/fortune") {
       const headers = new Headers(options.headers);
       if (!headers.has("ghostline-voucher")) return json({ scheme: "ghostline.channel.voucher.v1", channel_id: opened.channelId, price: "10", service_output_key: opened.serviceOutputPublicKey }, 402);
+      // The real paywall refuses a 51 µT voucher on a 51 µT channel (spend limit 50 µT).
+      if (paidCalls >= 5) return json({ scheme: "ghostline.channel.voucher.v1", status: 403, reason: "voucher exceeds channel spend limit (51 > 50)" }, 403);
       paidCalls += 1;
       return json({ fortune: `Mock paid response ${paidCalls}` }, 200, { "ghostline-recovery": `opaque-recovery-${paidCalls}` });
     }
@@ -236,6 +258,8 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
     await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1 || h.elements.get("status").textContent.startsWith("Live call failed:"));
   }
 
+  h.elements.get("settle").click();
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
   assert.equal(h.paidCalls(), 5);
   assert.match(h.elements.get("record-summary").textContent, /5 paid calls · 50 µT cumulative/);
   assert.equal(h.elements.get("explorer-link").href, "https://explorer.tari.mw/tx/settle-test-tx");
@@ -271,6 +295,7 @@ test("after a settled live run, five simulated calls show the recorded run witho
     await h.elements.get("pay").click();
     await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
   }
+  h.elements.get("settle").click();
   await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
   assert.match(h.elements.get("result-label").textContent, /YOUR LIVE RUN · SETTLEMENT FINALIZED/);
   assert.match(h.elements.get("result-note").textContent, /Your browser and Sapient created/);
@@ -310,6 +335,7 @@ test("a finished live run enables Start a new live run, which clears it and offe
     await h.elements.get("pay").click();
     await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
   }
+  h.elements.get("settle").click();
   await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
   const reset = h.elements.get("reset");
   assert.equal(reset.disabled, false);
@@ -648,6 +674,7 @@ test("a live channel shows its open transaction and live panel copy, then the op
     await h.elements.get("pay").click();
     await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
   }
+  h.elements.get("settle").click();
   await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
   assert.equal(h.elements.get("open-explorer-link").hidden, false);
   assert.equal(h.elements.get("open-explorer-link").href, "https://explorer.tari.mw/tx/open-test-tx");
@@ -659,24 +686,27 @@ test("a live channel shows its open transaction and live panel copy, then the op
   assert.equal(h.elements.get("open-tx-link").hidden, true);
 });
 
-test("the fifth live call shows as complete while settlement is still running", async () => {
+test("five live calls wait for Settle, which then shows progress until it finalizes", async () => {
   let release;
   const settleGate = new Promise((resolve) => { release = resolve; });
   const h = makeHarness({ settleGate });
   await h.load();
   await h.elements.get("live-open").click();
   await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     await h.elements.get("pay").click();
     await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
   }
-  const fifth = h.elements.get("pay").click();
-  await h.waitFor(() => /submitting the cumulative voucher settlement/.test(h.elements.get("status").textContent));
   assert.match(h.elements.get("demo-progress").textContent, /^5 of 5 live calls complete · 50 µT accepted/);
   assert.equal(h.elements.get("pay").textContent, "Five live calls complete");
   assert.equal(h.elements.get("pay").disabled, true);
+  assert.equal(h.calls.some((call) => call.url.includes("/demo/settle")), false, "settlement waits for the click");
+  assert.equal(h.elements.get("settle").disabled, false);
+  assert.match(h.elements.get("status").textContent, /Settle the channel, or first try to overspend/);
+  h.elements.get("settle").click();
+  await h.waitFor(() => /submitting the cumulative voucher settlement/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("settle").disabled, true);
   release();
-  await fifth;
   await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
 });
 
@@ -742,8 +772,123 @@ test("the settled view shows one channel-open link and no leftover funding link"
     await h.elements.get("pay").click();
     await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
   }
+  h.elements.get("settle").click();
   await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
   assert.equal(h.elements.get("open-explorer-link").hidden, false);
   assert.equal(h.elements.get("open-tx-link").hidden, true);
   assert.equal(h.elements.get("pending-funding-link").hidden, true);
+});
+
+test("a simulated overspend is refused with the paywall's message and leaves the total unchanged", async () => {
+  const h = makeHarness();
+  await h.load();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await h.elements.get("run-simulation").click();
+  const overspend = h.elements.get("overspend");
+  assert.equal(overspend.hidden, false);
+  assert.match(overspend.textContent, /sign 51 µT, past the spend limit/);
+  await overspend.click();
+  const refused = h.elements.get("calls").children[0];
+  assert.equal(refused.className, "refused");
+  assert.match(refused.children[1].textContent, /51 µT exceeds the 50 µT spend limit/);
+  assert.match(h.elements.get("status").textContent, /voucher exceeds channel spend limit \(51 > 50\)/);
+  assert.equal(h.elements.get("total").textContent, "50 µT");
+  assert.equal(overspend.hidden, true);
+});
+
+test("a live overspend is refused by the service, then Settle still settles 50 µT", async () => {
+  const h = makeHarness();
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Channel finalized|Live setup stopped/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("overspend").hidden, true, "no overspend before five calls");
+  for (let i = 0; i < 5; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  assert.equal(h.elements.get("overspend").hidden, false);
+  h.elements.get("overspend").click();
+  await h.waitFor(() => /refused the voucher/.test(h.elements.get("status").textContent));
+  assert.match(h.elements.get("status").textContent, /voucher exceeds channel spend limit \(51 > 50\)/);
+  assert.equal(h.elements.get("calls").children[0].className, "refused");
+  assert.equal(h.paidCalls(), 5);
+  assert.equal(h.elements.get("total").textContent, "50 µT");
+  assert.equal(h.elements.get("overspend").hidden, true);
+  h.elements.get("settle").click();
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+  assert.match(h.elements.get("record-summary").textContent, /5 paid calls · 50 µT cumulative/);
+});
+
+test("an unreachable relay shows the down banner, and its button runs the simulation", async () => {
+  const h = makeHarness({ failHealth: true });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Live setup stopped/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("relay-banner").hidden, false);
+  assert.equal(h.elements.get("relay-banner").dataset.kind, "down");
+  assert.match(h.elements.get("relay-banner-text").textContent, /isn't answering/);
+  await h.elements.get("banner-simulate").click();
+  assert.equal(h.elements.get("relay-banner").hidden, true);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED RUN/);
+  assert.equal(h.walletCalls.length, 0);
+});
+
+test("a missing Sapient wallet shows its banner", async () => {
+  const h = makeHarness({ wallet: false });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /No Tari wallet became available|Live setup stopped/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("relay-banner").dataset.kind, "sapient-missing");
+  assert.equal(h.elements.get("relay-banner").hidden, false);
+});
+
+test("the recorded run's observer view shows hidden commitments and what still leaks", async () => {
+  const h = makeHarness();
+  await h.load();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await h.elements.get("run-simulation").click();
+  assert.equal(h.elements.get("observer-view").hidden, false);
+  const rows = h.elements.get("observer-rows").children;
+  const byFact = Object.fromEntries(rows.map((row) => [row.children[0].textContent, row.children.slice(1).map((cell) => cell.textContent)]));
+  assert.match(byFact["Deposit (the channel input)"][0], /^Hidden · c: 44444444…4444/);
+  assert.match(byFact["Paid to the service"][0], /c: 55555555…5555, c: 66666666…6666 \(payment and change; observers can't tell which\) · no revealed amount/);
+  assert.equal(byFact["Paid to the service"][1], "Yes: 50 µT");
+  assert.equal(byFact["Number of calls and price"][1], "Yes: 5 × 10 µT");
+  assert.match(byFact["Fees, timing, settle branch, two-output shape"][0], /^Visible/);
+  assert.equal(byFact["Funding transfer"], undefined, "the CLI run has no hosted funding row");
+  assert.match(h.elements.get("observer-leaks").textContent, /^What still leaks: fees, timing/);
+  assert.equal(h.elements.get("observer-explorer").href, "https://explorer.tari.mw/tx/recorded-settle-tx");
+  assert.equal(h.elements.get("observer-load").hidden, true);
+  assert.equal(h.elements.get("observer-refusal").hidden, true);
+  await h.elements.get("overspend").click();
+  assert.equal(h.elements.get("observer-refusal").hidden, false, "a later refusal is added to the panel");
+});
+
+test("the live observer view loads public fields only on request, and notes a refusal", async () => {
+  const h = makeHarness();
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Channel finalized|Live setup stopped/.test(h.elements.get("status").textContent));
+  for (let i = 0; i < 5; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  h.elements.get("overspend").click();
+  await h.waitFor(() => /refused the voucher/.test(h.elements.get("status").textContent));
+  h.elements.get("settle").click();
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("observer-view").hidden, false);
+  assert.match(h.elements.get("observer-service-heading").textContent, /Relay \(custodial service\)/);
+  const rows = () => Object.fromEntries(h.elements.get("observer-rows").children.map((row) => [row.children[0].textContent, row.children.slice(1).map((cell) => cell.textContent)]));
+  assert.match(rows()["Deposit (the channel input)"][1], /Yes: 51 µT \(it received the deposit\)/);
+  assert.match(rows()["Payer change"][2], /1 µT kept for the fixed two-output shape; .* not returned to Sapient/);
+  assert.match(rows()["Funding transfer"][0], /deposit amount is not revealed/);
+  assert.equal(h.elements.get("observer-refusal").hidden, false);
+  assert.match(h.elements.get("observer-refusal").textContent, /51 µT voucher went over the 50 µT spend limit/);
+  assert.equal(h.calls.some((call) => call.url.startsWith(INDEXER)), false, "no indexer lookup before the visitor asks");
+  assert.equal(h.elements.get("observer-load").hidden, false);
+  await h.elements.get("observer-load").click();
+  await h.waitFor(() => /^Hidden · c:/.test(rows()["Deposit (the channel input)"][0]));
+  assert.match(rows()["Paid to the service"][0], /c: 22222222…2222, c: 33333333…3333 \(payment and change; observers can't tell which\) · no revealed amount/);
+  assert.equal(h.elements.get("observer-load").hidden, true);
 });

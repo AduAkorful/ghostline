@@ -47,7 +47,24 @@
         1
       ]
     },
-    "runKind": "command-line run (local CLI and reference paid API)"
+    "runKind": "command-line run (local CLI and reference paid API)",
+    "settlementPublicFields": {
+      "source": "Esmeralda indexer-a GET /transactions/{id}, read 2026-10-24",
+      "inputCommitments": [
+        "42fcc41076de45ca4803f47f05d5292e1affe3150919746a077e95cb639f1b43"
+      ],
+      "revealedInputAmount": "0",
+      "outputCommitments": [
+        "f8961afd544bc8d0d6db95eb76bfcbdc7ec8d893a121c4c479e0ccdc2c44fd49",
+        "66902ca0476e4d446b0cbb783af9478cbd9f99ef16767117bf6585ed86f5b91f"
+      ],
+      "outputMinimumValuePromises": [
+        1,
+        1
+      ],
+      "revealedOutput": null,
+      "revealedInputBucket": null
+    }
   },
   "liveRunRecord": {
     "runKind": "hosted Sapient run (play page, opt-in custodial testnet relay)",
@@ -67,7 +84,24 @@
     "settlementTransactionUrl": "https://explorer.tari.mw/tx/f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9",
     "settlementFinality": "Finalized",
     "settlementFeeMicroTari": 17952,
-    "custody": "The relay received the 51 µT private deposit, opened the channel and settled it. The browser kept the voucher-signing key."
+    "custody": "The relay received the 51 µT private deposit, opened the channel and settled it. The browser kept the voucher-signing key.",
+    "settlementPublicFields": {
+      "source": "Esmeralda indexer-a GET /transactions/{id}, read 2026-10-24",
+      "inputCommitments": [
+        "f6bf7ba369f145ced64a7d419ce9d697c5caeee60d183e14370eca095f451968"
+      ],
+      "revealedInputAmount": "0",
+      "outputCommitments": [
+        "c031c29a2bd2fd1f027ae1d9efba58c2a2967a25638dcf1e741b28ad38073844",
+        "78a4730f3353eaba47699be74da5f8ce5178c1d9c0b7d96455610c9eaa22d56d"
+      ],
+      "outputMinimumValuePromises": [
+        1,
+        1
+      ],
+      "revealedOutput": null,
+      "revealedInputBucket": null
+    }
   },
   "batchRecord": {
     "status": "Trusted-local prototype; not coordinator-private",
@@ -126,6 +160,26 @@
     "dryRunRequiredFeeMicroTari": 9510,
     "feePaidMicroTari": 9498
   },
+  "refusalRecord": {
+    "kind": "refused",
+    "runDate": "2026-10-24",
+    "description": "A refund of a throwaway 51 µT channel submitted before its expiry epoch. The template's refund branch only opens at AfterEpoch(12658); the network took the fee and refused the rest, so the channel output stayed unspent.",
+    "templateAddress": "template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1",
+    "channelOpenTransactionId": "b30ad41dd784e3caeb0bb6c8465ddb36385eceb0fb429d5d4bccca6e6cf5d7e8",
+    "channelOpenTransactionUrl": "https://explorer.tari.mw/tx/b30ad41dd784e3caeb0bb6c8465ddb36385eceb0fb429d5d4bccca6e6cf5d7e8",
+    "refusedTransactionId": "38656a6594fa15caf2c2d733a00cc568f1b141e968541b7163d7f8a7df99d6d8",
+    "refusedTransactionUrl": "https://explorer.tari.mw/tx/38656a6594fa15caf2c2d733a00cc568f1b141e968541b7163d7f8a7df99d6d8",
+    "submittedAtEpoch": 12656,
+    "refundOpensAtEpoch": 12658,
+    "explorerOutcome": "FeeIntentCommit",
+    "indexerResult": "AcceptFeeRejectRest",
+    "reason": "AfterEpoch(12658)",
+    "reasonSource": "Esmeralda indexer-a GET /transactions/{id}/result; the explorer page shows the FeeIntentCommit outcome and the unspent channel input, not the reason text",
+    "feePaidMicroTari": 9133,
+    "feeCapMicroTari": 9500,
+    "channelOutputAfterRefusal": "up",
+    "matchingContractTest": "refund_before_expiry_is_rejected"
+  },
   "notes": [
     "The current template was published and finalized before the fresh standard, pooled-batch, and expiry-refund runs.",
     "The current clickable proof is the 2026-10-22 CLI run: open 9986c19d…, five HTTP /fortune calls at 10 µT (50 µT cumulative) in a local ledger, then settle 1684aad9…. Indexer-a reported Finalized Commit at the time. On 2026-10-23 explorer.tari.mw still loaded both IDs, although indexer-a no longer served their results. The chain does not prove the call count or exact service amount.",
@@ -136,7 +190,8 @@
     "The batch prototype is trusted-local only: its builder received both deposit masks and values. Observers can see the two channels are grouped in one transaction, and the coordinator can learn the deposits.",
     "The fresh current-template expiry refund finalized with a zero revealed input amount, no revealed output, one stealth output, and no covenant claims. The wallet confirmed the channel output is down. The dry-run estimated a 9,510 µT fee; the finalized transaction paid 9,498 µT from the payer-side fee account.",
     "Call counts and accepted totals are service-ledger evidence, not chain proof. This is a static evidence record; use the linked Esmeralda explorer transactions to inspect chain data.",
-    "Fees are public. The recorded CLI run's fees are in chainRecord, the hosted run's in liveRunRecord, and the pooled prototype's in batchRecord."
+    "Fees are public. The recorded CLI run's fees are in chainRecord, the hosted run's in liveRunRecord, and the pooled prototype's in batchRecord.",
+    "On 2026-10-24 a throwaway channel's refund was submitted two epochs before expiry (refusalRecord). The network refused it with AfterEpoch(12658), took the 9,133 µT fee and left the channel unspent: a recorded on-chain refusal matching the contract test refund_before_expiry_is_rejected."
   ],
   "historicalPreviousTemplateRefundRecord": {
     "testDescription": "Historical previous-template refund retained for reference; see refundRecord above for the fresh latest-template refund proof.",
@@ -170,7 +225,9 @@
       "3411459ed95199a041fb289df5a24037acff0557769a280c607f3f5c87e6bdf3": "not known to the public indexer",
       "050dc1cb38803875deb5bcbba7f124086c62f40a5ae82e902a780f3c171cd2a2": "not known to the public indexer",
       "9fafd105e83788ff169b5aa557b5a8230e71834fb4c238daf7ee0a449c23b7fc": "not known to the public indexer",
-      "73a0277ef980a890aed17a44e69e8d0f0bc373d3320376c421077d19e57a3b47": "not known to the public indexer"
+      "73a0277ef980a890aed17a44e69e8d0f0bc373d3320376c421077d19e57a3b47": "not known to the public indexer",
+      "b30ad41dd784e3caeb0bb6c8465ddb36385eceb0fb429d5d4bccca6e6cf5d7e8": "loads",
+      "38656a6594fa15caf2c2d733a00cc568f1b141e968541b7163d7f8a7df99d6d8": "loads"
     }
   }
 }
