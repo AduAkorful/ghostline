@@ -20,6 +20,8 @@ let liveChannel;
 let liveCalls = 0;
 let liveAccepted = 0n;
 let liveRefundPending = false;
+// A restored channel whose state the relay could not confirm; its live actions wait for a reload.
+let liveStateUnconfirmed = false;
 // Set once the live channel has settled or been refunded: { kind, url, transactionId, deposit }.
 let liveResult;
 let simulationMode = false;
@@ -437,7 +439,9 @@ async function restoreLiveChannel() {
         : `Restored open channel ${liveChannel.channelId}. Continue the calls or check for expiry refund.`);
     }
   } catch (error) {
-    status(`Live channel ${liveChannel.channelId} is saved in this tab, but the relay could not be reached: ${error instanceof Error ? error.message : String(error)}`);
+    liveStateUnconfirmed = true;
+    showRelayBanner("down");
+    status(`Live channel ${liveChannel.channelId} is saved in this tab, but the relay could not be reached: ${error instanceof Error ? error.message : String(error)} Its live actions stay paused until a reload reaches the relay; the simulation works now.`);
   }
   refreshControls();
 }
@@ -491,14 +495,14 @@ function refreshControls() {
   const callsDone = liveChannel && !simulationMode ? liveCalls === countLimit && !liveResult : paywall?.calls === countLimit;
   const live = Boolean(liveChannel && !simulationMode);
   byId("overspend").hidden = !callsDone || (live ? liveOverspendTried : simOverspendTried);
-  byId("overspend").disabled = liveRefundPending;
+  byId("overspend").disabled = liveRefundPending || (live && liveStateUnconfirmed);
   byId("overspend").textContent = `Try to overspend · sign ${(liveChannel && !simulationMode ? BigInt(liveChannel.deposit) : deposit).toString()} µT, past the spend limit`;
   byId("settle").hidden = Boolean(liveChannel && liveResult && !simulationMode);
   if (liveChannel && !simulationMode) {
-    byId("pay").disabled = liveRefundPending || liveCalls >= countLimit;
+    byId("pay").disabled = liveStateUnconfirmed || liveRefundPending || liveCalls >= countLimit;
     byId("pay").textContent = liveCalls >= countLimit ? "Five live calls complete" : `Send live call ${liveCalls + 1} of ${countLimit} · sign voucher`;
     byId("run-simulation").hidden = true;
-    byId("settle").disabled = liveRefundPending || liveCalls !== countLimit;
+    byId("settle").disabled = liveStateUnconfirmed || liveRefundPending || liveCalls !== countLimit;
     byId("settle").textContent = liveCalls === countLimit ? "Settle live channel" : "Settlement unlocks after 5 calls";
     byId("demo-progress").textContent = `${liveCalls} of ${countLimit} live calls complete · ${liveAccepted.toString()} µT accepted.`;
     return;
@@ -705,11 +709,13 @@ async function relayHealth(url) {
         return;
       }
       if (response.status >= 500 && response.status !== 503) throw new Error(`Relay health returned HTTP ${response.status}.`);
+      showRelayBanner("waking");
       status(`Relay is waking. Check ${attempt}; the instant simulation remains available.`);
     } catch (error) {
       if (error?.name !== "AbortError" && !(error instanceof TypeError)) {
         throw error;
       }
+      showRelayBanner("waking");
       status(`Relay is waking. Check ${attempt}; the instant simulation remains available.`);
     } finally {
       window.clearTimeout(timeout);
@@ -923,6 +929,7 @@ async function connectAndOpenLive() {
       return;
     }
     setupStage = "opening the funded channel through the relay";
+    byId("pending-funding-link").textContent = "Inspect your finalized Sapient funding transaction ↗";
     status("Funding is finalized. The relay is opening your channel; this can take up to two minutes. No second transfer will be requested.");
     const opened = await openFundedChannel(pending, openDeadline);
     clearPendingFunding();
@@ -1063,7 +1070,7 @@ function renderRefusal(amount, limit, reason) {
   label.textContent = `REFUSED · ${amount} µT`;
   const text = document.createElement("span");
   text.className = "fortune";
-  text.textContent = `✖ Refused: a voucher for ${amount} µT exceeds the ${limit} µT spend limit. Accepted total stays ${accepted} µT.`;
+  text.textContent = `✖ Refused: a voucher for ${amount} µT exceeds the ${limit} µT spend limit. The service answered "${reason}". Accepted total stays ${accepted} µT.`;
   item.append(label, text);
   byId("calls").prepend(item);
   status(`The service refused the voucher: "${reason}". Nothing reached the chain, and the accepted total is unchanged.`);

@@ -74,7 +74,7 @@ const EVIDENCE_FIXTURE = {
   },
 };
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], openGate, settleGate, fastTime = false, pending, txStatus = "Finalized" } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], openGate, settleGate, unreachableStatus = false, unreachableHealth = false, fastTime = false, pending, txStatus = "Finalized" } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -129,6 +129,8 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     calls.push({ url: url.href, method: (options.method || "GET").toUpperCase(), headers: new Headers(options.headers), body: options.body || "" });
     if (url.origin === INDEXER && url.pathname.startsWith("/transactions/")) return json(SETTLEMENT_RECORD);
     if (url.origin !== RELAY) throw new Error(`Unexpected outbound origin: ${url.origin}`);
+    if (unreachableHealth && url.pathname === "/healthz") throw new TypeError("Failed to fetch");
+    if (unreachableStatus && url.pathname === "/demo/status") throw new TypeError("Failed to fetch");
     if (url.pathname === "/healthz" || url.pathname === "/health" || url.pathname === "/") return failHealth ? json({ error: "missing" }, 404) : coldHealth ? json({ ok: false, walletReady: false }, 503) : json({ ok: true, walletReady: true });
     if (url.pathname === "/demo/tx-status") return json({ state: txStatus });
     if (url.pathname === "/demo/config") return json({ enabled: true, deposit: 51, price: 10, network: "esmeralda" });
@@ -790,7 +792,7 @@ test("a simulated overspend is refused with the paywall's message and leaves the
   await overspend.click();
   const refused = h.elements.get("calls").children[0];
   assert.equal(refused.className, "refused");
-  assert.match(refused.children[1].textContent, /51 µT exceeds the 50 µT spend limit/);
+  assert.match(refused.children[1].textContent, /51 µT exceeds the 50 µT spend limit\. The service answered "voucher exceeds channel spend limit \(51 > 50\)"/);
   assert.match(h.elements.get("status").textContent, /voucher exceeds channel spend limit \(51 > 50\)/);
   assert.equal(h.elements.get("total").textContent, "50 µT");
   assert.equal(overspend.hidden, true);
@@ -891,4 +893,52 @@ test("the live observer view loads public fields only on request, and notes a re
   await h.waitFor(() => /^Hidden · c:/.test(rows()["Deposit (the channel input)"][0]));
   assert.match(rows()["Paid to the service"][0], /c: 22222222…2222, c: 33333333…3333 \(payment and change; observers can't tell which\) · no revealed amount/);
   assert.equal(h.elements.get("observer-load").hidden, true);
+});
+
+test("a relay that cannot be reached at all shows the waking banner, then the down banner", async () => {
+  const h = makeHarness({ unreachableHealth: true, fastTime: true });
+  try {
+    await h.load();
+    const kinds = new Set();
+    const opening = h.elements.get("live-open").click();
+    await h.waitFor(() => {
+      const banner = h.elements.get("relay-banner");
+      if (banner && !banner.hidden) kinds.add(banner.dataset.kind);
+      return /Live setup stopped/.test(h.elements.get("status")?.textContent || "");
+    });
+    await opening;
+    assert.ok(kinds.has("waking"), "waking banner shown while retrying");
+    assert.equal(h.elements.get("relay-banner").dataset.kind, "down");
+  } finally { h.restoreClock(); }
+});
+
+test("a restored live channel stays paused when the relay cannot confirm its state", async () => {
+  const h = makeHarness({ unreachableStatus: true, fastTime: true });
+  const payerSecret = new Uint8Array(32).fill(4);
+  const servicePublicKey = hex(publicKeyFromSecret(new Uint8Array(32).fill(9)));
+  h.session.set("ghostline-live-payer-secret", hex(payerSecret));
+  h.session.set("ghostline-live-channel", JSON.stringify({
+    channel: {
+      channelId: "c".repeat(64), payerRoot: hex(new Uint8Array(32).fill(7)), nonce: hex(new Uint8Array(32).fill(8)), networkTag: 38, deposit: "51",
+      expiryEpoch: 999, servicePublicKey, serviceOutputPublicKey: servicePublicKey, payerPublicKey: hex(publicKeyFromSecret(payerSecret)),
+    },
+    calls: 5,
+    accepted: "50",
+  }));
+  try {
+    await h.load();
+    await h.waitFor(() => /relay could not be reached/.test(h.elements.get("status").textContent));
+    assert.equal(h.elements.get("settle").disabled, true, "no settle against an unconfirmed channel");
+    assert.equal(h.elements.get("pay").disabled, true);
+    assert.equal(h.elements.get("relay-banner").dataset.kind, "down");
+    assert.equal(h.elements.get("relay-banner").hidden, false);
+  } finally { h.restoreClock(); }
+});
+
+test("the funding link drops 'pending' once the transfer finalizes", async () => {
+  const h = makeHarness({ openGate: new Promise(() => {}) });
+  await h.load();
+  h.elements.get("live-open").click();
+  await h.waitFor(() => /relay is opening your channel/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("pending-funding-link").textContent, "Inspect your finalized Sapient funding transaction ↗");
 });
