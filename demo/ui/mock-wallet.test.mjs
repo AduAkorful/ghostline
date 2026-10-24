@@ -55,7 +55,7 @@ const EVIDENCE_FIXTURE = {
   },
 };
 
-function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], settleGate, fastTime = false, pending, txStatus = "Finalized" } = {}) {
+function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrides = {}, failHealth = false, coldHealth = false, failOpen = false, openFailures = [], openGate, settleGate, fastTime = false, pending, txStatus = "Finalized" } = {}) {
   const elements = new Map();
   const session = new Map();
   const local = new Map();
@@ -118,6 +118,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
       return json({ sessionId: "session-test", fundingAddress: "otl_esm_1relay", deposit: 51, price: 10 }, 201);
     }
     if (url.pathname === "/demo/open") {
+      if (openGate) await openGate;
       if (failOpen) return json("relay cannot verify the receiver output", 422);
       if (openFailures.length) return json(openFailures.shift(), 400);
       const payerRoot = new Uint8Array(32).fill(7);
@@ -694,4 +695,55 @@ test("the page asks again after the relay stops stepping past recreated outputs,
     assert.equal(h.calls.filter((call) => call.url.includes("/demo/open")).length, 2);
     assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
   } finally { h.restoreClock(); }
+});
+
+test("while the approved transfer is opening, the page shows progress instead of the lock note or refund controls", async () => {
+  let release;
+  const openGate = new Promise((resolve) => { release = resolve; });
+  let polls = 0;
+  const h = makeHarness({
+    fastTime: true,
+    openGate,
+    walletOverrides: { tari_getTransactionRequest: () => ({ status: (polls += 1) > 5 ? "approved" : "pending" }) },
+  });
+  try {
+    await h.load();
+    const opening = h.elements.get("live-open").click();
+    await h.waitFor(() => /relay is opening your channel/.test(h.elements.get("status").textContent));
+    assert.doesNotMatch(h.elements.get("live-note").textContent, /may be locked/);
+    assert.match(h.elements.get("live-note").textContent, /Sapient approved the private transfer/);
+    assert.equal(h.elements.get("live-open").textContent, "Opening channel…");
+    assert.equal(h.elements.get("refund-pending-funding").hidden, true);
+    assert.equal(h.elements.get("abandon-pending-funding").hidden, true);
+    release();
+    await opening;
+    await h.waitFor(() => /Channel finalized/.test(h.elements.get("status").textContent));
+    assert.equal(h.elements.get("pending-funding-link").hidden, true);
+    assert.equal(h.elements.get("refund-pending-funding").hidden, true);
+  } finally { h.restoreClock(); }
+});
+
+test("a failed open with a saved transfer offers refund and retry once setup stops", async () => {
+  const h = makeHarness({ failOpen: true });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Live setup stopped/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("refund-pending-funding").hidden, false);
+  assert.equal(h.elements.get("abandon-pending-funding").hidden, false);
+  assert.match(h.elements.get("live-open").textContent, /Retry/);
+});
+
+test("the settled view shows one channel-open link and no leftover funding link", async () => {
+  const h = makeHarness();
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /Channel finalized/.test(h.elements.get("status").textContent));
+  for (let i = 0; i < 5; i += 1) {
+    await h.elements.get("pay").click();
+    await h.waitFor(() => (h.elements.get("calls")?.children.length || 0) === i + 1);
+  }
+  await h.waitFor(() => /Live settlement finalized/.test(h.elements.get("status").textContent));
+  assert.equal(h.elements.get("open-explorer-link").hidden, false);
+  assert.equal(h.elements.get("open-tx-link").hidden, true);
+  assert.equal(h.elements.get("pending-funding-link").hidden, true);
 });

@@ -24,6 +24,9 @@ let liveResult;
 let simulationMode = false;
 let liveSetupCancelled = false;
 let abandonArmed = false;
+// While live setup is running, refund and abandon would race the relay open (QA final rerun).
+let liveOpenInFlight = false;
+const LIVE_OPEN_PROGRESS_LABELS = new Set(["Checking Sapient…", "Waiting for Sapient approval…", "Opening channel…", "Retrying relay open…"]);
 
 const XTR_RESOURCE = `resource_${"01".repeat(32)}`;
 const LIVE_PENDING_KEY = "ghostline-live-pending";
@@ -93,8 +96,8 @@ function showPendingFundingControls(pending) {
     return;
   }
   showPendingFunding(pending.fundingTxId);
-  byId("refund-pending-funding").hidden = false;
-  byId("abandon-pending-funding").hidden = false;
+  byId("refund-pending-funding").hidden = liveOpenInFlight;
+  byId("abandon-pending-funding").hidden = liveOpenInFlight;
   byId("live-stop").hidden = false;
   byId("live-stop").textContent = "Continue with simulation";
   if (!byId("live-open").disabled) {
@@ -176,6 +179,9 @@ function showResult({ label, summary, txLabel, transactionId, url, linkText, ope
     openLink.textContent = openLinkText || "Inspect the channel-open transaction ↗";
   }
   byId("result-note").textContent = note;
+  // The result card carries the open link; links from earlier stages must not repeat it.
+  byId("open-tx-link").hidden = true;
+  if (!readPendingFunding()) byId("pending-funding-link").hidden = true;
   byId("chain-empty").hidden = true;
   byId("chain-result").hidden = false;
 }
@@ -652,6 +658,7 @@ async function openFundedChannel(pending, deadline) {
 async function connectAndOpenLive() {
   let setupStage = "checking relay configuration";
   liveSetupCancelled = false;
+  liveOpenInFlight = true;
   byId("live-open").disabled = true;
   byId("live-open").textContent = "Checking Sapient…";
   byId("live-stop").hidden = false;
@@ -721,6 +728,7 @@ async function connectAndOpenLive() {
         memo,
       });
       status("Approve the private testnet transfer in Sapient. If the wallet is locked, unlock it and approve the queued request. The relay will wait for finality before opening your channel.");
+      byId("live-open").textContent = "Waiting for Sapient approval…";
       const funding = await waitWalletRequest(operation.requestId);
       if (!funding?.transactionId) throw new Error("Sapient did not return the funding transaction id.");
       pending = {
@@ -731,6 +739,8 @@ async function connectAndOpenLive() {
       };
       savePendingFunding(pending);
       showPendingFundingControls(pending);
+      byId("live-open").textContent = "Opening channel…";
+      byId("live-note").textContent = "Sapient approved the private transfer. Waiting for it to finalize; the relay then opens your channel. No second transfer will be requested.";
       if (liveSetupCancelled) {
         status("The approved funding transaction is saved in this browser. Continue live setup later to open its channel without sending again.");
         return;
@@ -740,6 +750,7 @@ async function connectAndOpenLive() {
       showPendingFundingControls(pending);
       if (payerSecret.length !== 32) throw new Error("This browser has a funded transfer saved, but its local voucher-signing key is unavailable in this tab. Return the pending deposit to Sapient, or abandon the saved transfer to start over. Do not send another deposit.");
       byId("live-open").textContent = "Retrying relay open…";
+      byId("live-note").textContent = "Retrying the open for your saved, approved transfer. No second transfer will be requested.";
       status("Retrying the relay open for your existing finalized funding transaction; no second wallet transfer will be requested.");
       showPendingFunding(pending.fundingTxId);
     }
@@ -785,6 +796,7 @@ async function connectAndOpenLive() {
     refreshControls();
     status("Channel finalized. Each click now sends a real signed voucher to the relay.");
   } catch (error) {
+    liveOpenInFlight = false;
     const pending = readPendingFunding();
     const cancelled = Number(error?.code) === 4001;
     byId("live-stop").hidden = false;
@@ -812,9 +824,15 @@ async function connectAndOpenLive() {
       status(`Live setup stopped while ${setupStage}: ${detail}.${pending ? " Your funding transaction is saved in this browser; retry without sending again." : " No channel was opened."}`);
     }
   } finally {
+    liveOpenInFlight = false;
     byId("live-open").disabled = false;
-    if (byId("live-open").textContent === "Checking Sapient…") {
-      byId("live-open").textContent = "Connect Sapient and open channel";
+    const pending = readPendingFunding();
+    if (pending && !liveChannel) {
+      byId("refund-pending-funding").hidden = false;
+      byId("abandon-pending-funding").hidden = false;
+    }
+    if (LIVE_OPEN_PROGRESS_LABELS.has(byId("live-open").textContent)) {
+      byId("live-open").textContent = pending ? "Retry opening channel (no new charge)" : "Connect Sapient and open channel";
     }
   }
 }
