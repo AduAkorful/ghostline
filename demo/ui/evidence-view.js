@@ -16,81 +16,21 @@ export function explorerStatus(evidence, transactionId) {
 
 // Each run lists only fields the record has; nothing is filled in from elsewhere.
 export function describeRuns(evidence) {
-  const chain = evidence.chainRecord;
-  const service = evidence.serviceRecord;
-  const live = evidence.liveRunRecord;
-  const refund = evidence.refundRecord;
-  const batch = evidence.batchRecord;
   const template = evidence.templateRecord;
+  const opened = evidence.postResetOpen;
   const runs = [];
-  if (live) {
-    runs.push({
-      title: `Hosted Sapient run · ${formatRunDate(live.runDate)}`,
-      summary: `${live.successfulCalls} paid calls at ${live.unitPriceMicroTari} µT · ${live.acceptedTotalMicroTari} µT accepted · ${live.depositMicroTari} µT deposit. ${live.custody}`,
-      transactions: [
-        ["Private funding", live.fundingTransactionId, live.fundingTransactionUrl],
-        [`Channel open · fee ${number.format(live.openFeeMicroTari)} µT`, live.openTransactionId, live.openTransactionUrl],
-        [`Settlement · fee ${number.format(live.settlementFeeMicroTari)} µT`, live.settlementTransactionId, live.settlementTransactionUrl],
-      ],
-    });
-  }
-  if (chain) {
-    runs.push({
-      title: `Command-line run · ${formatRunDate(evidence.runDate)}`,
-      summary: `${service.successfulCalls} paid calls at ${service.unitPriceMicroTari} µT · ${service.acceptedTotalMicroTari} µT accepted (service ledger). Deposit and service amount hidden in public fields.`,
-      transactions: [
-        [`Channel open · fee ${number.format(chain.openFeeMicroTari)} µT`, chain.openTransactionId, chain.openTransactionUrl],
-        [`Settlement · fee ${number.format(chain.settlementFeeMicroTari)} µT`, chain.settlementTransactionId, chain.settlementTransactionUrl],
-      ],
-    });
-  }
-  if (refund) {
-    runs.push({
-      title: "Expiry refund · latest template",
-      summary: `Payer refund after expiry epoch ${refund.expiryEpoch}; fee ${number.format(refund.feePaidMicroTari)} µT. The recipient output was not unblinded to check the amount received.`,
-      transactions: [
-        ["Channel open", refund.channelOpenTransactionId, refund.channelOpenTransactionUrl],
-        ["Refund", refund.refundTransactionId, refund.refundTransactionUrl],
-      ],
-    });
-  }
-  if (batch) {
-    runs.push({
-      title: "Pooled settlement · trusted-local prototype",
-      summary: `Two channels with ${batch.channels.map((channel) => channel.successfulCalls).join(" and ")} calls closed in one settlement (fee ${number.format(batch.feeMicroTari)} µT). ${batch.coordinatorPrivacy}`,
-      transactions: [
-        ...batch.channels.map((channel, index) => [`Channel ${index + 1} open`, channel.openTransactionId, channel.openTransactionUrl]),
-        ["Pooled settlement", batch.settlementTransactionId, batch.settlementTransactionUrl],
-      ],
-    });
-  }
-  const refusal = evidence.refusalRecord;
-  if (refusal) {
-    runs.push({
-      title: `On-chain refusal · ${formatRunDate(refusal.runDate)}`,
-      summary: `${refusal.description} Explorer outcome: ${refusal.explorerOutcome}; indexer result: ${refusal.indexerResult}, reason ${refusal.reason}. Fee ${number.format(refusal.feePaidMicroTari)} µT.`,
-      transactions: [
-        ["Throwaway channel open", refusal.channelOpenTransactionId, refusal.channelOpenTransactionUrl],
-        ["Refused early refund", refusal.refusedTransactionId, refusal.refusedTransactionUrl],
-      ],
-    });
-  }
-  const previousRefund = evidence.historicalPreviousTemplateRefundRecord;
-  if (previousRefund) {
-    runs.push({
-      title: "Expiry refund · previous template (historical)",
-      summary: previousRefund.testDescription,
-      transactions: [
-        ["Channel open", previousRefund.channelOpenTransactionId, previousRefund.channelOpenTransactionUrl],
-        ["Refund", previousRefund.refundTransactionId, previousRefund.refundTransactionUrl],
-      ],
-    });
-  }
   if (template) {
     runs.push({
-      title: "Channel template publish",
-      summary: `Template ${template.address}; fee ${number.format(template.publishFeeMicroTari)} µT.`,
+      title: `Channel template publish · ${formatRunDate(template.publishedOn || evidence.runDate)}`,
+      summary: `Template ${template.address}; fee ${number.format(template.publishFeeMicroTari)} µT. ${template.finality}.`,
       transactions: [["Template publish", template.publishTransactionId, template.publishTransactionUrl]],
+    });
+  }
+  if (opened) {
+    runs.push({
+      title: `Channel open · ${formatRunDate(opened.runDate)}`,
+      summary: `${opened.depositMicroTari} µT deposit. Fee cap ${number.format(opened.openFeeCapMicroTari)} µT. ${opened.openFeeNote || ""} ${opened.note || ""}`.replace(/\s+/g, " ").trim(),
+      transactions: [["Channel open", opened.openTransactionId, opened.openTransactionUrl]],
     });
   }
   return runs;

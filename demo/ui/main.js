@@ -262,49 +262,26 @@ async function loadEvidence() {
   const response = await fetch("evidence.json");
   if (!response.ok) throw new Error("Evidence record could not be loaded.");
   const evidence = await response.json();
-  const service = evidence.serviceRecord;
-  const chain = evidence.chainRecord;
-  document.querySelector("#call-count").textContent = number.format(service.successfulCalls);
-  document.querySelector("#unit-price").textContent = `${number.format(service.unitPriceMicroTari)} µT`;
-  document.querySelector("#accepted-total").textContent = `${number.format(service.acceptedTotalMicroTari)} µT`;
-  document.querySelector("#open-tx").textContent = chain.openTransactionId;
-  document.querySelector("#settle-tx").textContent = chain.settlementTransactionId;
-  document.querySelector("#open-tx-link").href = chain.openTransactionUrl;
-  document.querySelector("#settle-tx-link").href = chain.settlementTransactionUrl;
-  document.querySelector("#refund-open-tx-link").href = evidence.refundRecord.channelOpenTransactionUrl;
-  document.querySelector("#refund-tx-link").href = evidence.refundRecord.refundTransactionUrl;
-  const templateAddress = evidence.templateRecord.address;
+  const template = evidence.templateRecord;
+  const opened = evidence.postResetOpen;
+  const templateAddress = template.address;
   document.querySelector("#template-address").textContent = `${templateAddress.slice(0, 12)}…${templateAddress.slice(-8)}`;
-  document.querySelector("#template-tx-link").href = evidence.templateRecord.publishTransactionUrl;
-  document.querySelector("#comparison-settlement-link").href = chain.settlementTransactionUrl;
-  document.querySelector("#comparison-settlement-link").setAttribute("aria-label", `Inspect settlement ${chain.settlementTransactionId} in Tari explorer`);
-  document.querySelector("#batch-tx-link").href = evidence.batchRecord.settlementTransactionUrl;
-  document.querySelector("#settled-total").textContent = chain.settledTotalMicroTari == null ? "Hidden" : `${number.format(chain.settledTotalMicroTari)} µT`;
-  document.querySelector("#deposit-total").textContent = "Hidden";
-  document.querySelector("#settlement-fee").textContent = chain.settlementFeeMicroTari == null ? "Public · see explorer" : `${number.format(chain.settlementFeeMicroTari)} µT`;
-  document.querySelector("#output-status").textContent = chain.channelOutputAfterSettlement;
-  const live = evidence.liveRunRecord;
+  document.querySelector("#template-tx-link").href = template.publishTransactionUrl;
+  document.querySelector("#template-id-link").href = template.publishTransactionUrl;
+  document.querySelector("#template-tx").textContent = template.publishTransactionId;
+  document.querySelector("#open-tx").textContent = opened.openTransactionId;
+  document.querySelector("#open-tx-link").href = opened.openTransactionUrl;
+  document.querySelector("#publish-fee").textContent = `${number.format(template.publishFeeMicroTari)} µT`;
+  document.querySelector("#open-fee").textContent = `${number.format(opened.openFeeCapMicroTari)} µT`;
+  document.querySelector("#template-finality").textContent = template.finality.toUpperCase();
+  document.querySelector("#open-finality").textContent = opened.openFinality.toUpperCase();
   const checked = evidence.explorerAvailability?.checkedOn;
-  document.querySelector("#evidence-date").textContent = `Command-line run: ${formatRunDate(evidence.runDate)}${live ? ` · hosted run: ${formatRunDate(live.runDate)}` : ""}${checked ? ` · explorer status checked ${formatRunDate(checked)}` : ""}. Static evidence, not a live network read.`;
-  const statusLinks = [
-    ["#open-tx-link", chain.openTransactionId],
-    ["#settle-tx-link", chain.settlementTransactionId],
-    ["#refund-open-tx-link", evidence.refundRecord.channelOpenTransactionId],
-    ["#refund-tx-link", evidence.refundRecord.refundTransactionId],
-    ["#template-tx-link", evidence.templateRecord.publishTransactionId],
-    ["#batch-tx-link", evidence.batchRecord.settlementTransactionId],
-  ];
-  if (live) {
-    statusLinks.push(["#live-funding-link", live.fundingTransactionId], ["#live-open-link", live.openTransactionId], ["#live-settle-link", live.settlementTransactionId]);
-    for (const [selector, key] of [["#live-funding-link", "funding"], ["#live-open-link", "open"], ["#live-settle-link", "settlement"]]) {
-      document.querySelector(selector).href = live[`${key}TransactionUrl`];
-    }
-  }
-  for (const [selector, transactionId] of statusLinks) markExplorerStatus(document.querySelector(selector), evidence, transactionId);
-  document.querySelectorAll(".finality").forEach((element, index) => {
-    const reportedFinality = index === 0 ? chain.openFinality : chain.settlementFinality;
-    element.textContent = `RUN LOG · ${reportedFinality.toUpperCase()}`;
-  });
+  document.querySelector("#evidence-date").textContent = `Recorded ${formatRunDate(evidence.runDate)}${checked ? ` · explorer status checked ${formatRunDate(checked)}` : ""}. Static evidence, not a live network read.`;
+  for (const [selector, transactionId] of [
+    ["#template-tx-link", template.publishTransactionId],
+    ["#template-id-link", template.publishTransactionId],
+    ["#open-tx-link", opened.openTransactionId],
+  ]) markExplorerStatus(document.querySelector(selector), evidence, transactionId);
 }
 
 loadEvidence().catch(() => {

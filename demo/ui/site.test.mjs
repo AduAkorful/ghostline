@@ -57,36 +57,26 @@ test("dates use one format: day, short month, year", () => {
 
 test("landing evidence links ship real hrefs that match evidence.json", () => {
   const index = html["index.html"];
-  const chain = evidence.chainRecord;
-  const live = evidence.liveRunRecord;
+  const opened = evidence.postResetOpen;
   const expected = {
-    "open-tx-link": chain.openTransactionUrl,
-    "settle-tx-link": chain.settlementTransactionUrl,
-    "comparison-settlement-link": chain.settlementTransactionUrl,
-    "refund-open-tx-link": evidence.refundRecord.channelOpenTransactionUrl,
-    "refund-tx-link": evidence.refundRecord.refundTransactionUrl,
+    "open-tx-link": opened.openTransactionUrl,
     "template-tx-link": evidence.templateRecord.publishTransactionUrl,
-    "batch-tx-link": evidence.batchRecord.settlementTransactionUrl,
-    "live-funding-link": live.fundingTransactionUrl,
-    "live-open-link": live.openTransactionUrl,
-    "live-settle-link": live.settlementTransactionUrl,
+    "template-id-link": evidence.templateRecord.publishTransactionUrl,
   };
   for (const [id, url] of Object.entries(expected)) {
     const tag = new RegExp(`<a\\b[^>]*\\bid="${id}"[^>]*>`).exec(index)?.[0];
     assert.ok(tag, `landing has #${id}`);
     assert.equal(/href="([^"]*)"/.exec(tag)?.[1], url, `#${id} links to the recorded transaction`);
   }
-  assert.ok(index.includes(chain.openTransactionId) && index.includes(chain.settlementTransactionId), "ids are present without JavaScript");
+  assert.ok(index.includes(opened.openTransactionId) && index.includes(evidence.templateRecord.publishTransactionId), "ids are present without JavaScript");
+  assert.doesNotMatch(index, /9986c19d|1684aad9|61bad5eb|22 Oct 2026|23 Oct 2026/);
 });
 
-test("landing copy matches the recorded call counts and labels each run separately", () => {
+test("landing copy matches the current template record", () => {
   const index = html["index.html"];
-  const calls = evidence.serviceRecord.successfulCalls;
-  assert.equal(evidence.liveRunRecord.successfulCalls, calls);
-  assert.doesNotMatch(index, /20 paid calls and one settlement|covers 20 paid HTTP calls|records 20 paid calls/);
-  assert.match(index, new RegExp(`${calls} paid calls and one settlement`));
-  assert.match(index, new RegExp(`command-line run on ${formatRunDate(evidence.runDate)}`));
-  assert.match(index, new RegExp(`hosted Sapient run on ${formatRunDate(evidence.liveRunRecord.runDate)}`));
+  assert.match(index, /2 Nov 2026/);
+  assert.match(index, /51 µT/);
+  assert.match(index, /No paid calls and no settlement are recorded on this template/);
   assert.match(index, /Try the 5-call simulation \(no wallet\)/);
   assert.match(index, /Mediums, start here/);
   assert.doesNotMatch(index.replace(/\b(class|id|aria-labelledby)="[^"]*judge[^"]*"/g, ""), /judge/i, "visible copy never addresses judges");
@@ -132,17 +122,12 @@ test("the play page has the observer view, overspend control and relay banner", 
   assert.match(read("play.js"), /\["Fees, timing, settle branch, two-output shape", live \? "Visible/);
 });
 
-test("recorded settlements carry the public fields an observer can read", () => {
-  for (const record of [evidence.chainRecord, evidence.liveRunRecord]) {
-    const fields = record.settlementPublicFields;
-    assert.ok(fields, `${record.settlementTransactionId} has public fields`);
-    assert.equal(fields.inputCommitments.length, 1);
-    assert.equal(fields.outputCommitments.length, 2, "fixed two-output settlement");
-    for (const commitment of [...fields.inputCommitments, ...fields.outputCommitments]) assert.match(commitment, /^[0-9a-f]{64}$/);
-    assert.equal(fields.revealedInputAmount, "0");
-    assert.equal(fields.revealedOutput, null);
-    assert.equal(fields.revealedInputBucket, null);
-  }
+test("the current record is a template publish and one open, with no settlement", () => {
+  assert.equal(evidence.postResetOpen.depositMicroTari, 51);
+  assert.equal(evidence.postResetOpen.templateAddress, evidence.templateRecord.address);
+  assert.equal(evidence.postResetOpen.note.includes("No paid calls"), true);
+  assert.equal(evidence.chainRecord, undefined);
+  assert.equal(evidence.liveRunRecord, undefined);
 });
 
 test("the custodial relay is described the same way on the play page and in the Sapient notes", () => {
@@ -158,12 +143,3 @@ test("any demo video the landing page embeds is in the published files", () => {
   }
 });
 
-test("the recorded on-chain refusal states its reason and leaves the channel unspent", () => {
-  const refusal = evidence.refusalRecord;
-  assert.equal(refusal.kind, "refused");
-  assert.equal(refusal.reason, `AfterEpoch(${refusal.refundOpensAtEpoch})`);
-  assert.ok(refusal.submittedAtEpoch < refusal.refundOpensAtEpoch, "submitted before the refund branch opened");
-  assert.equal(refusal.channelOutputAfterRefusal, "up");
-  assert.ok(refusal.feePaidMicroTari <= refusal.feeCapMicroTari);
-  assert.match(refusal.refusedTransactionId, /^[0-9a-f]{64}$/);
-});

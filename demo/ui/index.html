@@ -74,7 +74,7 @@
           </svg>
           <div class="art-legend"><span><i class="legend-dot dot-payer"></i>PAYER</span><span><i class="legend-dot dot-service"></i>SERVICE</span><span><i class="legend-dot dot-chain"></i>OOTLE</span></div>
           <div class="art-caption"><span>OFF-CHAIN · MANY</span><span>ON-CHAIN · ONE</span></div>
-          <p class="art-footnote">Schematic flow. Recorded proof: 5 paid calls and one settlement, in a 22 Oct 2026 command-line run and a 23 Oct 2026 hosted run. Motion is illustrative, not a live transaction feed.</p>
+          <p class="art-footnote">Schematic flow. The current Esmeralda record is a template publish and a 51 µT channel open on 2 Nov 2026. Motion is illustrative, not a live transaction feed.</p>
         </div>
         <div class="hero-index" aria-hidden="true"><span>01 — 08</span><span>SCROLL TO FOLLOW THE TRACE ↓</span></div>
       </section>
@@ -89,13 +89,13 @@
             <article class="judge-option judge-option-proof">
               <p class="judge-option-index">01 <span>BROWSER · NO WALLET</span></p>
               <h3>Run the 5-call simulation</h3>
-              <p>Sign five vouchers in your browser against a simulated paywall, then see a recorded settlement. With Sapient on Esmeralda you can instead fund a real channel and watch your own open and settlement finalize.</p>
+              <p>Sign five vouchers in your browser against a simulated paywall. With Sapient on Esmeralda you can fund a real channel and watch your own open and settlement finalize.</p>
               <a href="play.html">Open the demo <span aria-hidden="true">→</span></a>
             </article>
             <article class="judge-option">
               <p class="judge-option-index">02 <span>NO SETUP</span></p>
               <h3>Inspect the recorded proof</h3>
-              <p>Two recorded runs, each with 5 paid calls and one settlement: a command-line run and a hosted Sapient run. Each explorer link shows whether the public indexer still serves it.</p>
+              <p>The current record is the 2 Nov 2026 template publish and one 51 µT channel open. A paid-call settlement on this template is not recorded yet.</p>
               <a href="#evidence">Open the evidence <span aria-hidden="true">↓</span></a>
             </article>
             <article class="judge-option">
@@ -105,7 +105,7 @@
               <a href="#start">Find the commands <span aria-hidden="true">↓</span></a>
             </article>
           </div>
-          <p class="judge-path-note">The motion graphics are illustrative, not a live transaction feed. Explorer links to older records stop loading after the public indexer drops them; <a href="evidence.html">every record and its status</a> is listed separately.</p>
+          <p class="judge-path-note">The motion graphics are illustrative, not a live transaction feed. <a href="evidence.html">The recorded transactions</a> are the ones the indexer currently has, with the status from the last check.</p>
         </div>
       </section>
 
@@ -204,19 +204,19 @@ ghostline channel open --file /private/channel.json --max-fee &lt;reviewed-cap&g
               <p>Read the channel state and export call accounting. Check the indexer separately for transaction results and output state.</p>
               <div class="command-card"><div class="command-head"><span>LOCAL RECORD · NOT CHAIN PROOF</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel status --file /private/channel.json
 ghostline channel calls --dir /private/channels --out calls.csv</code></pre></div>
-              <p class="chapter-aside">Call details come from the service ledger. The latest claim-free Esmeralda settlement used the deployed fixed-output rule: two stealth outputs and a 1 µT payer reserve. The deposit and service amount remained unrevealed.</p>
+              <p class="chapter-aside">Call details come from the service ledger. A claim-free settlement uses two stealth outputs and a 1 µT payer reserve, so the deposit and service amount stay unrevealed in that shape.</p>
             </article>
 
             <article class="story-chapter" id="step-settle" data-scene="settle" aria-labelledby="chapter-settle">
               <p class="chapter-index"><span>07</span><i></i> CLOSE AND VERIFY</p>
               <h3 id="chapter-settle">Many accepted calls.<br /><em>One settlement.</em></h3>
-              <p>Review the result, choose to submit, then ask the indexer for finality. The latest Esmeralda test finalized one settlement while hiding the service amount from observers.</p>
+              <p>Review the result, choose to submit, then ask the indexer for finality. A claim-free settlement hides the service amount from observers.</p>
               <div class="command-card"><div class="command-head"><span>DRY-RUN → INTENTIONAL SUBMIT</span><button class="copy-command" type="button">Copy</button></div><pre><code>ghostline channel settle --file /private/channel.json --dry-run
 # Submit only after review:
 ghostline channel settle --file /private/channel.json --submit
 # Verify the returned transaction id:
 ghostline indexer result --url &lt;indexer-url&gt; --transaction-id &lt;tx-id&gt;</code></pre></div>
-              <p class="chapter-aside">The live settlement finalized on Esmeralda with no covenant claim or plaintext amounts. The latest template's fixed two-output rule was also exercised on Esmeralda. Fees and timing remain public.</p>
+              <p class="chapter-aside">A claim-free settlement has no covenant claim or plaintext amounts. Fees and timing remain public. This template does not yet have a recorded paid-call settlement.</p>
             </article>
 
             <article class="story-chapter refund-chapter" id="step-refund" data-scene="refund" aria-labelledby="chapter-refund">
@@ -235,64 +235,24 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
 
       <section class="evidence-section" id="evidence" aria-labelledby="evidence-title">
         <div class="shell">
-          <div class="evidence-heading"><div><p class="eyebrow">THE RECEIPT HAS TWO SIDES</p><h2 id="evidence-title">Service log.<br /><span>Chain finality.</span></h2></div><p>Two recorded runs, each with 5 paid HTTP calls and one settlement: a command-line run on 22 Oct 2026 and a hosted Sapient run on 23 Oct 2026. The service ledger records the calls; the chain records the open and the settlement.</p></div>
+          <div class="evidence-heading"><div><p class="eyebrow">ON THE INDEXER NOW</p><h2 id="evidence-title">Template.<br /><span>One open.</span></h2></div><p>On 2 Nov 2026 the channel template was published and a 51 µT channel opened. Both transactions finalized. No paid calls and no settlement are recorded on this template.</p></div>
           <aside class="evidence-availability" role="note">
             <strong>Explorer links age out.</strong>
-            <span>The public indexer keeps transaction bodies for about 50 epochs; after that the explorer says “not known to this indexer”. On 23 Oct 2026 both runs below still loaded. The refund, the pooled settlement and the template publish no longer did. Each link shows its last checked status, and <a href="evidence.html">every record</a> is listed with its status.</span>
+            <span>The public indexer keeps transaction bodies for about 50 epochs; after that the explorer says “not known to this indexer”. Both transactions below loaded on 2 Nov 2026. <a href="evidence.html">Each record</a> shows that status.</span>
           </aside>
           <div class="evidence-grid" id="evidence-grid" aria-live="polite">
-            <article class="evidence-panel service-panel">
-              <div class="panel-top"><span class="source-tag"><span aria-hidden="true">01 /</span> Service-side call record</span><span class="source-kind">OFF-CHAIN</span></div>
-              <p class="panel-description">Recorded by the reference HTTP paywall during the 22 Oct 2026 command-line run.</p>
-              <div class="call-count"><strong id="call-count">—</strong><span>successful<br /><code>/fortune</code> calls</span></div>
-              <div class="metric-row"><div><span>Price per call</span><strong id="unit-price">—</strong></div><div><span>Accepted total</span><strong id="accepted-total">—</strong></div></div>
-              <div class="mini-receipt"><p><strong>One cumulative voucher</strong><br /><span>Each accepted call updates the off-chain total.</span></p><span class="receipt-status">RECORDED</span></div>
-            </article>
-            <div class="evidence-bridge" aria-hidden="true"><span>same run</span><b>⇢</b></div>
             <article class="evidence-panel chain-panel">
-              <div class="panel-top"><span class="source-tag"><span aria-hidden="true">02 /</span> Esmeralda chain record</span><span class="source-kind">INDEXER / CHAIN</span></div>
-              <p class="panel-description">The 22 Oct 2026 command-line run: a finalized channel open and settlement. The service amount was hidden in the inspected public transaction fields. Template: <a id="template-tx-link" href="https://explorer.tari.mw/tx/59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">template_61b…0d7157a1</code></a></p>
+              <div class="panel-top"><span class="source-tag"><span aria-hidden="true">01 /</span> Esmeralda chain record</span><span class="source-kind">INDEXER / CHAIN</span></div>
+              <p class="panel-description">Published 2 Nov 2026. Template: <a id="template-tx-link" href="https://explorer.tari.mw/tx/7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">template_a43…8417c31e</code></a></p>
               <div class="chain-events">
-                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened</strong><span class="finality">RUN LOG</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" href="https://explorer.tari.mw/tx/9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">9986c19de891f43877fe36b76e1bcd90de4deecd5ec0e3f53c6f63be7126aaa1</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
-                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Voucher settled</strong><span class="finality">RUN LOG</span></div><div class="tx-line"><a class="tx-link" id="settle-tx-link" href="https://explorer.tari.mw/tx/1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc" target="_blank" rel="noopener noreferrer" aria-label="View settlement transaction in Tari explorer"><code id="settle-tx">1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc</code></a><button class="copy-button" type="button" data-copy="settle-tx" aria-label="Copy settlement transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Template published</strong><span class="finality" id="template-finality">FINALIZED COMMIT</span></div><div class="tx-line"><a class="tx-link" id="template-id-link" href="https://explorer.tari.mw/tx/7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859" target="_blank" rel="noopener noreferrer" aria-label="View template publish transaction in Tari explorer"><code id="template-tx">7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859</code></a><button class="copy-button" type="button" data-copy="template-tx" aria-label="Copy template publish transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened · 51 µT</strong><span class="finality" id="open-finality">FINALIZED COMMIT</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" href="https://explorer.tari.mw/tx/d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
               </div>
-              <p class="refund-proof"><span>SEPARATE EXPIRY REFUND · RUN LOG</span><span class="refund-links"><a id="refund-open-tx-link" href="https://explorer.tari.mw/tx/3411459ed95199a041fb289df5a24037acff0557769a280c607f3f5c87e6bdf3" target="_blank" rel="noopener noreferrer" aria-label="Open the channel used in the separate expiry refund test in Tari explorer">Open refund channel ↗</a><a id="refund-tx-link" href="https://explorer.tari.mw/tx/050dc1cb38803875deb5bcbba7f124086c62f40a5ae82e902a780f3c171cd2a2" target="_blank" rel="noopener noreferrer" aria-label="Open the payer expiry refund transaction in Tari explorer">Payer refund ↗</a></span></p>
-              <p class="chapter-aside">The latest-template refund finalized and spent the channel output. Its public output amount is hidden; the recipient output was not locally unblinded to verify the amount received.</p>
-              <div class="metric-row chain-metrics"><div><span>Service amount</span><strong id="settled-total">—</strong></div><div><span>Channel deposit</span><strong id="deposit-total">—</strong></div><div><span>Settlement fee</span><strong id="settlement-fee">—</strong><small class="fee-payer">Paid by service-side fee account</small></div></div>
-              <p class="output-state">OUTPUT AFTER SETTLEMENT <strong id="output-status">—</strong></p>
+              <div class="metric-row chain-metrics"><div><span>Publish fee</span><strong id="publish-fee">938,653 µT</strong></div><div><span>Open fee cap</span><strong id="open-fee">9,815 µT</strong><small class="fee-payer">Stealth open spends this cap</small></div><div><span>Settlement</span><strong id="settlement-state">Not recorded</strong></div></div>
             </article>
           </div>
-          <article class="batch-proof live-run-proof" aria-labelledby="live-run-title">
-            <div><p class="eyebrow">HOSTED SAPIENT RUN · 23 OCT 2026</p><h3 id="live-run-title">The same flow,<br /><span>from the demo page.</span></h3></div>
-            <div class="batch-proof-copy"><p>A Sapient wallet sent one private 51 µT deposit to the opt-in testnet relay, which opened the channel. Five 10 µT calls (50 µT) were paid with vouchers signed in the browser, then the relay settled once. The relay held the deposit; the browser kept the voucher key. This is a different run from the command-line record above.</p>
-              <ul class="live-run-links">
-                <li><span>Private funding</span><a id="live-funding-link" href="https://explorer.tari.mw/tx/4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829" target="_blank" rel="noopener noreferrer" data-tx="4dad1dcf1d7aa959b05b725252db4303046f5fb9699e0e79e8f726a0dfea6829"><code>4dad1dcf…6829</code> ↗</a></li>
-                <li><span>Channel open</span><a id="live-open-link" href="https://explorer.tari.mw/tx/87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69" target="_blank" rel="noopener noreferrer" data-tx="87b2e64579b808edb329c6cf001c589c8031904377bd67effaf82c8130ee9a69"><code>87b2e645…9a69</code> ↗</a></li>
-                <li><span>Settlement</span><a id="live-settle-link" href="https://explorer.tari.mw/tx/f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9" target="_blank" rel="noopener noreferrer" data-tx="f5dafe5c97f19b0d77a2e8071cc1b27297a43c8aebff11fbebf9a776bb9af9b9"><code>f5dafe5c…f9b9</code> ↗</a></li>
-              </ul>
-            </div>
-          </article>
-          <div class="proof-comparison" aria-label="Side-by-side explorer comparison">
-            <article>
-              <p class="eyebrow">PUBLIC TRANSFER · ETHEREUM</p>
-              <h3>One transfer</h3>
-              <p>Etherscan lists the USDC amount and recipient for this ordinary token transfer.</p>
-              <a href="https://etherscan.io/tx/0xd4b176e5bbb45ca3074f7e5bcb178c2347a7ddf26b17ae99e3d87cb8cc0b5fea" target="_blank" rel="noopener noreferrer">Inspect public transfer ↗</a>
-            </article>
-            <article>
-              <p class="eyebrow">GHOSTLINE · ESMERALDA</p>
-              <h3>Calls settle once</h3>
-              <p>The recorded claim-free settlement has no plaintext deposit, service amount, or payer remainder in public transaction fields.</p>
-              <a id="comparison-settlement-link" href="https://explorer.tari.mw/tx/1684aad9f34059ba007ad2a1b8a9d91f81ceab60c0e6799a6a5fb824bf6e7ebc" target="_blank" rel="noopener noreferrer">Inspect Ghostline settlement ↗</a>
-            </article>
-          </div>
-          <p class="comparison-note">These are examples of different transaction designs, not matched payments on the same network. Other chains can also support private payment designs.</p>
-          <article class="batch-proof" aria-labelledby="batch-proof-title">
-            <div><p class="eyebrow">EXPERIMENTAL · TRUSTED-LOCAL PROTOTYPE</p><h3 id="batch-proof-title">Two channels.<br /><span>One pooled close.</span></h3></div>
-            <div class="batch-proof-copy"><p>On Esmeralda, two channels each recorded 20 paid calls locally, then finalized one pooled settlement with two channel inputs and three stealth outputs. The service amount was opened locally with its one-time payout key; it was not readable in the public transaction fields.</p><p><strong>This is not coordinator-private.</strong> The local builder received both deposit values and masks, and observers can see the channels were grouped in one transaction. It is a research prototype, not a hosted or recommended production flow.</p><a id="batch-tx-link" href="https://explorer.tari.mw/tx/0e192d7b81581be024ffe5348b5944b8af010edac5cf52628024f21cf78e2e2f" target="_blank" rel="noopener noreferrer">Pooled settlement 0e192d7b…2e2f ↗</a></div>
-          </article>
-          <p class="evidence-caveat">Call counts and accepted totals come from the service ledgers; the chain does not attest to them. The recorded standard settlement transfer statement had zero covenant claims, no revealed channel amounts, and exactly two stealth outputs; separate fee instructions and fee amounts remain public, along with timing, branch, channel id, authorization data, and output commitments.</p>
-          <p class="evidence-footnote" id="evidence-date">Command-line run: 22 Oct 2026 · hosted run: 23 Oct 2026 · explorer status checked 23 Oct 2026. Static evidence, not a live network read.</p>
+          <p class="evidence-caveat">The 51 µT open is the deposit. It is not a paid-call settlement. Fees are public. The browser simulation does not create these transactions.</p>
+          <p class="evidence-footnote" id="evidence-date">Recorded 2 Nov 2026. Explorer status checked 2 Nov 2026. Static evidence, not a live network read.</p>
         </div>
       </section>
 

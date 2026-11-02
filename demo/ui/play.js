@@ -179,7 +179,7 @@ function saveLiveChannel() {
 const SIMULATION_CHAIN_COPY = {
   subtitle: "Recorded Esmeralda proof, separate from these clicks",
   title: "No transaction was created by this demo.",
-  text: "The browser simulation never connects to a wallet or sends a transaction. After five calls, this panel shows a separate recorded Esmeralda run.",
+  text: "The browser simulation never connects to a wallet or sends a transaction. After five calls, this panel shows the current Esmeralda channel open. That open is a separate transaction, and no settlement is recorded on this template.",
 };
 
 function explorerTxUrl(transactionId) {
@@ -521,13 +521,13 @@ function refreshControls() {
   byId("run-simulation").textContent = remaining === countLimit
     ? `Run all ${countLimit} simulated calls`
     : remaining > 0 ? `Finish the remaining ${remaining} calls` : "Simulation complete";
-  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted.${paywall.calls === countLimit ? " Recorded settlement evidence is now shown on the right." : " Run the next call or finish the remaining calls in one click."}`;
+  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted.${paywall.calls === countLimit ? " The current Esmeralda open is shown on the right. No settlement is recorded." : " Run the next call or finish the remaining calls in one click."}`;
   byId("settle").disabled = paywall.calls !== countLimit;
   byId("settle").textContent = settlementShown
-    ? "Recorded evidence shown"
+    ? "Current open shown"
     : paywall.calls === countLimit
-      ? "Show recorded settlement evidence · separate run"
-      : `Complete ${countLimit} calls to unlock recorded evidence`;
+      ? "Show the current Esmeralda open · separate transaction"
+      : `Complete ${countLimit} calls to unlock the current open`;
   if (settlementShown) byId("settle").disabled = true;
 }
 
@@ -562,8 +562,8 @@ function runRemainingSimulation() {
   const remaining = countLimit - paywall.calls;
   if (remaining <= 0) return;
   for (let index = 0; index < remaining; index += 1) payToll();
-  status(`Simulation complete: ${paywall.calls} paid calls, ${accepted.toString()} µT cumulative. The recorded Esmeralda evidence is separate from these browser clicks.`);
-  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted. The recorded Esmeralda proof is separate from this simulation.`;
+  status(`Simulation complete: ${paywall.calls} paid calls, ${accepted.toString()} µT cumulative. The Esmeralda open on the right is a separate transaction, and no settlement is recorded.`);
+  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted. That open was not created by these clicks.`;
 }
 
 function waitForTariProvider() {
@@ -1092,7 +1092,7 @@ function trySimulatedOverspend() {
     status("The simulated service accepted an over-limit voucher. This is a bug; please report it.");
   } catch (error) {
     renderRefusal(amount, amount - 1n, error instanceof Error ? error.message : String(error));
-    if (settlementShown && evidence) renderRecordedObserverView();
+    if (settlementShown && evidence?.chainRecord?.settlementPublicFields) renderRecordedObserverView();
   } finally {
     refreshControls();
   }
@@ -1360,6 +1360,7 @@ async function refundPendingFunding() {
 
 function renderRecordedObserverView() {
   const chain = evidence.chainRecord;
+  if (!chain?.settlementPublicFields) return;
   const service = evidence.serviceRecord || {};
   renderObserverView({
     live: false,
@@ -1372,35 +1373,31 @@ function renderRecordedObserverView() {
 }
 
 function showRecordedEvidence() {
-  if (!evidence || settlementShown) {
+  if (!evidence?.postResetOpen || settlementShown) {
     if (settlementShown) return;
-    status("Could not load the static Esmeralda evidence record. Refresh and try again.");
+    status("Could not load the current Esmeralda record. Refresh and try again.");
     return;
   }
   settlementShown = true;
-  const chain = evidence.chainRecord;
-  const service = evidence.serviceRecord || {};
-  const runDate = formatRunDate(evidence.runDate);
+  const opened = evidence.postResetOpen;
+  const runDate = formatRunDate(opened.runDate);
   showResult({
-    label: "RECORDED RUN · NOT CREATED BY THESE CLICKS",
-    summary: `Recorded command-line run, ${runDate}: ${service.successfulCalls ?? countLimit} paid calls · ${service.acceptedTotalMicroTari ?? Number(PRICE) * countLimit} µT cumulative · one settlement on Esmeralda.`,
-    txLabel: "Recorded settlement transaction",
-    transactionId: chain.settlementTransactionId,
-    url: chain.settlementTransactionUrl,
-    linkText: "Inspect the recorded settlement ↗",
-    openTransactionId: chain.openTransactionId,
-    openLinkText: "Inspect the recorded channel-open transaction ↗",
-    note: `Your simulated clicks did not create or submit this transaction. It comes from a separate ${runDate} command-line run: its service ledger recorded the calls, and the chain shows only the open and the settlement.`,
+    label: "CURRENT OPEN · NOT CREATED BY THESE CLICKS",
+    summary: `${runDate}: a ${opened.depositMicroTari} µT channel opened on Esmeralda. No settlement is recorded on this template.`,
+    txLabel: "Channel open transaction",
+    transactionId: opened.openTransactionId,
+    url: opened.openTransactionUrl,
+    linkText: "Inspect the channel open ↗",
+    note: `Your simulated clicks did not create or submit this transaction. It is the ${runDate} channel open. No paid-call settlement is recorded on this template.`,
   });
-  renderRecordedObserverView();
   byId("chain-panel").classList.add("is-settling");
-  status(`Separate recorded evidence: ${chain.settlementFinality}. The simulated run did not submit it.`);
+  status(`Current channel open: ${opened.openFinality}. The simulated run did not submit it, and no settlement is recorded.`);
   if (window.matchMedia("(max-width: 760px)").matches) {
     byId("chain-panel").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
   }
   window.setTimeout(() => byId("chain-panel").classList.remove("is-settling"), 420);
   byId("settle").disabled = true;
-  byId("settle").textContent = "Recorded evidence shown";
+  byId("settle").textContent = "Current open shown";
 }
 
 function abandonPendingFunding() {
