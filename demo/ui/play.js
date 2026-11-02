@@ -733,9 +733,8 @@ async function relayHealth(url) {
 
 async function waitWalletRequest(requestId) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    if (attempt === 4) {
-      status("Still waiting for Sapient. If the wallet is locked, unlock it and approve the queued request; this page will not ask for a second transfer.");
-      byId("live-note").textContent = "Sapient may be locked or showing a queued approval behind its lock screen. Unlock the wallet to continue. You can switch to the instant simulation without sending another deposit.";
+    if (attempt === 20) {
+      status("Still waiting for the Sapient approval. If a lock screen is covering the request, unlock the wallet and approve it. This page will not ask for a second transfer.");
     }
     const result = await tariRequest("tari_getTransactionRequest", { requestId });
     if (result.status !== "pending") {
@@ -866,17 +865,20 @@ async function connectAndOpenLive() {
       try {
         balances = await tariRequest("tari_getBalances");
       } catch {
-        // Some wallet accounts do not grant balance inspection; the wallet still checks funds on approval.
+        // A failed balance read must not open the approval. The check below stops the flow.
       }
       const xtr = Array.isArray(balances) ? balances.find((balance) => balance.resourceAddress === NATIVE_TARI_RESOURCE) : undefined;
-      const shownBalance = xtr ? BigInt(xtr.amount || "0") + BigInt(xtr.confidentialAmount || "0") : 0n;
-      if ((xtr && shownBalance < BigInt(relay.deposit)) || (caps.privateViewGranted === true && !xtr)) {
-        const reported = xtr ? `Sapient currently reports ${shownBalance} µT` : "Sapient did not return a spendable TARI balance";
-        byId("live-note").textContent = `${reported}; the live channel needs ${relay.deposit} µT plus a wallet fee. If you just funded this wallet, refresh Sapient's wallet view, wait for finality, then reload this page and retry.`;
-        throw new Error(`${reported}; ${relay.deposit} µT plus a wallet fee is required. Refresh Sapient after funding and retry.`);
-      }
-      if (caps.privateViewGranted !== true || !xtr) {
-        byId("live-note").textContent = `This wallet does not expose a spendable TARI balance to the page. It will check funds when you approve. You need at least ${relay.deposit} µT plus the wallet fee; if Sapient reports insufficient funds, use its Esmeralda faucet, wait for finality, refresh Sapient, and retry.`;
+      // sendPrivately spends confidential outputs. Revealed balance cannot pay this deposit.
+      const privateBalance = xtr ? BigInt(xtr.confidentialAmount || "0") : null;
+      const fundingMaxFee = 12000n;
+      const needed = BigInt(relay.deposit) + fundingMaxFee;
+      if (privateBalance === null || privateBalance < needed) {
+        const reported = privateBalance === null
+          ? "Sapient did not show a private TARI balance"
+          : `Sapient private balance is ${privateBalance} µT`;
+        const message = `${reported}. ${relay.deposit} µT plus a wallet fee is required before approval. Revealed TARI cannot pay this private deposit. Refresh Sapient after a private transfer arrives, then retry.`;
+        byId("live-note").textContent = message;
+        throw new Error(message);
       }
       const channelKeys = createEphemeralChannelKeys(randomBytes, scalarFromWide, publicKeyFromSecret);
       payerSecret = channelKeys.payerSecret;
@@ -886,7 +888,7 @@ async function connectAndOpenLive() {
         method: "POST",
         body: JSON.stringify({ payerPublicKey: bytesToHex(channelKeys.payerPublic), refundAddress }),
       });
-      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay and pay your wallet’s transaction fee. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled. Approve in Sapient when you can; a finalized transfer can still be opened later.`;
+      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. The wallet fee cap is 12,000 µT (0.012 TARI); a private send of this size uses about 9,815 µT, and a stealth fee spends the cap. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
       setupStage = "waiting for Sapient approval";
       const memo = fundingMemo(relaySession.sessionId, bytesToHex(channelKeys.payerPublic), refundAddress);
       if (memo.length > 253) throw new Error("The encrypted funding memo is too long for a stealth output. Retry live setup.");
@@ -895,10 +897,10 @@ async function connectAndOpenLive() {
         resourceAddress: NATIVE_TARI_RESOURCE,
         recipientWalletAddress: relaySession.fundingAddress,
         amount: String(relaySession.deposit),
-        maxFee: "50000",
+        maxFee: "12000",
         memo,
       });
-      status("Approve the private testnet transfer in Sapient. If the wallet is locked, unlock it and approve the queued request. The relay will wait for finality before opening your channel.");
+      status("Approve the private testnet transfer in Sapient. The relay waits for finality before opening your channel.");
       byId("live-open").textContent = "Waiting for Sapient approval…";
       const funding = await waitWalletRequest(operation.requestId);
       if (!funding?.transactionId) throw new Error("Sapient did not return the funding transaction id.");

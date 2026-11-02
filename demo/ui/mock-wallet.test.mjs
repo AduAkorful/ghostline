@@ -98,7 +98,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     tari_requestAccounts: ["otl_esm_1mockwallet"],
     tari_getCapabilities: { privateSpend: true, transactionRequests: true, walletAddress: true, transactionResultLookup: true, privateViewGranted: true },
     tari_getWalletAddress: "otl_esm_1mockwallet",
-    tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "100000", confidentialAmount: "0" }],
+    tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "200000" }],
     tari_createTransactionRequest: { requestId: "funding-request" },
     tari_getTransactionRequest: { status: "approved" },
     tari_submitTransactionRequest: { transactionId: fundingTxId },
@@ -270,6 +270,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   const fundingRequest = h.walletCalls.find((call) => call.method === "tari_createTransactionRequest");
   assert.equal(fundingRequest.params.kind, "sendPrivately");
   assert.equal(fundingRequest.params.amount, "51");
+  assert.equal(fundingRequest.params.maxFee, "12000");
   assert.match(fundingRequest.params.memo, /^G2:session-test[0-9a-f]{64}:otl_esm_1mockwallet$/i, "encrypted recipient memo binds session, payer, and refund address");
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/session")).length, 1);
 
@@ -419,6 +420,7 @@ test("missing extension, rejected approval, unsupported methods, chain errors, a
     { name: "unsupported wallet method", options: { walletOverrides: { tari_getCapabilities: rpcError(4200, "Unsupported") } }, message: /does not support a required feature/ },
     { name: "chain rejection", options: { walletOverrides: { tari_getCapabilities: rpcError(-32603, "Ootle rejected wallet request") } }, message: /Ootle rejected wallet request/ },
       { name: "low balance", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "0" }] } }, message: /51 µT plus a wallet fee is required/ },
+      { name: "revealed balance only", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "5000000", confidentialAmount: "0" }] } }, message: /Revealed TARI cannot pay this private deposit/ },
   ];
   for (const scenario of cases) {
     await t.test(scenario.name, async () => {
