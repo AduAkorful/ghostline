@@ -1,4 +1,4 @@
-// packages/ghostline/node_modules/@noble/hashes/utils.js
+// node_modules/@noble/hashes/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
@@ -147,7 +147,7 @@ function randomBytes(bytesLength = 32) {
   return cr.getRandomValues(new Uint8Array(bytesLength));
 }
 
-// packages/ghostline/node_modules/@noble/hashes/_blake.js
+// node_modules/@noble/hashes/_blake.js
 var BSIGMA = /* @__PURE__ */ Uint8Array.from([
   0,
   1,
@@ -408,7 +408,7 @@ var BSIGMA = /* @__PURE__ */ Uint8Array.from([
   9
 ]);
 
-// packages/ghostline/node_modules/@noble/hashes/_u64.js
+// node_modules/@noble/hashes/_u64.js
 var fromNumH = (n) => n / 2 ** 32 | 0;
 var fromNumL = (n) => n >>> 0;
 var rotrSH = (h, l, s) => h >>> s | l << 32 - s;
@@ -424,7 +424,7 @@ function add(Ah, Al, Bh, Bl) {
 var add3L = (Al, Bl, Cl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0);
 var add3H = (low, Ah, Bh, Ch) => Ah + Bh + Ch + (low / 2 ** 32 | 0) | 0;
 
-// packages/ghostline/node_modules/@noble/hashes/blake2.js
+// node_modules/@noble/hashes/blake2.js
 var B2B_IV = /* @__PURE__ */ Uint32Array.from([
   4089235720,
   1779033703,
@@ -758,7 +758,7 @@ var _BLAKE2b = class extends _BLAKE2 {
 };
 var blake2b = /* @__PURE__ */ createHasher((opts) => new _BLAKE2b(opts));
 
-// packages/ghostline/src/channel.ts
+// src/channel.ts
 var CHANNEL_ID_DOMAIN = new TextEncoder().encode("ghostline.channel.id.v1");
 var VOUCHER_DOMAIN = new TextEncoder().encode("ghostline.channel.voucher.v1");
 var CHANNEL_ID_LEN = 32;
@@ -829,7 +829,7 @@ function voucherMessage(channelIdBytes, serviceOutputKey, outputCommitment2) {
   return out;
 }
 
-// packages/ghostline/node_modules/@noble/curves/utils.js
+// node_modules/@noble/curves/utils.js
 function aarray(item, title, inner = () => {
 }) {
   if (!Array.isArray(item))
@@ -961,7 +961,7 @@ var notImplemented = () => {
   throw new Error("not implemented");
 };
 
-// packages/ghostline/node_modules/@noble/curves/abstract/modular.js
+// node_modules/@noble/curves/abstract/modular.js
 var _0n2 = /* @__PURE__ */ BigInt(0);
 var _1n2 = /* @__PURE__ */ BigInt(1);
 var _2n = /* @__PURE__ */ BigInt(2);
@@ -1390,7 +1390,7 @@ function Field(ORDER, opts = {}) {
   return new _Field(ORDER, opts);
 }
 
-// packages/ghostline/node_modules/@noble/curves/abstract/curve.js
+// node_modules/@noble/curves/abstract/curve.js
 var _0n3 = /* @__PURE__ */ BigInt(0);
 var _1n3 = /* @__PURE__ */ BigInt(1);
 var _4n2 = /* @__PURE__ */ BigInt(4);
@@ -1771,7 +1771,7 @@ function createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
   return { CURVE, Fp: Fp2, Fn: Fn3 };
 }
 
-// packages/ghostline/node_modules/@noble/curves/abstract/edwards.js
+// node_modules/@noble/curves/abstract/edwards.js
 var _0n4 = /* @__PURE__ */ BigInt(0);
 var _1n4 = /* @__PURE__ */ BigInt(1);
 var _2n2 = /* @__PURE__ */ BigInt(2);
@@ -2145,7 +2145,7 @@ var PrimeEdwardsPoint = class {
   }
 };
 
-// packages/ghostline/node_modules/@noble/curves/ed25519.js
+// node_modules/@noble/curves/ed25519.js
 var _1n5 = /* @__PURE__ */ BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
 var _5n2 = /* @__PURE__ */ BigInt(5);
@@ -2322,7 +2322,7 @@ var ristretto255 = /* @__PURE__ */ (() => {
   return Object.freeze({ Point: _RistrettoPoint });
 })();
 
-// packages/ghostline/src/cbor.ts
+// src/cbor.ts
 function concat(parts) {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let offset = 0;
@@ -2385,7 +2385,7 @@ function encodeVoucherCbor(channelId2, amount, mask, serviceOutputKey, outputCom
   ]);
 }
 
-// packages/ghostline/src/voucher.ts
+// src/voucher.ts
 var { Point } = ristretto255;
 var Fn2 = Point.Fn;
 var PEDERSEN_H = fromHex("ce389841c0c8698ab95b70242aeea64840b1eac5f644b7d008ac0587cf471d70");
@@ -2413,8 +2413,33 @@ function scalarFromWide(bytes) {
 function publicKeyFromSecret(secret) {
   return Point.BASE.multiply(scalarFromCanonical(secret)).toBytes();
 }
-function computeChallenge(domain, message, publicKey, noncePublic) {
-  return blake2b(concat2([domain, noncePublic, publicKey, message]), { dkLen: 64 });
+var TEMPLATE_SIGNATURE_DOMAIN = "com.tari.ootle.template_signature";
+function u64le(length) {
+  const out = new Uint8Array(8);
+  let value = BigInt(length);
+  for (let i = 0; i < 8; i += 1) {
+    out[i] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return out;
+}
+function domainSeparated(label, parts) {
+  const tag = new TextEncoder().encode(`${TEMPLATE_SIGNATURE_DOMAIN}.v1.${label}`);
+  const chunks = [u64le(tag.length), tag];
+  for (const part of parts) {
+    chunks.push(u64le(part.length), part);
+  }
+  return blake2b(concat2(chunks), { dkLen: 64 });
+}
+function computeChallenge(networkTag, domain, message, publicKey, noncePublic) {
+  const templateMessage = domainSeparated("message", [
+    Uint8Array.of(networkTag),
+    Uint8Array.of(0),
+    new Uint8Array(),
+    domain,
+    message
+  ]);
+  return domainSeparated("challenge", [noncePublic, publicKey, templateMessage]);
 }
 function randomNonceScalar() {
   const wide = new Uint8Array(64);
@@ -2460,7 +2485,7 @@ function signVoucher(secret, params, amount, serviceOutputKey, maskSecret, nonce
   const publicNonce = Point.BASE.multiply(r).toBytes();
   const id = channelId(params);
   const message = voucherMessage(id, serviceOutputKey, commitment);
-  const e = scalarFromWide(computeChallenge(VOUCHER_DOMAIN, message, publicKey, publicNonce));
+  const e = scalarFromWide(computeChallenge(params.networkTag, VOUCHER_DOMAIN, message, publicKey, publicNonce));
   const s = Fn2.add(Fn2.mul(e, k), r);
   return {
     channelId: id,
@@ -2492,7 +2517,7 @@ function verifyVoucher(voucher, params) {
     throw new Error("invalid signature");
   }
   const message = voucherMessage(id, voucher.serviceOutputKey, voucher.outputCommitment);
-  const e = scalarFromWide(computeChallenge(VOUCHER_DOMAIN, message, publicKey, voucher.publicNonce));
+  const e = scalarFromWide(computeChallenge(params.networkTag, VOUCHER_DOMAIN, message, publicKey, voucher.publicNonce));
   const sG = Point.BASE.multiply(scalarFromCanonical(voucher.scalar));
   const eP = Point.fromBytes(publicKey).multiply(e);
   if (!sG.equals(R.add(eP))) {

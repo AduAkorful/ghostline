@@ -51,14 +51,47 @@ export function publicKeyFromSecret(secret: Uint8Array): Uint8Array {
   return Point.BASE.multiply(scalarFromCanonical(secret)).toBytes();
 }
 
-/** Blake2b-512(domain || nonce_public || public_key || message), as in `RistrettoSchnorrBlake2bVerifier`. */
+const TEMPLATE_SIGNATURE_DOMAIN = "com.tari.ootle.template_signature";
+
+function u64le(length: number): Uint8Array {
+  const out = new Uint8Array(8);
+  let value = BigInt(length);
+  for (let i = 0; i < 8; i += 1) {
+    out[i] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return out;
+}
+
+/** `{domain}.v{version}.{label}`, length-prefixed, matching `DomainSeparatedHasher`. */
+function domainSeparated(label: string, parts: Uint8Array[]): Uint8Array {
+  const tag = new TextEncoder().encode(`${TEMPLATE_SIGNATURE_DOMAIN}.v1.${label}`);
+  const chunks = [u64le(tag.length), tag];
+  for (const part of parts) {
+    chunks.push(u64le(part.length), part);
+  }
+  return blake2b(concat(chunks), { dkLen: 64 });
+}
+
+/**
+ * Shared-scope template Schnorr challenge (`tari_ootle_common_types` 0.49).
+ * The channel template calls `signature.verify`, which uses this scope.
+ */
 export function computeChallenge(
+  networkTag: number,
   domain: Uint8Array,
   message: Uint8Array,
   publicKey: Uint8Array,
   noncePublic: Uint8Array,
 ): Uint8Array {
-  return blake2b(concat([domain, noncePublic, publicKey, message]), { dkLen: 64 });
+  const templateMessage = domainSeparated("message", [
+    Uint8Array.of(networkTag),
+    Uint8Array.of(0),
+    new Uint8Array(),
+    domain,
+    message,
+  ]);
+  return domainSeparated("challenge", [noncePublic, publicKey, templateMessage]);
 }
 
 function randomNonceScalar(): bigint {
@@ -116,7 +149,7 @@ export function signVoucher(
   const publicNonce = Point.BASE.multiply(r).toBytes();
   const id = channelId(params);
   const message = voucherMessage(id, serviceOutputKey, commitment);
-  const e = scalarFromWide(computeChallenge(VOUCHER_DOMAIN, message, publicKey, publicNonce));
+  const e = scalarFromWide(computeChallenge(params.networkTag, VOUCHER_DOMAIN, message, publicKey, publicNonce));
   const s = Fn.add(Fn.mul(e, k), r);
   return {
     channelId: id,
@@ -149,7 +182,7 @@ export function verifyVoucher(voucher: SignedVoucher, params: ChannelParams): vo
     throw new Error("invalid signature");
   }
   const message = voucherMessage(id, voucher.serviceOutputKey, voucher.outputCommitment);
-  const e = scalarFromWide(computeChallenge(VOUCHER_DOMAIN, message, publicKey, voucher.publicNonce));
+  const e = scalarFromWide(computeChallenge(params.networkTag, VOUCHER_DOMAIN, message, publicKey, voucher.publicNonce));
   const sG = Point.BASE.multiply(scalarFromCanonical(voucher.scalar));
   const eP = Point.fromBytes(publicKey).multiply(e);
   if (!sG.equals(R.add(eP))) {

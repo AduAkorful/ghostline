@@ -356,6 +356,7 @@ pub fn settle_batch(
         let balance_proof = sign_with_nonce(
             &mask_excess,
             proof_nonce,
+            channel.params().network_tag,
             BATCH_BALANCE_DOMAIN,
             &proof_message,
         );

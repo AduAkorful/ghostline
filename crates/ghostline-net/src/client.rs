@@ -129,8 +129,29 @@ impl IndexerClient {
         })
     }
 
+    /// `GET /substates/{id}` classified for the v0.49 indexer.
+    ///
+    /// A live object is HTTP 200 with `state.up`. A spent version the indexer can still
+    /// prove is HTTP 200 with `state.down`, or HTTP 404 whose body says `(vN) is down`.
+    /// HTTP 404 without that phrase is `NotFound` (the id is not in this indexer).
+    pub async fn classify_substate(&self, substate_id: &str) -> Result<IndexedSubstate, NetError> {
+        let response = self
+            .http
+            .get(self.substate_url(substate_id)?)
+            .send()
+            .await?;
+        let status = response.status().as_u16();
+        let bytes = response.bytes().await?;
+        classify_substate_response(status, &String::from_utf8_lossy(&bytes))
+    }
+
     /// `GET /substates/{id}` (`tari_indexer_client` 0.45 `get_substate`).
     pub async fn substate(&self, substate_id: &str) -> Result<Value, NetError> {
+        self.send_json(self.http.get(self.substate_url(substate_id)?), "substates")
+            .await
+    }
+
+    fn substate_url(&self, substate_id: &str) -> Result<Url, NetError> {
         let mut url = self.base.clone();
         url.path_segments_mut()
             .map_err(|()| NetError::Decode {
@@ -140,7 +161,7 @@ impl IndexerClient {
             .pop_if_empty()
             .push("substates")
             .push(substate_id);
-        self.send_json(self.http.get(url), "substates").await
+        Ok(url)
     }
 
     /// Fill `version: null` inputs on unsigned JSON (`V1.inputs`) from `GET /substates/{id}`.
@@ -234,7 +255,8 @@ impl IndexerClient {
                     path: "substates".into(),
                     details: format!("substate version {version} does not fit u32"),
                 })?;
-                Ok((version, false, Some(got)))
+                let down = got.pointer("/state/down").is_some();
+                Ok((version, down, if down { None } else { Some(got) }))
             }
             Err(NetError::Rejected {
                 status: 404, body, ..
@@ -314,6 +336,51 @@ pub enum SubstatePresence {
     Down { version: u32 },
 }
 
+/// `GET /substates/{id}` after the v0.49 indexer started answering unknown ids with
+/// `not found` instead of a down version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexedSubstate {
+    Up { version: u32 },
+    Down { version: u32 },
+    NotFound,
+}
+
+pub fn classify_substate_response(status: u16, body: &str) -> Result<IndexedSubstate, NetError> {
+    if status == 404 {
+        return Ok(match down_version_from_indexer_body(body) {
+            Some(version) => IndexedSubstate::Down { version },
+            None => IndexedSubstate::NotFound,
+        });
+    }
+    if !(200..300).contains(&status) {
+        return Err(NetError::Rejected {
+            path: "substates".into(),
+            status,
+            body: body.to_owned(),
+        });
+    }
+    let got: Value = serde_json::from_str(body).map_err(|err| NetError::Decode {
+        path: "substates".into(),
+        details: err.to_string(),
+    })?;
+    let version = got
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| NetError::Decode {
+            path: "substates".into(),
+            details: "substate response had no version".into(),
+        })?;
+    let version = u32::try_from(version).map_err(|_| NetError::Decode {
+        path: "substates".into(),
+        details: format!("substate version {version} does not fit u32"),
+    })?;
+    if got.pointer("/state/down").is_some() {
+        Ok(IndexedSubstate::Down { version })
+    } else {
+        Ok(IndexedSubstate::Up { version })
+    }
+}
+
 /// How many unsigned inputs got a version, and how many of those were already down (spent).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResolvedInputs {
@@ -334,6 +401,13 @@ const VAULT_CBOR_TAG: u64 = 132;
 fn vault_ids_from_substate(body: &Value) -> Vec<String> {
     let mut out = Vec::new();
     collect_vault_ids(body, &mut out);
+    // v0.49 indexer `GET /substates/{id}`: `state.up.substate` is standard base64 of the
+    // CBOR `SubstateValue`. Vault ids are CBOR tag 132 around a 32-byte string.
+    if let Some(encoded) = body.pointer("/state/up/substate").and_then(Value::as_str)
+        && let Some(bytes) = decode_standard_base64(encoded)
+    {
+        collect_vaults_in_cbor(&bytes, &mut out);
+    }
     out.sort();
     out.dedup();
     out
@@ -361,6 +435,172 @@ fn collect_vault_ids(value: &Value, out: &mut Vec<String>) {
             }
         }
         _ => {}
+    }
+}
+
+/// CBOR tag 132 (`BinaryTag::VaultId`) followed by a 32-byte byte string.
+fn collect_vaults_in_cbor(bytes: &[u8], out: &mut Vec<String>) {
+    let mut index = 0;
+    while index < bytes.len() {
+        if !walk_cbor(bytes, &mut index, out) {
+            break;
+        }
+    }
+}
+
+fn walk_cbor(bytes: &[u8], index: &mut usize, out: &mut Vec<String>) -> bool {
+    let Some(initial) = bytes.get(*index).copied() else {
+        return false;
+    };
+    *index += 1;
+    let major = initial >> 5;
+    let info = initial & 0x1f;
+    if info == 31 {
+        return false;
+    }
+    let Some(argument) = cbor_argument(bytes, index, info) else {
+        return false;
+    };
+    match major {
+        0 | 1 => true,
+        2 | 3 => skip_bytes(bytes, index, argument),
+        4 => walk_items(bytes, index, out, argument),
+        5 => walk_items(bytes, index, out, argument.saturating_mul(2)),
+        6 => {
+            if argument == VAULT_CBOR_TAG {
+                capture_vault(bytes, index, out)
+            } else {
+                walk_cbor(bytes, index, out)
+            }
+        }
+        7 => true,
+        _ => false,
+    }
+}
+
+fn cbor_argument(bytes: &[u8], index: &mut usize, info: u8) -> Option<u64> {
+    if info < 24 {
+        return Some(u64::from(info));
+    }
+    let width = match info {
+        24 => 1,
+        25 => 2,
+        26 => 4,
+        27 => 8,
+        _ => return None,
+    };
+    if *index + width > bytes.len() {
+        return None;
+    }
+    let mut value = 0_u64;
+    for _ in 0..width {
+        value = (value << 8) | u64::from(bytes[*index]);
+        *index += 1;
+    }
+    Some(value)
+}
+
+fn skip_bytes(bytes: &[u8], index: &mut usize, len: u64) -> bool {
+    let Ok(len) = usize::try_from(len) else {
+        return false;
+    };
+    if *index + len > bytes.len() {
+        return false;
+    }
+    *index += len;
+    true
+}
+
+fn walk_items(bytes: &[u8], index: &mut usize, out: &mut Vec<String>, count: u64) -> bool {
+    for _ in 0..count {
+        if !walk_cbor(bytes, index, out) {
+            return false;
+        }
+    }
+    true
+}
+
+/// A tag-132 vault is only the immediate 32-byte string. Other payloads are still walked.
+fn capture_vault(bytes: &[u8], index: &mut usize, out: &mut Vec<String>) -> bool {
+    let start = *index;
+    let Some(initial) = bytes.get(*index).copied() else {
+        return false;
+    };
+    if initial >> 5 == 2 {
+        *index += 1;
+        let info = initial & 0x1f;
+        if info == 31 {
+            return false;
+        }
+        let Some(len) = cbor_argument(bytes, index, info) else {
+            return false;
+        };
+        if len == 32 {
+            let len = 32_usize;
+            if *index + len <= bytes.len() {
+                out.push(format!(
+                    "vault_{}",
+                    hex_encode(&bytes[*index..*index + len])
+                ));
+            }
+        }
+        *index = start;
+    }
+    walk_cbor(bytes, index, out)
+}
+
+fn decode_standard_base64(input: &str) -> Option<Vec<u8>> {
+    let bytes = input.as_bytes();
+    if bytes.is_empty() || bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    let mut i = 0;
+    while i < bytes.len() {
+        let chunk = &bytes[i..i + 4];
+        i += 4;
+        let pad = chunk.iter().rev().take_while(|b| **b == b'=').count();
+        if pad > 2 || (pad > 0 && i != bytes.len()) {
+            return None;
+        }
+        let mut value = 0_u32;
+        for (place, byte) in chunk.iter().enumerate() {
+            let digit = if place >= 4 - pad {
+                0
+            } else {
+                base64_digit(*byte)?
+            };
+            value = (value << 6) | u32::from(digit);
+        }
+        out.push((value >> 16) as u8);
+        if pad < 2 {
+            out.push((value >> 8) as u8);
+        }
+        if pad < 1 {
+            out.push(value as u8);
+        }
+    }
+    Some(out)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(*byte >> 4) as usize] as char);
+        out.push(HEX[(*byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn base64_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
     }
 }
 
@@ -585,6 +825,54 @@ mod tests {
         });
         let ids = vault_ids_from_substate(&body);
         assert_eq!(ids, vec![format!("vault_{vault}")]);
+    }
+
+    #[test]
+    fn vault_ids_from_v049_base64_cbor_substate() {
+        let vault = "ab".repeat(32);
+        let body = serde_json::json!({
+            "version": 0,
+            "state": {"up": {"substate": "oQHYhFggq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="}},
+            "verified": true
+        });
+        assert_eq!(
+            vault_ids_from_substate(&body),
+            vec![format!("vault_{vault}")]
+        );
+        // Live Esmeralda resource_01… substate on 2026-11-02. It names TARI and has no vault.
+        let live = serde_json::json!({
+            "version": 0,
+            "state": {"up": {"substate": "ggGBiIIDgIIAgJGCAYCCAICCAYCCAICCAYCCAICCAICCAICCAICCAICCAYCCAYCCAYCCAICCAYCCAYCCAIDYgaFmU1lNQk9MZXRUQVJJ9vb2Bg=="}},
+            "verified": true
+        });
+        assert!(vault_ids_from_substate(&live).is_empty());
+    }
+
+    #[test]
+    fn classify_substate_response_separates_missing_from_down() {
+        assert_eq!(
+            classify_substate_response(404, r#"{"error":"Substate template_ab not found"}"#)
+                .unwrap(),
+            IndexedSubstate::NotFound
+        );
+        assert_eq!(
+            classify_substate_response(404, r#"{"error":"Input substate utxo_ab (v3) is down"}"#)
+                .unwrap(),
+            IndexedSubstate::Down { version: 3 }
+        );
+        assert_eq!(
+            classify_substate_response(
+                200,
+                r#"{"version":0,"state":{"up":{"substate":"gg=="}},"verified":true}"#
+            )
+            .unwrap(),
+            IndexedSubstate::Up { version: 0 }
+        );
+        assert_eq!(
+            classify_substate_response(200, r#"{"version":4,"state":{"down":{}},"verified":true}"#)
+                .unwrap(),
+            IndexedSubstate::Down { version: 4 }
+        );
     }
 
     #[test]

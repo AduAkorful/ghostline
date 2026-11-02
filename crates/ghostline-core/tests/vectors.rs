@@ -80,7 +80,13 @@ fn committed_voucher_signature_matches_rust() {
         .to_byte_type();
     let channel_id = params.channel_id();
     let message = voucher_message(&channel_id, &service, &commitment);
-    let signature = sign_with_nonce(&secret, nonce.clone(), VOUCHER_DOMAIN, &message);
+    let signature = sign_with_nonce(
+        &secret,
+        nonce.clone(),
+        params.network_tag,
+        VOUCHER_DOMAIN,
+        &message,
+    );
     let voucher = SignedVoucher {
         channel_id,
         amount: 30,

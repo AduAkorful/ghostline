@@ -216,7 +216,9 @@ pub struct StealthTransfer {
     pub output_memo: Option<Value>,
     pub pay_to: Value,
     pub attach_sender_address: bool,
-    pub pay_ref: Option<String>,
+    /// `StealthTransfer.destination_tag` in `tari_ootle_walletd_client` 0.49.2.
+    /// That struct rejects the old `pay_ref` name (`deny_unknown_fields`).
+    pub destination_tag: Option<String>,
 }
 
 impl StealthTransferRequest {
@@ -237,7 +239,7 @@ impl StealthTransferRequest {
                 output_memo: None,
                 pay_to: params.pay_to,
                 attach_sender_address: false,
-                pay_ref: None,
+                destination_tag: None,
             }],
             max_fee: params.max_fee,
             dry_run: params.dry_run,
@@ -1196,7 +1198,8 @@ mod tests {
         assert_eq!(xfer["attach_sender_address"], false);
         assert_eq!(xfer["pay_to"], pay_to);
         assert!(xfer["output_memo"].is_null());
-        assert!(xfer["pay_ref"].is_null());
+        assert!(xfer["destination_tag"].is_null());
+        assert!(xfer.get("pay_ref").is_none());
     }
 
     #[test]

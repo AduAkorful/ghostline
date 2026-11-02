@@ -12,11 +12,12 @@ mod session;
 mod voucher;
 
 use ootle_byte_type::ToByteType;
+use ootle_network::Network;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_ootle_common_types::RistrettoSchnorrBlake2bVerifier;
+use tari_ootle_common_types::{RistrettoSchnorrBlake2bVerifier, TemplateSignatureBinding};
 use tari_template_lib::types::crypto::{NoSignatureDomain, Signature};
 
 pub use error::VoucherError;
@@ -36,23 +37,32 @@ pub const SETTLEMENT_RESERVE: u64 = 1;
 
 fn sign_with_domain(
     secret: &RistrettoSecretKey,
+    network_tag: u8,
     domain: &[u8],
     message: &[u8],
 ) -> Signature<NoSignatureDomain> {
     let (nonce, _) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-    sign_with_nonce(secret, nonce, domain, message)
+    sign_with_nonce(secret, nonce, network_tag, domain, message)
 }
 
-/// Same challenge as `RistrettoSchnorrBlake2bVerifier` (`tari_ootle_common_types` 0.45).
+/// Schnorr challenge for a template signature in the shared scope (`tari_ootle_common_types` 0.49).
+///
+/// `signature.verify` in the channel template uses that scope, so the challenge binds `network_tag`
+/// and the domain. `network_tag` must be an Ootle network byte (Esmeralda is 38).
 pub fn sign_with_nonce(
     secret: &RistrettoSecretKey,
     nonce: RistrettoSecretKey,
+    network_tag: u8,
     domain: &[u8],
     message: &[u8],
 ) -> Signature<NoSignatureDomain> {
+    let network =
+        Network::try_from(network_tag).expect("channel network tag is not an Ootle network byte");
+    let binding = TemplateSignatureBinding::shared(network);
     let nonce_public = RistrettoPublicKey::from_secret_key(&nonce);
     let public_key = RistrettoPublicKey::from_secret_key(secret);
     let challenge = RistrettoSchnorrBlake2bVerifier::compute_challenge(
+        &binding,
         domain,
         message,
         &public_key.to_byte_type(),

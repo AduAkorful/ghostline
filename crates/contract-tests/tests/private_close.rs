@@ -10,7 +10,7 @@ use ghostline_sdk::{
     Channel, ChannelSpec, MaskAndValue, OutputScan, refund, settle, unblind_output,
 };
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT, fund};
+use support::{CHANNEL, DEPOSIT, LOCALNET_TAG, fund};
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -61,7 +61,7 @@ impl Fixture {
         let (service, service_public) = create_key_pair_from_seed(13);
         let (other, _) = create_key_pair_from_seed(14);
         let channel = Channel::open(ChannelSpec {
-            network_tag: 1,
+            network_tag: LOCALNET_TAG,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
             deposit: DEPOSIT,
@@ -118,6 +118,7 @@ impl Fixture {
         let signature = sign_with_nonce(
             &self.payer,
             RistrettoSecretKey::random(&mut rand::rng()),
+            self.channel.params().network_tag,
             VOUCHER_DOMAIN,
             &message,
         );
@@ -488,7 +489,7 @@ fn relay_refund_key_can_refund_after_expiry_without_replacing_payer_signature() 
     let (service, service_public) = create_key_pair_from_seed(103);
     let channel = Channel::open_with_refund_key(
         ChannelSpec {
-            network_tag: 1,
+            network_tag: LOCALNET_TAG,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
             deposit: DEPOSIT,
@@ -714,16 +715,19 @@ fn settlement_can_pay_its_fee_from_a_separate_stealth_input() {
         .seal(&f.service);
 
     let result = f.test.execute_expect_success(tx, vec![]);
+    // The fee intent is the engine's three-call stealth sequence. Settlement adds the
+    // script entry plus data, verify, inputs, both revealed amounts, and outputs.
+    // tari_engine 0.49 charges that shape 10; the 0.45 engine charged 11.
     assert_eq!(
         result
             .finalize
             .fee_receipt
             .fee_breakdown()
             .get(FeeSource::RuntimeCall),
-        11
+        10
     );
     assert_eq!(result.finalize.fee_receipt.unpaid_debt(), 0);
-    assert_eq!(result.finalize.fee_receipt.total_fee_overcharge(), 89);
+    assert_eq!(result.finalize.fee_receipt.total_fee_overcharge(), 90);
     // The channel's service authorization key closes the channel; the independent one-time key owns the payout.
     assert_ne!(settlement_public, f.channel.spec().service);
 }

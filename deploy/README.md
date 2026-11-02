@@ -9,14 +9,14 @@ wallet that holds valuable assets.
 
 ## Wallet daemon build
 
-The image downloads a Ghostline build of `tari_ootle_walletd` 0.47.0, not the
-official asset. Official v0.47.0 can skip stealth outputs while scanning, so the
-relay may never discover a finalized deposit. The build backports the public
-upstream fix tari-project/tari-ootle#3047 (`32cd4c5`) onto v0.47.0 (`9dabb2a`).
-It is compiled in `rust:1.97.1-bookworm` without the embedded web UI and pinned
-by SHA-256 in [`Dockerfile`](Dockerfile). The release page carries the patch,
-licence and test results. Switch back to an official release once one contains
-#3047.
+The image downloads official `tari_ootle_walletd` 0.49.2 (`aa7b0c8`) and checks
+the upstream SHA-256 in [`Dockerfile`](Dockerfile). v0.48.0, v0.49.0 and v0.49.1
+did not publish a working wallet binary. v0.49.2 includes both Esmeralda resets.
+The daemon listens on `127.0.0.1` inside the container. v0.49.2 allows IP
+literals and `localhost` without `allowed_hosts`, so the Render public hostname
+is not added and the daemon is not published off loopback. A restart deletes
+`/tmp` wallet data, which is required after the reset: do not reuse a v0.47
+database.
 
 ## Render setup
 
@@ -60,8 +60,8 @@ licence and test results. Switch back to an official release once one contains
    the account component. When that component is missing on the indexer, startup
    claims the Esmeralda faucet once (`accounts.create_free_test_coins`, 1,000
    TARI) and pays the fee from the new account, capped at
-   `GHOSTLINE_DEMO_OPEN_MAX_FEE` (100000 µT). If that faucet is empty, startup
-   instead moves 1 XTR (1000000 µT, `GHOSTLINE_DEMO_FEE_FLOAT`) of the opener's
+   `GHOSTLINE_DEMO_OPEN_MAX_FEE` (12000 µT). If that faucet is empty, startup
+   instead moves 1 TARI (1000000 µT, `GHOSTLINE_DEMO_FEE_FLOAT`) of the opener's
    revealed balance into the fee account. That transfer publishes the component.
    Both the faucet claim and the revealed transfer are public. A stealth
    transfer to the printed address does not create the component, and a second
@@ -93,11 +93,11 @@ licence and test results. Switch back to an official release once one contains
    to reduce idle spin-down, then verify the service remains healthy.
 
 After each relay open, settlement, and refund, the service refreshes the dedicated
-fee account's wallet balance. It logs a warning when revealed native XTR falls
-below 0.1 XTR (100,000 µT), and a separate warning if walletd cannot provide the
+fee account's wallet balance. It logs a warning when revealed native TARI falls
+below 0.1 TARI (100,000 µT), and a separate warning if walletd cannot provide the
 balance. Confidential balance is not counted as fee float. The one-time faucet
 claim runs at startup. A later low-balance warning needs a transfer of revealed
-test XTR to the printed fee address; do not expose walletd outside the container.
+test TARI to the printed fee address; do not expose walletd outside the container.
 
 Never paste seed words or private keys into the site, a browser console, a
 GitHub file, or a shared terminal. Enter secret values directly in Render's

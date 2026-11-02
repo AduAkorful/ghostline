@@ -19,7 +19,7 @@ use tari_ootle_transaction::{Epoch, Transaction};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
 
-const NETWORK_TAG: u8 = 1;
+const NETWORK_TAG: u8 = support::LOCALNET_TAG;
 const NONCE: [u8; NONCE_LEN] = [42u8; NONCE_LEN];
 const SIGNED: u64 = 30;
 
@@ -220,7 +220,7 @@ fn settle_voucher_for_another_channel_is_rejected() {
 fn settle_voucher_for_another_network_is_rejected() {
     assert_rejected(
         run(Scenario {
-            voucher_network: NETWORK_TAG + 1,
+            voucher_network: 0x26,
             ..Scenario::settle()
         }),
         "voucher channel id does not match this channel",

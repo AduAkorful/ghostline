@@ -17,6 +17,9 @@ use tari_template_test_tooling::{
 pub const FAUCET: &str = "TestFaucet";
 pub const CHANNEL: &str = "GhostlineChannel";
 pub const DEPOSIT: u64 = 100;
+/// `Network::LocalNet`. Template tests execute with `Transaction::builder_localnet`, and a
+/// template signature is bound to that network.
+pub const LOCALNET_TAG: u8 = 0x10;
 
 /// Mints a single `DEPOSIT`-valued stealth UTXO locked by `auth` and returns the resource address plus its mask.
 #[allow(dead_code)]

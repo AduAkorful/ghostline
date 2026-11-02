@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MIT
 
 use ootle_byte_type::ToByteType;
+use ootle_network::Network;
 use tari_crypto::{
     keys::SecretKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
-use tari_ootle_common_types::{RistrettoSchnorrBlake2bVerifier, Verifier};
+use tari_ootle_common_types::{
+    RistrettoSchnorrBlake2bVerifier, TemplateSignatureBinding, Verifier,
+};
 use tari_ootle_wallet_crypto::MaskAndValue;
 use tari_template_lib::types::{
     bytes::Bytes,
@@ -102,8 +105,10 @@ impl SignedVoucher {
             .to_byte_type();
         let message = voucher_message(&channel_id, &service_output_key, &output_commitment);
         let signature = match nonce {
-            Some(n) => crate::sign_with_nonce(secret, n, VOUCHER_DOMAIN, &message),
-            None => sign_with_domain(secret, VOUCHER_DOMAIN, &message),
+            Some(n) => {
+                crate::sign_with_nonce(secret, n, params.network_tag, VOUCHER_DOMAIN, &message)
+            }
+            None => sign_with_domain(secret, params.network_tag, VOUCHER_DOMAIN, &message),
         };
         Ok(Self {
             channel_id,
@@ -143,7 +148,10 @@ impl SignedVoucher {
             &self.service_output_key,
             &self.output_commitment,
         );
+        let network =
+            Network::try_from(params.network_tag).map_err(|_| VoucherError::InvalidSignature)?;
         let ok = RistrettoSchnorrBlake2bVerifier.verify(
+            &TemplateSignatureBinding::shared(network),
             VOUCHER_DOMAIN,
             &message,
             &PublicKey::from(params.payer),

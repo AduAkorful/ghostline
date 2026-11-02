@@ -8,9 +8,9 @@ set +x
 
 INDEXER_URL_DEFAULT="https://ootle-indexer-a.tari.com"
 NETWORK_TAG=38 # Tari Ootle Network::Esmeralda (0x26), per tari-project/ootle.ts.
-TEMPLATE_HEX="61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1"
-TEMPLATE_PUBLISH_TX="59fc0b3c52b36b6e0a8c7f3e44c8219e1d4777950dd6d9d4cd862aa1498c9741"
-TEMPLATE_EVIDENCE_DATE="2026-10-19"
+TEMPLATE_HEX="a43092160888319098524681d196f9a49adacccc12615c74ed6936a88417c31e"
+TEMPLATE_PUBLISH_TX="7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859"
+TEMPLATE_EVIDENCE_DATE="2026-11-02"
 WALLET_URL_DEFAULT="http://127.0.0.1:5100"
 
 require_command() {
@@ -86,10 +86,10 @@ check_wallet_compatibility() {
     printf 'Could not query wallet info at %s. Check the local daemon and its JSON-RPC auth mode.\n' "$url" >&2
     return 1
   }
-  if ! python3 -c 'import json,re,sys; d=json.load(sys.stdin).get("result",{}); v=d.get("version",""); n=d.get("network","").lower(); m=re.match(r"^(\d+)\.(\d+)\.(\d+)",v); ok=m and tuple(map(int,m.groups())) >= (0,47,0) and n=="esmeralda"; print(f"walletd={v} network={n}"); sys.exit(0 if ok else 1)' <<<"$info"; then
-    echo 'This run needs Ootle walletd 0.47.0 or newer on Esmeralda.' >&2
-    echo 'Walletd 0.46.1 cannot decode the current Esmeralda account/resource substates during settlement.' >&2
-    echo 'Upgrade the local wallet daemon before opening a channel; no funds have been moved.' >&2
+  if ! python3 -c 'import json,re,sys; d=json.load(sys.stdin).get("result",{}); v=d.get("version",""); n=d.get("network","").lower(); m=re.match(r"^(\d+)\.(\d+)\.(\d+)",v); ok=m and tuple(map(int,m.groups())) >= (0,49,0) and n=="esmeralda"; print(f"walletd={v} network={n}"); sys.exit(0 if ok else 1)' <<<"$info"; then
+    echo 'This run needs Ootle walletd 0.49.0 or newer on Esmeralda.' >&2
+    echo 'The 2026-11-02 resets changed wallet data and transaction signing. The official binary is v0.49.2.' >&2
+    echo 'Upgrade the local wallet daemon and use a new database before opening a channel; no funds have been moved.' >&2
     return 1
   fi
 }
@@ -130,7 +130,10 @@ template_state="$(curl -fsS "$INDEXER_URL/substates/template_$TEMPLATE_HEX")" ||
   echo 'Stop here and use a current, independently verified Esmeralda deployment profile.' >&2
   exit 2
 }
-if ! python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("state",{}).get("up",{}).get("substate",{}).get("Template"); sys.exit(0 if t and t.get("template_name")=="GhostlineChannel" else 1)' <<<"$template_state"; then
+# v0.49 serves state.up.substate as base64 CBOR, not a JSON Template object.
+if ! python3 -c 'import json,sys; d=json.load(sys.stdin); sub=(d.get("state") or {}).get("up",{}).get("substate");
+old=sub.get("Template") if isinstance(sub, dict) else None
+sys.exit(0 if (isinstance(sub, str) and sub) or (old and old.get("template_name")=="GhostlineChannel") else 1)' <<<"$template_state"; then
   echo 'The address resolved, but it is not an active GhostlineChannel template.' >&2
   echo 'Stop here and use a current, independently verified Esmeralda deployment profile.' >&2
   exit 2

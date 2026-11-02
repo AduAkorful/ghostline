@@ -374,13 +374,34 @@ struct HealthResponse {
     wallet_ready: bool,
     #[serde(rename = "uptimeSecs")]
     uptime_secs: u64,
+    /// `present`, `missing`, or `unreachable`. Set only for the hosted relay.
+    #[serde(rename = "templateStatus", skip_serializing_if = "Option::is_none")]
+    template_status: Option<&'static str>,
+    /// Revealed native balance in micro-TARI. Set only when the wallet answered.
+    #[serde(
+        rename = "feeBalanceMicroTari",
+        skip_serializing_if = "Option::is_none"
+    )]
+    fee_balance_micro_tari: Option<String>,
+    /// Whether that balance covers `GHOSTLINE_DEMO_OPEN_MAX_FEE`.
+    #[serde(rename = "feeSufficient", skip_serializing_if = "Option::is_none")]
+    fee_sufficient: Option<bool>,
 }
 
 async fn healthz() -> impl IntoResponse {
     static STARTED: OnceLock<Instant> = OnceLock::new();
     let started = STARTED.get_or_init(Instant::now);
     let wallet_ready = demo_setup_ready() && wallet_daemon_reachable().await;
-    let status = if wallet_ready {
+    let chain = if demo_mode() {
+        Some(relay::relay_chain_health().await)
+    } else {
+        None
+    };
+    let ok = match &chain {
+        Some(chain) => wallet_ready && chain.template_status == "present" && chain.fee_sufficient,
+        None => wallet_ready,
+    };
+    let status = if ok {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -388,13 +409,18 @@ async fn healthz() -> impl IntoResponse {
     (
         status,
         Json(HealthResponse {
-            ok: wallet_ready,
+            ok,
             network: std::env::var("GHOSTLINE_NETWORK").unwrap_or_else(|_| "unconfigured".into()),
             template_address: std::env::var("GHOSTLINE_TEMPLATE")
                 .unwrap_or_else(|_| "unconfigured".into()),
             version: env!("CARGO_PKG_VERSION"),
             wallet_ready,
             uptime_secs: started.elapsed().as_secs(),
+            template_status: chain.as_ref().map(|chain| chain.template_status),
+            fee_balance_micro_tari: chain
+                .as_ref()
+                .and_then(|chain| chain.fee_balance_micro_tari.clone()),
+            fee_sufficient: chain.as_ref().map(|chain| chain.fee_sufficient),
         }),
     )
 }
@@ -1096,6 +1122,10 @@ mod tests {
         assert!(health.get("version").is_some());
         assert!(health.get("walletReady").is_some());
         assert!(health.get("uptimeSecs").is_some());
+        if std::env::var("GHOSTLINE_DEMO_MODE").ok().as_deref() != Some("1") {
+            assert!(health.get("templateStatus").is_none());
+            assert!(health.get("feeSufficient").is_none());
+        }
     }
 
     #[tokio::test]

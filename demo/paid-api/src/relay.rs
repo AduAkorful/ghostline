@@ -13,9 +13,10 @@ use std::{
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use ghostline_core::{from_hex, to_hex};
 use ghostline_net::{
-    FUNDING_NOT_DISCOVERED, IndexerClient, StealthTransfer, StealthTransferRequest, TransactionId,
-    TransferFeeParams, UtxoInputSelection, WalletClient, account_name, execution_accepted,
-    funding_output_spend_gate, indexed_receipt_status, indexed_transaction_status,
+    FUNDING_NOT_DISCOVERED, IndexedSubstate, IndexerClient, StealthTransfer,
+    StealthTransferRequest, TransactionId, TransferFeeParams, UtxoInputSelection, WalletClient,
+    account_name, execution_accepted, funding_output_spend_gate, indexed_receipt_status,
+    indexed_transaction_status,
 };
 use ghostline_paywall::{ChannelStore, PaymentTerms};
 use serde::{Deserialize, Serialize};
@@ -344,7 +345,7 @@ async fn refund_funding_inner(
             output_memo: None,
             pay_to: serde_json::Value::String("StealthPublicKey".into()),
             attach_sender_address: false,
-            pay_ref: None,
+            destination_tag: None,
         }],
         max_fee: config.refund_max_fee,
         dry_run: false,
@@ -1967,7 +1968,7 @@ async fn refund_inner(
             output_memo: None,
             pay_to: serde_json::Value::String("StealthPublicKey".into()),
             attach_sender_address: false,
-            pay_ref: None,
+            destination_tag: None,
         }],
         max_fee: config.refund_max_fee,
         dry_run: false,
@@ -2157,7 +2158,7 @@ async fn warn_if_fee_float_low(config: &RelayConfig) {
                 event = "relay_fee_float_low",
                 revealed_balance_micro_xtr = balance,
                 threshold_micro_xtr = FEE_FLOAT_WARNING_THRESHOLD,
-                "relay fee account is below the 0.1 XTR safety threshold; top it up from the Esmeralda faucet"
+                "relay fee account is below the 0.1 TARI safety threshold; top it up from the Esmeralda faucet"
             );
         }
         Ok(_) => {}
@@ -2168,6 +2169,79 @@ async fn warn_if_fee_float_low(config: &RelayConfig) {
                 "could not verify the relay fee float"
             );
         }
+    }
+}
+
+pub(crate) struct RelayChainHealth {
+    pub template_status: &'static str,
+    pub fee_balance_micro_tari: Option<String>,
+    pub fee_sufficient: bool,
+}
+
+/// Indexer template presence and the fee account's revealed balance.
+///
+/// `template_status` is `present`, `missing`, or `unreachable`. A transport
+/// failure is `unreachable`, not `missing`. The balance is the wallet's current
+/// revealed native balance, compared with `GHOSTLINE_DEMO_OPEN_MAX_FEE`.
+pub(crate) async fn relay_chain_health() -> RelayChainHealth {
+    let template_status = template_status_from_env().await;
+    let (fee_balance_micro_tari, fee_sufficient) = fee_account_can_pay().await;
+    RelayChainHealth {
+        template_status,
+        fee_balance_micro_tari,
+        fee_sufficient,
+    }
+}
+
+async fn template_status_from_env() -> &'static str {
+    let Ok(template) = std::env::var("GHOSTLINE_TEMPLATE") else {
+        return "missing";
+    };
+    let template = template.trim();
+    if template.is_empty() {
+        return "missing";
+    }
+    let Ok(indexer_url) = std::env::var("GHOSTLINE_INDEXER_URL") else {
+        return "unreachable";
+    };
+    let Ok(indexer) = IndexerClient::connect(indexer_url.trim()) else {
+        return "unreachable";
+    };
+    match tokio::time::timeout(Duration::from_secs(3), indexer.classify_substate(template)).await {
+        Ok(Ok(IndexedSubstate::Up { .. })) => "present",
+        Ok(Ok(IndexedSubstate::Down { .. } | IndexedSubstate::NotFound)) => "missing",
+        _ => "unreachable",
+    }
+}
+
+async fn fee_account_can_pay() -> (Option<String>, bool) {
+    let account = std::env::var("GHOSTLINE_DEMO_FEE_ACCOUNT_NAME").unwrap_or_default();
+    let cap = std::env::var("GHOSTLINE_DEMO_OPEN_MAX_FEE")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .unwrap_or(u128::from(DEFAULT_OPEN_FEE_CAP));
+    if account.trim().is_empty() {
+        return (None, false);
+    }
+    let Ok(url) = std::env::var("GHOSTLINE_WALLET_URL") else {
+        return (None, false);
+    };
+    let checked = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut wallet = WalletClient::connect(url.trim()).map_err(|error| error.to_string())?;
+        wallet
+            .auth_none_admin()
+            .await
+            .map_err(|error| error.to_string())?;
+        let response = wallet
+            .account_balances(account.trim(), false)
+            .await
+            .map_err(|error| error.to_string())?;
+        revealed_native_balance(&response)
+    })
+    .await;
+    match checked {
+        Ok(Ok(balance)) => (Some(balance.to_string()), balance >= cap),
+        _ => (None, false),
     }
 }
 

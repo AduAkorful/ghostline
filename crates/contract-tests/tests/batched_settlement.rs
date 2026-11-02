@@ -63,7 +63,7 @@ impl BatchFixture {
         let template = test.get_template_address(CHANNEL);
         let make_channel = |payer: &RistrettoPublicKey| {
             Channel::open(ChannelSpec {
-                network_tag: 1,
+                network_tag: support::LOCALNET_TAG,
                 payer: payer.to_byte_type(),
                 service: service_public.to_byte_type(),
                 deposit: DEPOSIT,

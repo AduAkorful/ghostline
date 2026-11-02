@@ -35,7 +35,9 @@ let abandonArmed = false;
 let liveOpenInFlight = false;
 const LIVE_OPEN_PROGRESS_LABELS = new Set(["Checking Sapient…", "Waiting for Sapient approval…", "Opening channel…", "Retrying relay open…"]);
 
-const XTR_RESOURCE = `resource_${"01".repeat(32)}`;
+// Native Esmeralda resource. On 2026-11-02 the indexer substate for this address
+// carried the symbol TARI. The old XTR alias no longer resolves.
+const NATIVE_TARI_RESOURCE = `resource_${"01".repeat(32)}`;
 const LIVE_PENDING_KEY = "ghostline-live-pending";
 const LIVE_CHANNEL_KEY = "ghostline-live-channel";
 const TARI_PROVIDER_READY_EVENT = "tari#initialized";
@@ -840,7 +842,7 @@ async function connectAndOpenLive() {
     if (liveSetupCancelled) return;
     setupStage = "loading live demo settings";
     const relay = await relayJson("/demo/config");
-    byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test XTR. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough XTR for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
+    byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test TARI. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough TARI for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
     let pending = readPendingFunding();
     const retryingSavedTransfer = Boolean(pending?.fundingTxId);
     if (!pending?.fundingTxId) {
@@ -866,15 +868,15 @@ async function connectAndOpenLive() {
       } catch {
         // Some wallet accounts do not grant balance inspection; the wallet still checks funds on approval.
       }
-      const xtr = Array.isArray(balances) ? balances.find((balance) => balance.resourceAddress === XTR_RESOURCE) : undefined;
+      const xtr = Array.isArray(balances) ? balances.find((balance) => balance.resourceAddress === NATIVE_TARI_RESOURCE) : undefined;
       const shownBalance = xtr ? BigInt(xtr.amount || "0") + BigInt(xtr.confidentialAmount || "0") : 0n;
       if ((xtr && shownBalance < BigInt(relay.deposit)) || (caps.privateViewGranted === true && !xtr)) {
-        const reported = xtr ? `Sapient currently reports ${shownBalance} µT` : "Sapient did not return a spendable XTR balance";
+        const reported = xtr ? `Sapient currently reports ${shownBalance} µT` : "Sapient did not return a spendable TARI balance";
         byId("live-note").textContent = `${reported}; the live channel needs ${relay.deposit} µT plus a wallet fee. If you just funded this wallet, refresh Sapient's wallet view, wait for finality, then reload this page and retry.`;
         throw new Error(`${reported}; ${relay.deposit} µT plus a wallet fee is required. Refresh Sapient after funding and retry.`);
       }
       if (caps.privateViewGranted !== true || !xtr) {
-        byId("live-note").textContent = `This wallet does not expose a spendable XTR balance to the page. It will check funds when you approve. You need at least ${relay.deposit} µT plus the wallet fee; if Sapient reports insufficient funds, use its Esmeralda faucet, wait for finality, refresh Sapient, and retry.`;
+        byId("live-note").textContent = `This wallet does not expose a spendable TARI balance to the page. It will check funds when you approve. You need at least ${relay.deposit} µT plus the wallet fee; if Sapient reports insufficient funds, use its Esmeralda faucet, wait for finality, refresh Sapient, and retry.`;
       }
       const channelKeys = createEphemeralChannelKeys(randomBytes, scalarFromWide, publicKeyFromSecret);
       payerSecret = channelKeys.payerSecret;
@@ -890,7 +892,7 @@ async function connectAndOpenLive() {
       if (memo.length > 253) throw new Error("The encrypted funding memo is too long for a stealth output. Retry live setup.");
       const operation = await tariRequest("tari_createTransactionRequest", {
         kind: "sendPrivately",
-        resourceAddress: XTR_RESOURCE,
+        resourceAddress: NATIVE_TARI_RESOURCE,
         recipientWalletAddress: relaySession.fundingAddress,
         amount: String(relaySession.deposit),
         maxFee: "50000",

@@ -15,7 +15,7 @@ services:
       - key: GHOSTLINE_DEMO_MODE
         value: "1"
       - key: GHOSTLINE_TEMPLATE
-        value: template_61bad5eb1b599ba6351e1573958fb84c4aeb4dd47415e60c0b44b1c50d7157a1
+        value: template_a43092160888319098524681d196f9a49adacccc12615c74ed6936a88417c31e
       - key: GHOSTLINE_CORS_ORIGINS
         value: https://ghostline-ui.vercel.app
       - key: GHOSTLINE_LEDGER_PATH
@@ -35,7 +35,7 @@ services:
       - key: GHOSTLINE_DEMO_FEE_KEY_INDEX
         value: "3"
       - key: GHOSTLINE_DEMO_OPEN_MAX_FEE
-        value: "100000"
+        value: "12000"
       - key: GHOSTLINE_DEMO_SETTLE_MAX_FEE
         value: "100000"
       - key: GHOSTLINE_DEMO_REFUND_MAX_FEE

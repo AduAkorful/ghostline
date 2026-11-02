@@ -16,7 +16,7 @@ use tari_template_lib::types::crypto::{
 };
 use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
 
-const NETWORK_TAG: u8 = 1;
+const NETWORK_TAG: u8 = support::LOCALNET_TAG;
 const NONCE: [u8; NONCE_LEN] = [42; NONCE_LEN];
 
 #[test]

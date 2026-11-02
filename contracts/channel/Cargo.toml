@@ -8,7 +8,7 @@ license = "MIT"
 description = "Ghostline payment channel: one-shot voucher settlement for stealth deposits on Tari Ootle"
 
 [dependencies]
-tari_template_lib = "0.34.0"
+tari_template_lib = "0.37.0"
 curve25519-dalek = { version = "=5.0.0", default-features = false }
 
 [lib]

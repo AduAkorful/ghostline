@@ -10,13 +10,13 @@ Wallet and network identifiers must come from your deployment and wallet. This i
 
 Install the current [`v0.4.0` release](https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0). It adds the bounded local `ghostline demo` and retains the guided runner. The runner verifies the documented template is active at its Esmeralda address (indexers may no longer retain the original publish transaction result), creates fresh local payer and service keys, starts the sample API on loopback, asks before opening and settling, then prints the finalized transaction links. It does not host a signer or receive wallet credentials.
 
-The runner needs a working Esmeralda wallet daemon and test funds. It requires Ootle walletd `0.47.0` or newer: the official `0.46.1` daemon fails to decode current Esmeralda component/resource substates during transaction submission. Tari now publishes `0.47.0` as a pre-release with binaries, so judges do not need to build walletd from source. Download the binary and matching `.sha256` asset for your OS/architecture from the [official Ootle v0.47.0 release](https://github.com/tari-project/tari-ootle/releases/tag/v0.47.0). For Linux x86_64, the exact asset we checksum-verified is [`tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64`](https://github.com/tari-project/tari-ootle/releases/download/v0.47.0/tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64); download the adjacent `.sha256` file and run `sha256sum -c` before using it. The successful end-to-end run was performed with a development build of walletd 0.47.0; the official asset was checksum-verified and its Esmeralda account JSON-RPC tested. The runner checks wallet version and network before any transaction, and refuses older daemons.
+The runner needs a working Esmeralda wallet daemon and test funds. After the 2026-11-02 resets it requires Ootle walletd `0.49.0` or newer. v0.48.0, v0.49.0 and v0.49.1 did not publish a working binary; the official asset is [v0.49.2](https://github.com/tari-project/tari-ootle/releases/tag/v0.49.2). For Linux x86_64, the checksum-verified asset is [`tari_ootle_walletd-0.49.2-aa7b0c8-linux-x86_64`](https://github.com/tari-project/tari-ootle/releases/download/v0.49.2/tari_ootle_walletd-0.49.2-aa7b0c8-linux-x86_64); download the adjacent `.sha256` file and run `sha256sum -c` before using it. The public indexer reported version `0.49.1` on 2026-11-02. The runner checks wallet version and network before any transaction, and refuses older daemons. Delete any wallet database created before the reset.
 
 Use a **fresh, test-only wallet profile**. The runner needs walletd's local unauthenticated JSON-RPC, so keep it bound to loopback and do not point it at a wallet containing real funds. Example Linux x86_64 launch after downloading and verifying the binary:
 
 ```sh
-chmod +x ./tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64
-./tari_ootle_walletd-0.47.0-9dabb2a-linux-x86_64 \
+chmod +x ./tari_ootle_walletd-0.49.2-aa7b0c8-linux-x86_64
+./tari_ootle_walletd-0.49.2-aa7b0c8-linux-x86_64 \
   --network esmeralda \
   --authentication none \
   --listen-on 127.0.0.1:5100 \

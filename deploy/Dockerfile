@@ -9,11 +9,11 @@ COPY . .
 RUN cargo build --locked --release -p ghostline-cli -p ghostline-paid-api
 
 FROM debian:bookworm-slim AS runtime
-# Upstream v0.47.0 (9dabb2a) can skip stealth outputs while scanning, so the relay never finds
-# some finalized deposits. This build backports the public upstream fix tari-ootle#3047
-# (32cd4c5) onto v0.47.0, built in rust:1.97.1-bookworm; see the release notes for the patch.
-ARG OOTLE_WALLETD_URL=https://github.com/AduAkorful/ghostline/releases/download/walletd-v0.47.0-ghostline.3047/tari_ootle_walletd-0.47.0-ghostline.3047-linux-x86_64
-ARG OOTLE_WALLETD_SHA256=4617bac9c53b53d52a871450eeb0f27f65d5e089a839cafb36b6300ed8da2874
+# Official v0.49.2 (aa7b0c8). v0.48.0, v0.49.0 and v0.49.1 published no working
+# wallet binary. v0.49.2 includes those resets. The checksum is the upstream
+# tari_ootle_walletd-0.49.2-aa7b0c8-linux-x86_64.sha256 asset.
+ARG OOTLE_WALLETD_URL=https://github.com/tari-project/tari-ootle/releases/download/v0.49.2/tari_ootle_walletd-0.49.2-aa7b0c8-linux-x86_64
+ARG OOTLE_WALLETD_SHA256=57e753dd30f36405a0e092edbe65abd800d9e9d0718579225975b0969277914c
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl libdbus-1-3 libgcc-s1 libgcrypt20 liblz4-1 liblzma5 passwd \
     libssl3 libstdc++6 libsystemd0 libzstd1 \
