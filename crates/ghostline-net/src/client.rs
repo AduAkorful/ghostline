@@ -551,7 +551,7 @@ fn capture_vault(bytes: &[u8], index: &mut usize, out: &mut Vec<String>) -> bool
 
 fn decode_standard_base64(input: &str) -> Option<Vec<u8>> {
     let bytes = input.as_bytes();
-    if bytes.is_empty() || bytes.len() % 4 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return None;
     }
     let mut out = Vec::with_capacity(bytes.len() / 4 * 3);

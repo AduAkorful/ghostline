@@ -271,6 +271,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   assert.equal(fundingRequest.params.kind, "sendPrivately");
   assert.equal(fundingRequest.params.amount, "51");
   assert.equal(fundingRequest.params.maxFee, "12000");
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_requestViewAccess"), false, "an existing private view is not requested again");
   assert.match(fundingRequest.params.memo, /^G2:session-test[0-9a-f]{64}:otl_esm_1mockwallet$/i, "encrypted recipient memo binds session, payer, and refund address");
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/session")).length, 1);
 
@@ -445,6 +446,42 @@ test("missing extension, rejected approval, unsupported methods, chain errors, a
       assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
     });
   }
+});
+
+test("a withheld confidentialAmount of 0 is not trusted until Sapient grants a private view", async () => {
+  let granted = false;
+  const h = makeHarness({ walletOverrides: {
+    tari_getCapabilities: { privateSpend: true, transactionRequests: true, walletAddress: true, privateBalanceView: true, privateViewGranted: false },
+    tari_requestViewAccess: () => { granted = true; return { granted: true }; },
+    tari_getBalances: () => [{
+      resourceAddress: XTR_RESOURCE,
+      amount: "5",
+      confidentialAmount: granted ? "2" : "0",
+      divisibility: granted ? 0 : 6,
+    }],
+  } });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Channel finalized") || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /Channel finalized/);
+  assert.equal(h.walletCalls.filter((call) => call.method === "tari_requestViewAccess").length, 1);
+  assert.equal(h.walletCalls.filter((call) => call.method === "tari_getBalances").length, 1);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), true);
+});
+
+test("a refused private view stops before approval and does not call the zero confidential amount empty", async () => {
+  const h = makeHarness({ walletOverrides: {
+    tari_getCapabilities: { privateSpend: true, transactionRequests: true, walletAddress: true, privateBalanceView: true, privateViewGranted: false },
+    tari_requestViewAccess: { granted: false },
+    tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "5000000", confidentialAmount: "0", divisibility: 6 }],
+  } });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /did not grant a private balance view/);
+  assert.match(h.elements.get("status").textContent, /confidentialAmount 0/);
+  assert.doesNotMatch(h.elements.get("status").textContent, /private balance is 0/);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
 });
 
 test("disconnected wallet is asked to reconnect and the request is retried", async () => {

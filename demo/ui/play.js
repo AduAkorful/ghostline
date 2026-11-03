@@ -825,6 +825,23 @@ async function openFundedChannel(pending, deadline) {
   }
 }
 
+// TokenBalance amounts are raw units of 10^-divisibility TARI. µT is 10^-6 TARI.
+// A missing divisibility is 6, which is native TARI's exponent; the caller still prints the raw fields.
+function rawToMicroTari(raw, divisibility) {
+  const value = BigInt(raw);
+  const places = divisibility === undefined || divisibility === null || divisibility === "" ? 6 : Number(divisibility);
+  if (!Number.isInteger(places) || places < 0 || places > 12) {
+    throw new Error(`Sapient reported divisibility ${divisibility}, which this page cannot convert to µT.`);
+  }
+  const scale = 10n ** BigInt(places);
+  const micro = 1_000_000n;
+  if (places <= 6) return value * (micro / scale);
+  if (value % (scale / micro) !== 0n) {
+    throw new Error(`Sapient reported ${raw} at divisibility ${places}, which is not a whole number of µT.`);
+  }
+  return value / (scale / micro);
+}
+
 async function connectAndOpenLive() {
   let setupStage = "checking relay configuration";
   liveSetupCancelled = false;
@@ -860,23 +877,46 @@ async function connectAndOpenLive() {
       if (typeof refundAddress !== "string" || !refundAddress.startsWith("otl_esm_1")) {
         throw new Error("Could not read an Esmeralda Sapient wallet address for private refunds.");
       }
-      let balances;
       setupStage = "checking the testnet balance";
+      // Without a private view, Sapient reports confidentialAmount as "0" even when the wallet holds stealth TARI.
+      let viewGranted = caps.privateViewGranted === true;
+      if (!viewGranted) {
+        if (caps.privateBalanceView === false) {
+          throw new Error(`This Sapient account cannot show a private balance to the page. ${relay.deposit} µT plus a wallet fee is required before approval. No deposit was requested.`);
+        }
+        setupStage = "requesting a private balance view";
+        try {
+          const access = await tariRequest("tari_requestViewAccess");
+          viewGranted = access?.granted === true;
+        } catch (error) {
+          if (Number(error?.code) === 4001) throw error;
+          viewGranted = false;
+        }
+        setupStage = "checking the testnet balance";
+      }
+      let balances;
       try {
         balances = await tariRequest("tari_getBalances");
       } catch {
-        // A failed balance read must not open the approval. The check below stops the flow.
+        balances = undefined;
       }
       const xtr = Array.isArray(balances) ? balances.find((balance) => balance.resourceAddress === NATIVE_TARI_RESOURCE) : undefined;
-      // sendPrivately spends confidential outputs. Revealed balance cannot pay this deposit.
-      const privateBalance = xtr ? BigInt(xtr.confidentialAmount || "0") : null;
+      const rawBalance = xtr
+        ? `raw amount ${xtr.amount ?? "missing"}, confidentialAmount ${xtr.confidentialAmount ?? "missing"}, divisibility ${xtr.divisibility ?? "missing"}`
+        : "no native TARI balance row";
+      if (!viewGranted) {
+        throw new Error(`Sapient did not grant a private balance view, so confidentialAmount is not the spendable private balance (${rawBalance}). Approve the view prompt in Sapient, then retry. ${relay.deposit} µT plus a wallet fee is required before approval. No deposit was requested.`);
+      }
+      if (!xtr || xtr.confidentialAmount === undefined || xtr.confidentialAmount === null || xtr.confidentialAmount === "") {
+        throw new Error(`Sapient granted a private view but did not return confidentialAmount (${rawBalance}). No deposit was requested.`);
+      }
+      // sendPrivately spends stealth outputs. Revealed balance cannot pay this deposit.
+      const privateBalance = rawToMicroTari(xtr.confidentialAmount, xtr.divisibility);
+      const revealedBalance = rawToMicroTari(xtr.amount || "0", xtr.divisibility);
       const fundingMaxFee = 12000n;
       const needed = BigInt(relay.deposit) + fundingMaxFee;
-      if (privateBalance === null || privateBalance < needed) {
-        const reported = privateBalance === null
-          ? "Sapient did not show a private TARI balance"
-          : `Sapient private balance is ${privateBalance} µT`;
-        const message = `${reported}. ${relay.deposit} µT plus a wallet fee is required before approval. Revealed TARI cannot pay this private deposit. Refresh Sapient after a private transfer arrives, then retry.`;
+      if (privateBalance < needed) {
+        const message = `Sapient reports revealed ${revealedBalance} µT and private ${privateBalance} µT (${rawBalance}). ${relay.deposit} µT plus a wallet fee is required before approval. Revealed TARI cannot pay this private deposit.`;
         byId("live-note").textContent = message;
         throw new Error(message);
       }
