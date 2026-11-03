@@ -98,7 +98,7 @@ function makeHarness({ wallet = true, injectWalletOnLoad = wallet, walletOverrid
     tari_requestAccounts: ["otl_esm_1mockwallet"],
     tari_getCapabilities: { privateSpend: true, transactionRequests: true, walletAddress: true, transactionResultLookup: true, privateViewGranted: true },
     tari_getWalletAddress: "otl_esm_1mockwallet",
-    tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "200000" }],
+    tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "100000", confidentialAmount: "200000" }],
     tari_createTransactionRequest: { requestId: "funding-request" },
     tari_getTransactionRequest: { status: "approved" },
     tari_submitTransactionRequest: { transactionId: fundingTxId },
@@ -270,7 +270,7 @@ test("mock wallet completes connect → private funding → 5 vouchers → final
   const fundingRequest = h.walletCalls.find((call) => call.method === "tari_createTransactionRequest");
   assert.equal(fundingRequest.params.kind, "sendPrivately");
   assert.equal(fundingRequest.params.amount, "51");
-  assert.equal(fundingRequest.params.maxFee, "12000");
+  assert.equal(fundingRequest.params.maxFee, "20000");
   assert.equal(h.walletCalls.some((call) => call.method === "tari_requestViewAccess"), false, "an existing private view is not requested again");
   assert.match(fundingRequest.params.memo, /^G2:session-test[0-9a-f]{64}:otl_esm_1mockwallet$/i, "encrypted recipient memo binds session, payer, and refund address");
   assert.equal(h.calls.filter((call) => call.url.includes("/demo/session")).length, 1);
@@ -420,7 +420,7 @@ test("missing extension, rejected approval, unsupported methods, chain errors, a
     { name: "rejected approval", options: { walletOverrides: { tari_getNetwork: rpcError(4001, "User rejected") } }, message: /Wallet approval was cancelled/ },
     { name: "unsupported wallet method", options: { walletOverrides: { tari_getCapabilities: rpcError(4200, "Unsupported") } }, message: /does not support a required feature/ },
     { name: "chain rejection", options: { walletOverrides: { tari_getCapabilities: rpcError(-32603, "Ootle rejected wallet request") } }, message: /Ootle rejected wallet request/ },
-      { name: "low balance", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "0" }] } }, message: /51 µT plus a wallet fee is required/ },
+      { name: "low balance", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "0", confidentialAmount: "0" }] } }, message: /deposit needs 51 µT of private TARI/ },
       { name: "revealed balance only", options: { walletOverrides: { tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "5000000", confidentialAmount: "0" }] } }, message: /Revealed TARI cannot pay this private deposit/ },
   ];
   for (const scenario of cases) {
@@ -467,6 +467,31 @@ test("a withheld confidentialAmount of 0 is not trusted until Sapient grants a p
   assert.equal(h.walletCalls.filter((call) => call.method === "tari_requestViewAccess").length, 1);
   assert.equal(h.walletCalls.filter((call) => call.method === "tari_getBalances").length, 1);
   assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), true);
+});
+
+test("a public balance below the fee cap stops before approval", async () => {
+  const h = makeHarness({ walletOverrides: {
+    tari_getBalances: [{ resourceAddress: XTR_RESOURCE, amount: "1000", confidentialAmount: "200000", divisibility: 6 }],
+  } });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => h.elements.get("status").textContent.includes("Live setup stopped") || /Public balance is short/.test(h.elements.get("status").textContent));
+  assert.match(h.elements.get("status").textContent, /Public balance is short/);
+  assert.match(h.elements.get("status").textContent, /20000 µT/);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_createTransactionRequest"), false);
+});
+
+test("a network fee rejection is not described as still waiting for approval", async () => {
+  const raw = "Insufficient fees paid: At instruction #3: Insufficient fees to fund native verification requiring 14142000 points: 553728 of 11009000 allowance points already consumed";
+  const h = makeHarness({ walletOverrides: { tari_getTransactionRequest: { status: "rejected", error: raw } } });
+  await h.load();
+  await h.elements.get("live-open").click();
+  await h.waitFor(() => /network rejected the deposit/.test(h.elements.get("status").textContent) || h.elements.get("status").textContent.includes("Live setup stopped"));
+  assert.match(h.elements.get("status").textContent, /The network rejected the deposit/);
+  assert.doesNotMatch(h.elements.get("status").textContent, /waiting for Sapient approval/);
+  assert.equal(h.elements.get("live-error-details").hidden, false);
+  assert.match(h.elements.get("live-error-raw").textContent, /14142000 points/);
+  assert.equal(h.walletCalls.some((call) => call.method === "tari_submitTransactionRequest"), false);
 });
 
 test("a refused private view stops before approval and does not call the zero confidential amount empty", async () => {

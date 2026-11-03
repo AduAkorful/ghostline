@@ -842,12 +842,45 @@ function rawToMicroTari(raw, divisibility) {
   return value / (scale / micro);
 }
 
+function clearLiveError() {
+  const details = byId("live-error-details");
+  details.hidden = true;
+  details.open = false;
+  byId("live-error-raw").textContent = "";
+}
+
+function showLiveError(raw) {
+  const details = byId("live-error-details");
+  byId("live-error-raw").textContent = raw;
+  details.hidden = false;
+  details.open = false;
+}
+
+// A wallet answer after the approval screen is not "still waiting". The long engine text stays behind the toggle.
+function depositFailure(stage, detail) {
+  if (/InsufficientFees|Insufficient fees|accepted the fee but rejected/i.test(detail)) {
+    return {
+      summary: "The network rejected the deposit because the fee could not cover private verification. The 51 µT was not spent. A fee may still have been charged.",
+      raw: detail,
+    };
+  }
+  if (stage === "waiting for Sapient approval") {
+    const summary = detail.length > 220 ? `${detail.slice(0, 200)}…` : detail;
+    return {
+      summary: `Sapient rejected the deposit after approval: ${summary}`,
+      raw: detail,
+    };
+  }
+  return { summary: `Live setup stopped while ${stage}: ${detail.length > 220 ? `${detail.slice(0, 200)}…` : detail}`, raw: detail };
+}
+
 async function connectAndOpenLive() {
   let setupStage = "checking relay configuration";
   liveSetupCancelled = false;
   liveOpenInFlight = true;
   byId("live-open").disabled = true;
-  byId("live-open").textContent = "Checking Sapient…";
+    byId("live-open").textContent = "Checking Sapient…";
+    clearLiveError();
   byId("live-stop").hidden = false;
   byId("live-stop").textContent = "Use simulated mode instead";
   try {
@@ -858,7 +891,7 @@ async function connectAndOpenLive() {
     if (liveSetupCancelled) return;
     setupStage = "loading live demo settings";
     const relay = await relayJson("/demo/config");
-    byId("funding-requirement").textContent = `Switch Sapient to Esmeralda and use its built-in faucet to request test TARI. Wait for the transfer to finalize. This demo sends ${relay.deposit} µT to open the channel; your wallet also needs enough TARI for its transaction fee. If Sapient still shows an old balance after funding, refresh its wallet view and reload this page before retrying.`;
+    byId("funding-requirement").textContent = `Use Sapient 0.7.1 or newer. Switch it to Esmeralda. The deposit is ${relay.deposit} µT of private TARI. The wallet fee is paid from public TARI, and the cap is 20,000 µT (0.02 TARI). Sapient 0.7.0 reports a private balance of 0 and rejects the send.`;
     let pending = readPendingFunding();
     const retryingSavedTransfer = Boolean(pending?.fundingTxId);
     if (!pending?.fundingTxId) {
@@ -913,10 +946,17 @@ async function connectAndOpenLive() {
       // sendPrivately spends stealth outputs. Revealed balance cannot pay this deposit.
       const privateBalance = rawToMicroTari(xtr.confidentialAmount, xtr.divisibility);
       const revealedBalance = rawToMicroTari(xtr.amount || "0", xtr.divisibility);
-      const fundingMaxFee = 12000n;
-      const needed = BigInt(relay.deposit) + fundingMaxFee;
-      if (privateBalance < needed) {
-        const message = `Sapient reports revealed ${revealedBalance} µT and private ${privateBalance} µT (${rawBalance}). ${relay.deposit} µT plus a wallet fee is required before approval. Revealed TARI cannot pay this private deposit.`;
+      // Sapient pays this fee from public TARI. The 51 µT deposit is the private spend.
+      // A 12,000 µT cap was rejected on 2026-11-03: verification needed 15,687 µT of payment.
+      const fundingMaxFee = 20000n;
+      const reported = `Sapient reports revealed ${revealedBalance} µT and private ${privateBalance} µT (${rawBalance})`;
+      if (privateBalance < BigInt(relay.deposit)) {
+        const message = `The deposit needs ${relay.deposit} µT of private TARI. Revealed TARI cannot pay this private deposit. ${reported}.`;
+        byId("live-note").textContent = message;
+        throw new Error(message);
+      }
+      if (revealedBalance < fundingMaxFee) {
+        const message = `Public balance is short. The wallet fee is paid from public TARI and the cap is ${fundingMaxFee} µT. No deposit was requested. ${reported}.`;
         byId("live-note").textContent = message;
         throw new Error(message);
       }
@@ -928,7 +968,7 @@ async function connectAndOpenLive() {
         method: "POST",
         body: JSON.stringify({ payerPublicKey: bytesToHex(channelKeys.payerPublic), refundAddress }),
       });
-      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. The wallet fee cap is 12,000 µT (0.012 TARI); a private send of this size uses about 9,815 µT, and a stealth fee spends the cap. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
+      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. The fee cap is 20,000 µT (0.02 TARI), paid from public TARI. A 51 µT private send was rejected at 12,000 µT because verification needed about 15,687 µT. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
       setupStage = "waiting for Sapient approval";
       const memo = fundingMemo(relaySession.sessionId, bytesToHex(channelKeys.payerPublic), refundAddress);
       if (memo.length > 253) throw new Error("The encrypted funding memo is too long for a stealth output. Retry live setup.");
@@ -937,7 +977,7 @@ async function connectAndOpenLive() {
         resourceAddress: NATIVE_TARI_RESOURCE,
         recipientWalletAddress: relaySession.fundingAddress,
         amount: String(relaySession.deposit),
-        maxFee: "12000",
+        maxFee: "20000",
         memo,
       });
       status("Approve the private testnet transfer in Sapient. The relay waits for finality before opening your channel.");
@@ -1035,12 +1075,14 @@ async function connectAndOpenLive() {
       status("No Tari wallet became available. Reload this page in the Chrome profile where Sapient is enabled, then retry.");
     } else {
       byId("live-open").textContent = "Retry live setup";
-      // Relay errors already end in a full stop; the sentences below add their own.
       const detail = walletError(error).replace(/\.+$/, "");
-      byId("live-note").textContent = pending
-      ? `Live setup stopped while ${setupStage}: ${detail}. Your approved funding transaction is saved in this browser; retrying will not request another transfer. You can return the pending deposit to Sapient if channel opening cannot be completed.`
-        : `Live setup stopped while ${setupStage}: ${detail}. No channel was opened; the instant simulation remains available.`;
-      status(`Live setup stopped while ${setupStage}: ${detail}.${pending ? " Your funding transaction is saved in this browser; retry without sending again." : " No channel was opened."}`);
+      const failure = depositFailure(setupStage, detail);
+      const tail = pending
+        ? "Your approved funding transaction is saved in this browser; retrying will not request another transfer."
+        : "No channel was opened. The instant simulation remains available.";
+      byId("live-note").textContent = `${failure.summary} ${tail}`;
+      status(failure.summary);
+      if (failure.raw !== failure.summary) showLiveError(failure.raw);
     }
   } finally {
     liveOpenInFlight = false;
