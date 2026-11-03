@@ -628,9 +628,25 @@ pub fn indexed_transaction_status(entry: &Value) -> &'static str {
     {
         "Commit" => "Finalized",
         "Abort" => "FinalizedAbort",
+        // The fee intent committed and the rest was rejected. This is not a channel commit.
+        // The abort text is on `GET /transactions/{id}/result`, not in `rejected_reason`.
+        "FeeIntentCommit" => "FeeIntent",
         "Pending" => "Pending",
         _ => "Unknown",
     }
+}
+
+/// Abort text from `GET /transactions/{id}/result` after a `FeeIntentCommit`.
+///
+/// The live Esmeralda body is `{"result":{"Finalized":{"abort_details":"..."}}}`.
+/// An empty or missing field returns `None`; callers must not invent a reason.
+pub fn indexer_result_abort_details(body: &Value) -> Option<&str> {
+    let text = body
+        .pointer("/result/Finalized/abort_details")
+        .or_else(|| body.pointer("/Finalized/abort_details"))
+        .and_then(Value::as_str)?
+        .trim();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Classify `GET /transaction-receipts/{id}` (`receipt.outcome`).
@@ -643,6 +659,7 @@ pub fn indexed_receipt_status(body: &Value) -> &'static str {
     {
         "Commit" => "Finalized",
         "Abort" => "FinalizedAbort",
+        "FeeIntentCommit" => "FeeIntent",
         _ => "Unknown",
     }
 }
@@ -774,8 +791,50 @@ mod tests {
             "FinalizedAbort"
         );
         assert_eq!(
+            indexed_transaction_status(&serde_json::json!({
+                "transaction": {
+                    "summary": {"outcome": "FeeIntentCommit", "total_fees_paid": 9342},
+                    "rejected_reason": null
+                }
+            })),
+            "FeeIntent"
+        );
+        assert_eq!(
             indexed_receipt_status(&serde_json::json!({"receipt": {"outcome": "Commit"}})),
             "Finalized"
+        );
+        assert_eq!(
+            indexed_receipt_status(&serde_json::json!({"receipt": {"outcome": "FeeIntentCommit"}})),
+            "FeeIntent"
+        );
+    }
+
+    #[test]
+    fn indexer_result_abort_details_reads_the_fee_intent_result() {
+        let body = serde_json::json!({
+            "result": {
+                "Finalized": {
+                    "final_decision": "Commit",
+                    "abort_details": "Failed to lock outputs: Substate utxo_0101…c7e550:0 already exists and cannot be created as an output"
+                }
+            }
+        });
+        assert!(
+            indexer_result_abort_details(&body)
+                .unwrap()
+                .contains("already exists and cannot be created as an output")
+        );
+        assert_eq!(
+            indexer_result_abort_details(
+                &serde_json::json!({"result": {"Finalized": {"abort_details": "  "}}})
+            ),
+            None
+        );
+        assert_eq!(
+            indexer_result_abort_details(
+                &serde_json::json!({"result": {"Finalized": {"final_decision": "Commit"}}})
+            ),
+            None
         );
     }
 

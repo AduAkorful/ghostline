@@ -16,7 +16,7 @@ use ghostline_net::{
     FUNDING_NOT_DISCOVERED, IndexedSubstate, IndexerClient, StealthTransfer,
     StealthTransferRequest, TransactionId, TransferFeeParams, UtxoInputSelection, WalletClient,
     account_name, execution_accepted, funding_output_spend_gate, indexed_receipt_status,
-    indexed_transaction_status,
+    indexed_transaction_status, indexer_result_abort_details,
 };
 use ghostline_paywall::{ChannelStore, PaymentTerms};
 use serde::{Deserialize, Serialize};
@@ -1136,12 +1136,20 @@ fn channel_open_tx_id(path: &Path) -> Result<Option<String>, String> {
 enum SavedOpen {
     Finalized,
     Pending,
-    /// `executed` is false for an indexer `Rejected` record: the transaction was refused before
-    /// execution, so it spent nothing and paid no fee. `FinalizedAbort` executed and paid.
+    /// `executed` is false when the channel output was not created. A pre-execution `Rejected`
+    /// record also paid no fee. `FeeIntentCommit` with an "output already exists" abort paid the
+    /// fee and still did not create the output; `fee_charged` records that. `FinalizedAbort`
+    /// executed and is not replaced.
     Rejected {
         reason: String,
         executed: bool,
+        fee_charged: bool,
     },
+}
+
+struct OutputCollision {
+    transaction_id: String,
+    fee_charged: bool,
 }
 
 fn saved_open_from_entry(entry: &serde_json::Value) -> Result<SavedOpen, String> {
@@ -1151,31 +1159,56 @@ fn saved_open_from_entry(entry: &serde_json::Value) -> Result<SavedOpen, String>
         "Rejected" => Ok(SavedOpen::Rejected {
             reason: open_rejection_reason(entry),
             executed: false,
+            fee_charged: false,
         }),
         "FinalizedAbort" => Ok(SavedOpen::Rejected {
             reason: open_rejection_reason(entry),
             executed: true,
+            fee_charged: true,
         }),
+        "FeeIntent" => Err("FeeIntentCommit needs the transaction result".into()),
         other => Err(format!(
             "indexer returned an unrecognized transaction status: {other}"
         )),
     }
 }
 
+async fn saved_open_from_indexer_entry(
+    indexer: &IndexerClient,
+    entry: &serde_json::Value,
+) -> Result<SavedOpen, String> {
+    if indexed_transaction_status(entry) != "FeeIntent" {
+        return saved_open_from_entry(entry);
+    }
+    let tx = entry
+        .pointer("/transaction/transaction_id")
+        .or_else(|| entry.get("transaction_id"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("indexer FeeIntentCommit record omitted its transaction id")?;
+    let transaction_id = TransactionId::from_hex(tx).map_err(|error| error.to_string())?;
+    let abort = match indexer.transaction_result(transaction_id).await {
+        Ok(body) => indexer_result_abort_details(&body).map(str::to_owned),
+        Err(error) if indexer_lookup_missing(&error) => None,
+        Err(error) => return Err(format!("could not read the channel-open abort: {error}")),
+    };
+    Ok(saved_open_from_fee_intent(abort.as_deref()))
+}
+
 async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpen, String> {
     let transaction_id = TransactionId::from_hex(tx).map_err(|error| error.to_string())?;
     let indexer = IndexerClient::connect(&config.indexer_url).map_err(|error| error.to_string())?;
     match indexer.transaction(transaction_id).await {
-        Ok(entry) => saved_open_from_entry(&entry),
+        Ok(entry) => saved_open_from_indexer_entry(&indexer, &entry).await,
         Err(error) if indexer_lookup_missing(&error) => {
             match indexer.transaction_receipt(transaction_id).await {
                 Ok(receipt) => match indexed_receipt_status(&receipt) {
                     "Finalized" => Ok(SavedOpen::Finalized),
-                    "FinalizedAbort" | "Rejected" => Ok(SavedOpen::Rejected {
+                    "FinalizedAbort" | "Rejected" | "FeeIntent" => Ok(SavedOpen::Rejected {
                         reason: "Ootle rejected the transaction".into(),
-                        // A receipt alone does not say whether execution ran; never treat it
-                        // as safe to replace.
+                        // A receipt alone does not say whether execution ran, and a
+                        // FeeIntentCommit receipt has no abort text. Never replace it.
                         executed: true,
+                        fee_charged: true,
                     }),
                     _ => Ok(SavedOpen::Pending),
                 },
@@ -1189,9 +1222,11 @@ async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpe
 
 /// walletd 0.47 derives each output mask from a counter its database restarts at 0 (OBS-033).
 /// The relay wallet database is lost on every Render restart, so a fresh channel output can
-/// recreate a 51 µT commitment that is already on chain. Ootle refuses that before execution.
+/// recreate a 51 µT commitment that is already on chain. A pre-execution rejection charges no
+/// fee. A `FeeIntentCommit` of the same output charges the open fee and still creates nothing.
 /// Every landed open adds one more index a later restart must step past (hosted run 16 needed
-/// two), so the bound is generous. Each refused attempt took 1–2 s on Esmeralda.
+/// two), so the bound is generous. A pre-execution refusal took 1–2 s on Esmeralda; the
+/// 2026-11-03 fee-intent refusal took about 10 s and 9,342 µT.
 const MAX_OUTPUT_COLLISION_ATTEMPTS: usize = 32;
 /// Stop stepping before play.js abandons its 120 s `/demo/open` request. walletd keeps its mask
 /// counter between requests, so the browser's next request resumes past the indices tried here.
@@ -1200,32 +1235,72 @@ const OUTPUT_COLLISION_BUDGET: Duration = Duration::from_secs(75);
 const _: () =
     assert!(MAX_OUTPUT_COLLISION_ATTEMPTS >= 16 && OUTPUT_COLLISION_BUDGET.as_secs() < 120);
 
-/// A pre-execution refusal for an output substate that already exists. Nothing was spent and no
-/// fee was charged, and each new walletd statement takes the next mask index, so a fresh attempt
-/// can succeed.
+/// An output substate that already exists. A pre-execution rejection charges no fee.
+/// `FeeIntentCommit` charges the fee and still does not create the output. Each new walletd
+/// statement takes the next mask index, so a fresh attempt can succeed.
 /// Prefix play.js matches to keep re-requesting the open within its own deadline.
 const OUTPUT_COLLISION_EXHAUSTED: &str =
     "the relay wallet recreated an output that already exists on chain";
 
+const OUTPUT_ALREADY_EXISTS: &str = "already exists and cannot be created as an output";
+const FEE_INTENT_ABORT_UNAVAILABLE: &str = "Ootle committed the fee and rejected the channel output, but the indexer result had no abort text. This open will not be replaced. Do not send another deposit";
+
 fn is_output_collision_reject(reason: &str, executed: bool) -> bool {
-    !executed && reason.contains("already exists and cannot be created as an output")
+    !executed && reason.contains(OUTPUT_ALREADY_EXISTS)
 }
 
-/// The rejected open transaction id when the saved attempt failed only by output collision.
+/// `FeeIntentCommit` is not a channel commit. Only the output-already-exists abort is safe to
+/// replace: the fee was charged and the channel output was not created. Any other abort, or a
+/// missing abort, stays executed so the retry loop will not build another output.
+fn saved_open_from_fee_intent(abort: Option<&str>) -> SavedOpen {
+    match abort.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(reason) if reason.contains(OUTPUT_ALREADY_EXISTS) => SavedOpen::Rejected {
+            reason: reason.to_owned(),
+            executed: false,
+            fee_charged: true,
+        },
+        Some(reason) => SavedOpen::Rejected {
+            reason: reason.to_owned(),
+            executed: true,
+            fee_charged: true,
+        },
+        None => SavedOpen::Rejected {
+            reason: FEE_INTENT_ABORT_UNAVAILABLE.to_owned(),
+            executed: true,
+            fee_charged: true,
+        },
+    }
+}
+
+fn output_collision_exhausted(collisions: usize, fee_charged: bool) -> String {
+    let outcome = if fee_charged {
+        "Ootle accepted the fee and rejected the output, so a fee was charged and the deposit is unspent."
+    } else {
+        "Ootle refused each open before execution, so the deposit is unspent and no fee was charged."
+    };
+    format!(
+        "{OUTPUT_COLLISION_EXHAUSTED} {collisions} times in this request (its key counter restarted with the relay). {outcome} Retry opening the channel; it continues past these outputs. Do not send another deposit"
+    )
+}
+
+/// The rejected open when the saved attempt failed only by output collision.
 /// Lookup errors and every other outcome return `None`, so the caller keeps the original error.
 async fn output_collision_attempt(
     state: &AppState,
     config: &RelayConfig,
     funding_id: &str,
-) -> Option<String> {
+) -> Option<OutputCollision> {
     let attempt = state.relay_registry.open_attempt(funding_id).await?;
     let tx = channel_open_tx_id(&attempt.channel_file).ok().flatten()?;
     match indexed_open_outcome(config, &tx).await {
-        Ok(SavedOpen::Rejected { reason, executed })
-            if is_output_collision_reject(&reason, executed) =>
-        {
-            Some(tx)
-        }
+        Ok(SavedOpen::Rejected {
+            reason,
+            executed,
+            fee_charged,
+        }) if is_output_collision_reject(&reason, executed) => Some(OutputCollision {
+            transaction_id: tx,
+            fee_charged,
+        }),
         _ => None,
     }
 }
@@ -1245,26 +1320,26 @@ where
     A: FnMut() -> AF,
     AF: std::future::Future<Output = Result<T, String>>,
     C: FnMut() -> CF,
-    CF: std::future::Future<Output = Option<String>>,
+    CF: std::future::Future<Output = Option<OutputCollision>>,
     D: FnMut(String, usize) -> DF,
     DF: std::future::Future<Output = Result<(), String>>,
 {
     let started = tokio::time::Instant::now();
     let mut collisions = 0;
+    let mut fee_charged = false;
     loop {
         let error = match attempt().await {
             Ok(value) => return Ok(value),
             Err(error) => error,
         };
-        let Some(rejected_tx) = collided().await else {
+        let Some(collision) = collided().await else {
             return Err(error);
         };
         collisions += 1;
-        discard(rejected_tx, collisions).await?;
+        fee_charged |= collision.fee_charged;
+        discard(collision.transaction_id, collisions).await?;
         if collisions >= max_attempts || started.elapsed() >= budget {
-            return Err(format!(
-                "{OUTPUT_COLLISION_EXHAUSTED} {collisions} times in this request (its key counter restarted with the relay). Ootle refused each open before execution, so the deposit is unspent and no fee was charged. Retry opening the channel; it continues past these outputs. Do not send another deposit"
-            ));
+            return Err(output_collision_exhausted(collisions, fee_charged));
         }
     }
 }
@@ -1508,7 +1583,9 @@ async fn transaction_status(
         Ok(entry) => match indexed_transaction_status(&entry) {
             "Finalized" => Ok("Finalized"),
             "Pending" | "Unknown" => Ok("Pending"),
-            "FinalizedAbort" | "Rejected" => Err("Ootle rejected the transaction".into()),
+            "FinalizedAbort" | "Rejected" | "FeeIntent" => {
+                Err("Ootle rejected the transaction".into())
+            }
             other => Err(format!(
                 "indexer returned an unrecognized transaction status: {other}"
             )),
@@ -1517,7 +1594,9 @@ async fn transaction_status(
             match indexer.transaction_receipt(transaction_id).await {
                 Ok(receipt) => match indexed_receipt_status(&receipt) {
                     "Finalized" => Ok("Finalized"),
-                    "FinalizedAbort" | "Rejected" => Err("Ootle rejected the transaction".into()),
+                    "FinalizedAbort" | "Rejected" | "FeeIntent" => {
+                        Err("Ootle rejected the transaction".into())
+                    }
                     _ => Ok("Pending"),
                 },
                 Err(error) if indexer_lookup_missing(&error) => Ok("Pending"),
@@ -1811,7 +1890,7 @@ async fn wait_indexed_funding_transaction(
             Ok(entry) => match indexed_transaction_status(&entry) {
                 "Finalized" => return Ok(entry),
                 "Pending" | "Unknown" => {}
-                "FinalizedAbort" | "Rejected" => {
+                "FinalizedAbort" | "Rejected" | "FeeIntent" => {
                     return Err("Sapient funding transaction was rejected by Ootle".into());
                 }
                 other => {
@@ -1823,7 +1902,7 @@ async fn wait_indexed_funding_transaction(
             Err(error) if indexer_lookup_missing(&error) => {
                 if let Ok(receipt) = indexer.transaction_receipt(funding_tx).await {
                     match indexed_receipt_status(&receipt) {
-                        "FinalizedAbort" | "Rejected" => {
+                        "FinalizedAbort" | "Rejected" | "FeeIntent" => {
                             return Err("Sapient funding transaction was rejected by Ootle".into());
                         }
                         "Finalized" => {
@@ -2591,8 +2670,8 @@ impl RelayRegistry {
         self.persist_locked(&state)
     }
 
-    /// Forget an open attempt whose transaction Ootle refused before execution, so the next
-    /// attempt builds a new channel. Its files stay on disk for diagnosis.
+    /// Forget an open attempt whose output already exists, so the next attempt builds a new
+    /// channel. A `FeeIntentCommit` collision has already paid its fee. Its files stay on disk.
     async fn discard_open_attempt(&self, tx: &str) -> Result<(), String> {
         let mut state = self.0.lock().await;
         state.open_attempts.remove(tx);
@@ -3454,8 +3533,13 @@ mod tests {
             "transaction": { "summary": null, "rejected_reason": COLLISION_REASON }
         });
         match saved_open_from_entry(&rejected).unwrap() {
-            SavedOpen::Rejected { reason, executed } => {
+            SavedOpen::Rejected {
+                reason,
+                executed,
+                fee_charged,
+            } => {
                 assert!(!executed);
+                assert!(!fee_charged);
                 assert!(is_output_collision_reject(&reason, executed));
             }
             _ => panic!("expected a pre-execution rejection"),
@@ -3465,12 +3549,26 @@ mod tests {
             "transaction": { "summary": { "outcome": "Abort" } }
         });
         match saved_open_from_entry(&aborted).unwrap() {
-            SavedOpen::Rejected { reason, executed } => {
+            SavedOpen::Rejected {
+                reason,
+                executed,
+                fee_charged,
+            } => {
                 assert!(executed, "an abort executed and paid a fee");
+                assert!(fee_charged);
                 assert!(!is_output_collision_reject(&reason, executed));
             }
             _ => panic!("expected an executed rejection"),
         }
+
+        let fee_intent = serde_json::json!({
+            "transaction": {
+                "transaction_id": "d07273cc8a78e576bcadd25cb9d0228cf166ece642ac8c94d6284fc42b079277",
+                "summary": {"outcome": "FeeIntentCommit", "total_fees_paid": 9342},
+                "rejected_reason": null
+            }
+        });
+        assert!(saved_open_from_entry(&fee_intent).is_err());
 
         assert!(!is_output_collision_reject(COLLISION_REASON, true));
         assert!(!is_output_collision_reject(
@@ -3481,6 +3579,49 @@ mod tests {
             "OneOrMoreInputsNotFound",
             false
         ));
+    }
+
+    #[test]
+    fn fee_intent_output_collision_is_replaceable_and_other_aborts_are_not() {
+        let abort = "Failed to lock outputs: Substate utxo_0101…c7e550:0 already exists and cannot be created as an output";
+        match saved_open_from_fee_intent(Some(abort)) {
+            SavedOpen::Rejected {
+                reason,
+                executed,
+                fee_charged,
+            } => {
+                assert!(!executed);
+                assert!(fee_charged);
+                assert!(is_output_collision_reject(&reason, executed));
+            }
+            _ => panic!("expected a fee-intent collision"),
+        }
+        match saved_open_from_fee_intent(Some(
+            "Insufficient fees to fund native verification requiring 14142000 points",
+        )) {
+            SavedOpen::Rejected {
+                executed,
+                fee_charged,
+                ..
+            } => {
+                assert!(executed);
+                assert!(fee_charged);
+            }
+            _ => panic!("expected a hard fee-intent stop"),
+        }
+        match saved_open_from_fee_intent(None) {
+            SavedOpen::Rejected {
+                reason,
+                executed,
+                fee_charged,
+            } => {
+                assert!(executed);
+                assert!(fee_charged);
+                assert!(reason.contains("no abort text"));
+                assert!(!is_output_collision_reject(&reason, executed));
+            }
+            _ => panic!("expected a missing-abort stop"),
+        }
     }
 
     #[tokio::test]
@@ -3498,7 +3639,12 @@ mod tests {
                     Ok("opened")
                 }
             },
-            || async { Some(format!("rejected-{}", attempts.get())) },
+            || async {
+                Some(OutputCollision {
+                    transaction_id: format!("rejected-{}", attempts.get()),
+                    fee_charged: false,
+                })
+            },
             |tx, n| {
                 discarded.borrow_mut().push((tx, n));
                 async { Ok(()) }
@@ -3523,15 +3669,44 @@ mod tests {
                 attempts.set(attempts.get() + 1);
                 Err("wait did not Accept".to_string())
             },
-            || async { Some("rejected".to_string()) },
+            || async {
+                Some(OutputCollision {
+                    transaction_id: "rejected".into(),
+                    fee_charged: false,
+                })
+            },
             |_, _| async { Ok(()) },
         )
         .await;
         let error = result.unwrap_err();
         assert_eq!(attempts.get(), MAX_OUTPUT_COLLISION_ATTEMPTS);
         assert!(error.contains("deposit is unspent"), "{error}");
+        assert!(error.contains("no fee was charged"), "{error}");
         assert!(error.starts_with(OUTPUT_COLLISION_EXHAUSTED), "{error}");
         assert!(error.contains("Do not send another deposit"), "{error}");
+        assert!(!error.ends_with('.'), "page appends its own period");
+    }
+
+    #[tokio::test]
+    async fn fee_intent_collisions_say_the_fee_was_charged() {
+        let result: Result<(), String> = open_with_collision_retries(
+            1,
+            OUTPUT_COLLISION_BUDGET,
+            || async { Err("wait did not Accept".to_string()) },
+            || async {
+                Some(OutputCollision {
+                    transaction_id: "d07273cc".into(),
+                    fee_charged: true,
+                })
+            },
+            |_, _| async { Ok(()) },
+        )
+        .await;
+        let error = result.unwrap_err();
+        assert!(error.contains("a fee was charged"), "{error}");
+        assert!(error.contains("deposit is unspent"), "{error}");
+        assert!(!error.contains("no fee was charged"), "{error}");
+        assert!(error.starts_with(OUTPUT_COLLISION_EXHAUSTED), "{error}");
         assert!(!error.ends_with('.'), "page appends its own period");
     }
 
@@ -3546,7 +3721,12 @@ mod tests {
                 attempts.set(attempts.get() + 1);
                 Err("wait did not Accept".to_string())
             },
-            || async { Some("rejected".to_string()) },
+            || async {
+                Some(OutputCollision {
+                    transaction_id: "rejected".into(),
+                    fee_charged: false,
+                })
+            },
             |_, _| async { Ok(()) },
         )
         .await;
@@ -3580,7 +3760,12 @@ mod tests {
             MAX_OUTPUT_COLLISION_ATTEMPTS,
             OUTPUT_COLLISION_BUDGET,
             || async { Err("wait did not Accept".to_string()) },
-            || async { Some("rejected".to_string()) },
+            || async {
+                Some(OutputCollision {
+                    transaction_id: "rejected".into(),
+                    fee_charged: false,
+                })
+            },
             |_, _| async { Err("relay state: disk full".to_string()) },
         )
         .await;

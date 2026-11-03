@@ -59,7 +59,9 @@ pub fn open(token: &str, key: &[u8; 32]) -> Result<Vec<u8>, RecoveryError> {
     let encoded = token
         .strip_prefix(TOKEN_PREFIX)
         .ok_or(RecoveryError::InvalidToken)?;
-    if !encoded.len().is_multiple_of(2) || encoded.len() > (MAX_RECOVERY_PAYLOAD + NONCE_LEN + 64) * 2 {
+    if !encoded.len().is_multiple_of(2)
+        || encoded.len() > (MAX_RECOVERY_PAYLOAD + NONCE_LEN + 64) * 2
+    {
         return Err(RecoveryError::InvalidToken);
     }
     let bytes = hex_decode(encoded).ok_or(RecoveryError::InvalidToken)?;
