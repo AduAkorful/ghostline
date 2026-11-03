@@ -33,6 +33,18 @@ export function describeRuns(evidence) {
       transactions: [["Channel open", opened.openTransactionId, opened.openTransactionUrl]],
     });
   }
+  const sapient = evidence.sapientRun;
+  if (sapient) {
+    runs.push({
+      title: `Sapient paid calls · ${formatRunDate(sapient.runDate)}`,
+      summary: `${sapient.wallet}. Deposit ${sapient.depositMicroTari} µT. ${sapient.acceptedCalls} accepted calls, ${sapient.acceptedTotalMicroTari} µT, from the service ledger. ${sapient.note || ""}`.replace(/\s+/g, " ").trim(),
+      transactions: [
+        ["Sapient funding", sapient.fundingTransactionId, sapient.fundingTransactionUrl],
+        ["Channel open", sapient.openTransactionId, sapient.openTransactionUrl],
+        ["Settlement", sapient.settlementTransactionId, sapient.settlementTransactionUrl],
+      ],
+    });
+  }
   return runs;
 }
 

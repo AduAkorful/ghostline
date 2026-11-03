@@ -911,7 +911,8 @@ test("the simulation shows the current channel open and does not invent a settle
   assert.equal(h.elements.get("observer-view").hidden, true);
   assert.match(h.elements.get("result-label").textContent, /CURRENT OPEN/);
   assert.equal(h.elements.get("recorded-tx-id").textContent, "recorded-open-tx");
-  assert.match(h.elements.get("record-summary").textContent, /No settlement is recorded/);
+  assert.match(h.elements.get("record-summary").textContent, /did not submit it/);
+  assert.match(h.elements.get("record-summary").textContent, /different channel/);
 });
 
 test("the live observer view loads public fields only on request, and notes a refusal", async () => {

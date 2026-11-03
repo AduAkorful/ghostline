@@ -275,13 +275,22 @@ async function loadEvidence() {
   document.querySelector("#open-fee").textContent = `${number.format(opened.openFeeCapMicroTari)} µT`;
   document.querySelector("#template-finality").textContent = template.finality.toUpperCase();
   document.querySelector("#open-finality").textContent = opened.openFinality.toUpperCase();
+  const sapient = evidence.sapientRun;
+  if (sapient) {
+    document.querySelector("#settlement-tx").textContent = sapient.settlementTransactionId;
+    document.querySelector("#settlement-tx-link").href = sapient.settlementTransactionUrl;
+    document.querySelector("#settlement-finality").textContent = sapient.settlementFinality.toUpperCase();
+    document.querySelector("#settlement-state").textContent = `${number.format(sapient.settlementFeeMicroTari)} µT`;
+  }
   const checked = evidence.explorerAvailability?.checkedOn;
   document.querySelector("#evidence-date").textContent = `Recorded ${formatRunDate(evidence.runDate)}${checked ? ` · explorer status checked ${formatRunDate(checked)}` : ""}. Static evidence, not a live network read.`;
-  for (const [selector, transactionId] of [
+  const links = [
     ["#template-tx-link", template.publishTransactionId],
     ["#template-id-link", template.publishTransactionId],
     ["#open-tx-link", opened.openTransactionId],
-  ]) markExplorerStatus(document.querySelector(selector), evidence, transactionId);
+  ];
+  if (sapient) links.push(["#settlement-tx-link", sapient.settlementTransactionId]);
+  for (const [selector, transactionId] of links) markExplorerStatus(document.querySelector(selector), evidence, transactionId);
 }
 
 loadEvidence().catch(() => {

@@ -95,7 +95,7 @@
             <article class="judge-option">
               <p class="judge-option-index">02 <span>NO SETUP</span></p>
               <h3>Inspect the recorded proof</h3>
-              <p>The current record is the 2 Nov 2026 template publish and one 51 µT channel open. A paid-call settlement on this template is not recorded yet.</p>
+              <p>The current record is the 2 Nov 2026 template publish, that day's 51 µT channel open, and a 3 Nov 2026 Sapient settlement.</p>
               <a href="#evidence">Open the evidence <span aria-hidden="true">↓</span></a>
             </article>
             <article class="judge-option">
@@ -235,7 +235,7 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
 
       <section class="evidence-section" id="evidence" aria-labelledby="evidence-title">
         <div class="shell">
-          <div class="evidence-heading"><div><p class="eyebrow">ON THE INDEXER NOW</p><h2 id="evidence-title">Template.<br /><span>One open.</span></h2></div><p>On 2 Nov 2026 the channel template was published and a 51 µT channel opened. Both transactions finalized. No paid calls and no settlement are recorded on this template.</p></div>
+          <div class="evidence-heading"><div><p class="eyebrow">ON THE INDEXER NOW</p><h2 id="evidence-title">Template.<br /><span>Then a settlement.</span></h2></div><p>On 2 Nov 2026 the channel template was published and a 51 µT channel opened. On 3 Nov 2026 a Sapient wallet funded a second channel, made five paid calls, and the relay settled it. The call count is from the service ledger. The settlement amounts stay hidden.</p></div>
           <aside class="evidence-availability" role="note">
             <strong>Explorer links age out.</strong>
             <span>The public indexer keeps transaction bodies for about 50 epochs; after that the explorer says “not known to this indexer”. Both transactions below loaded on 2 Nov 2026. <a href="evidence.html">Each record</a> shows that status.</span>
@@ -246,12 +246,13 @@ ghostline channel refund --file /private/channel.json --submit</code></pre></div
               <p class="panel-description">Published 2 Nov 2026. Template: <a id="template-tx-link" href="https://explorer.tari.mw/tx/7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859" target="_blank" rel="noopener noreferrer" aria-label="View Ghostline template publication transaction in Tari explorer"><code id="template-address">template_a43…8417c31e</code></a></p>
               <div class="chain-events">
                 <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Template published</strong><span class="finality" id="template-finality">FINALIZED COMMIT</span></div><div class="tx-line"><a class="tx-link" id="template-id-link" href="https://explorer.tari.mw/tx/7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859" target="_blank" rel="noopener noreferrer" aria-label="View template publish transaction in Tari explorer"><code id="template-tx">7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859</code></a><button class="copy-button" type="button" data-copy="template-tx" aria-label="Copy template publish transaction ID">Copy ID</button></div></div></div>
-                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened · 51 µT</strong><span class="finality" id="open-finality">FINALIZED COMMIT</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" href="https://explorer.tari.mw/tx/d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Channel opened · 51 µT</strong><span class="finality" id="open-finality">FINALIZED COMMIT</span></div><div class="tx-line"><a class="tx-link" id="open-tx-link" href="https://explorer.tari.mw/tx/d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b" target="_blank" rel="noopener noreferrer" aria-label="View channel open transaction in Tari explorer"><code id="open-tx">d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b</code></a><button class="copy-button" type="button" data-copy="open-tx" aria-label="Copy channel open transaction ID">Copy ID</button></div></div></div>
+                <div class="chain-event"><span class="event-line event-line-last" aria-hidden="true"><i></i></span><div><div class="event-title"><strong>Sapient settlement · 3 Nov 2026</strong><span class="finality" id="settlement-finality">FINALIZED COMMIT</span></div><div class="tx-line"><a class="tx-link" id="settlement-tx-link" href="https://explorer.tari.mw/tx/44b9e3c545b4f82b4f52d608fca761f366f1b41dac8e3171719660c71472e40b" target="_blank" rel="noopener noreferrer" aria-label="View Sapient settlement transaction in Tari explorer"><code id="settlement-tx">44b9e3c545b4f82b4f52d608fca761f366f1b41dac8e3171719660c71472e40b</code></a><button class="copy-button" type="button" data-copy="settlement-tx" aria-label="Copy Sapient settlement transaction ID">Copy ID</button></div></div></div>
               </div>
-              <div class="metric-row chain-metrics"><div><span>Publish fee</span><strong id="publish-fee">938,653 µT</strong></div><div><span>Open fee cap</span><strong id="open-fee">9,815 µT</strong><small class="fee-payer">Stealth open spends this cap</small></div><div><span>Settlement</span><strong id="settlement-state">Not recorded</strong></div></div>
+              <div class="metric-row chain-metrics"><div><span>Publish fee</span><strong id="publish-fee">938,653 µT</strong></div><div><span>Open fee cap</span><strong id="open-fee">9,815 µT</strong><small class="fee-payer">Stealth open spends this cap</small></div><div><span>Sapient settlement fee</span><strong id="settlement-state">18,666 µT</strong></div></div>
             </article>
           </div>
-          <p class="evidence-caveat">The 51 µT open is the deposit. It is not a paid-call settlement. Fees are public. The browser simulation does not create these transactions.</p>
+          <p class="evidence-caveat">The 2 Nov open is a deposit with no paid calls. The 3 Nov settlement is a different channel. Fees are public. The browser simulation does not create these transactions.</p>
           <p class="evidence-footnote" id="evidence-date">Recorded 2 Nov 2026. Explorer status checked 2 Nov 2026. Static evidence, not a live network read.</p>
         </div>
       </section>
