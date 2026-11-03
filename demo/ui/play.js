@@ -33,7 +33,7 @@ let liveSetupCancelled = false;
 let abandonArmed = false;
 // While live setup is running, refund and abandon would race the relay open (QA final rerun).
 let liveOpenInFlight = false;
-const LIVE_OPEN_PROGRESS_LABELS = new Set(["Checking Sapient…", "Waiting for Sapient approval…", "Opening channel…", "Retrying relay open…"]);
+const LIVE_OPEN_PROGRESS_LABELS = new Set(["Checking Sapient…", "Waiting for Sapient approval…", "Waiting for finality…", "Opening channel…", "Retrying relay open…"]);
 
 // Native Esmeralda resource. On 2026-11-02 the indexer substate for this address
 // carried the symbol TARI. The old XTR alias no longer resolves.
@@ -306,6 +306,8 @@ function renderObserverView({ live, settlementTransactionId, fields, deposit: de
   }
   const explorer = byId("observer-explorer");
   explorer.href = explorerTxUrl(settlementTransactionId);
+  // The result card already links to this settlement. A second button repeats it.
+  explorer.hidden = !byId("chain-result").hidden && byId("explorer-link").href === explorer.href;
   byId("observer-load").hidden = !live || Boolean(fields);
   byId("observer-view").hidden = false;
 }
@@ -761,7 +763,10 @@ function withTimeout(promise, ms, timeoutError) {
 // A saved transfer is already approved, so its retry asks only the relay: a locked Sapient
 // would otherwise hold the lookup open with no visible error (QA run 16 retry 7).
 async function waitFinalized(transactionId, { deadline, useWallet = true } = {}) {
+  const started = Date.now();
   for (let attempt = 0; Date.now() < deadline; attempt += 1) {
+    const waited = Math.max(0, Math.round((Date.now() - started) / 1000));
+    status(`Waiting for the funding transfer to finalize (${waited}s). This usually takes under a minute. No second transfer will be requested.`);
     if (useWallet) {
       try {
         const result = await withTimeout(
@@ -818,8 +823,8 @@ async function openFundedChannel(pending, deadline) {
       }
       const waited = Math.round((Date.now() - started) / 1000);
       status(collided
-        ? `The relay is stepping past outputs its restarted wallet recreated (${waited} s). No second transfer will be requested.`
-        : `Deposit finalized; waiting for the relay wallet to discover it (${waited} s). No second transfer will be requested.`);
+        ? `The relay is stepping past outputs its restarted wallet recreated (${waited}s). No second transfer will be requested.`
+        : `The relay is opening your channel (${waited}s). Its wallet usually finds the deposit in about a minute. No second transfer will be requested.`);
       if (!collided) await new Promise((resolve) => window.setTimeout(resolve, 5000));
     }
   }
@@ -891,7 +896,7 @@ async function connectAndOpenLive() {
     if (liveSetupCancelled) return;
     setupStage = "loading live demo settings";
     const relay = await relayJson("/demo/config");
-    byId("funding-requirement").textContent = `Use Sapient 0.7.1 or newer. Switch it to Esmeralda. The deposit is ${relay.deposit} µT of private TARI. The wallet fee is paid from public TARI, and the cap is 20,000 µT (0.02 TARI). Sapient 0.7.0 reports a private balance of 0 and rejects the send.`;
+    byId("funding-requirement").textContent = `Use Sapient 0.7.1 or newer. Switch it to Esmeralda. The deposit is ${relay.deposit} µT of private TARI. The wallet fee is paid from public TARI. Sapient shows a Max fee of 0.02 TARI; that is a cap, and the 3 Nov deposit was charged 17,708 µT. Sapient 0.7.0 reports a private balance of 0 and rejects the send. A private-view prompt appears only when this site does not already have one.`;
     let pending = readPendingFunding();
     const retryingSavedTransfer = Boolean(pending?.fundingTxId);
     if (!pending?.fundingTxId) {
@@ -968,7 +973,7 @@ async function connectAndOpenLive() {
         method: "POST",
         body: JSON.stringify({ payerPublicKey: bytesToHex(channelKeys.payerPublic), refundAddress }),
       });
-      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. The fee cap is 20,000 µT (0.02 TARI), paid from public TARI. A 51 µT private send was rejected at 12,000 µT because verification needed about 15,687 µT. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
+      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. Scroll the Sapient popup if Approve & Sign is below the fold; its balance may stay blurred for a few seconds. Max fee 0.02 TARI is a ceiling paid from public TARI. The 3 Nov deposit was charged 17,708 µT, under that cap. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
       setupStage = "waiting for Sapient approval";
       const memo = fundingMemo(relaySession.sessionId, bytesToHex(channelKeys.payerPublic), refundAddress);
       if (memo.length > 253) throw new Error("The encrypted funding memo is too long for a stealth output. Retry live setup.");
@@ -980,7 +985,7 @@ async function connectAndOpenLive() {
         maxFee: "20000",
         memo,
       });
-      status("Approve the private testnet transfer in Sapient. The relay waits for finality before opening your channel.");
+      status("Approve the private testnet transfer in Sapient. Scroll the popup if Approve & Sign is below the fold. The balance may stay blurred for a few seconds. Max fee 0.02 TARI is a cap, not the charge.");
       byId("live-open").textContent = "Waiting for Sapient approval…";
       const funding = await waitWalletRequest(operation.requestId);
       if (!funding?.transactionId) throw new Error("Sapient did not return the funding transaction id.");
@@ -992,8 +997,8 @@ async function connectAndOpenLive() {
       };
       savePendingFunding(pending);
       showPendingFundingControls(pending);
-      byId("live-open").textContent = "Opening channel…";
-      byId("live-note").textContent = "Sapient approved the private transfer. Waiting for it to finalize; the relay then opens your channel. No second transfer will be requested.";
+      byId("live-open").textContent = "Waiting for finality…";
+      byId("live-note").textContent = "Sapient approved the private transfer. Finality usually takes under a minute. The relay then opens the channel; its wallet usually finds the deposit in about a minute and can take up to about two minutes. No second transfer will be requested.";
       if (liveSetupCancelled) {
         status("The approved funding transaction is saved in this browser. Continue live setup later to open its channel without sending again.");
         return;
@@ -1003,7 +1008,7 @@ async function connectAndOpenLive() {
       showPendingFundingControls(pending);
       if (payerSecret.length !== 32) throw new Error("This browser has a funded transfer saved, but its local voucher-signing key is unavailable in this tab. Return the pending deposit to Sapient, or abandon the saved transfer to start over. Do not send another deposit.");
       byId("live-open").textContent = "Retrying relay open…";
-      byId("live-note").textContent = "Retrying the open for your saved, approved transfer. No second transfer will be requested.";
+      byId("live-note").textContent = "Retrying the open for your saved, approved transfer. The relay wallet usually finds the deposit in about a minute. No second transfer will be requested.";
       status("Retrying the relay open for your existing finalized funding transaction; no second wallet transfer will be requested.");
       showPendingFunding(pending.fundingTxId);
     }
@@ -1016,7 +1021,8 @@ async function connectAndOpenLive() {
     }
     setupStage = "opening the funded channel through the relay";
     byId("pending-funding-link").textContent = "Inspect your finalized Sapient funding transaction ↗";
-    status("Funding is finalized. The relay is opening your channel; this can take up to two minutes. No second transfer will be requested.");
+    byId("live-open").textContent = "Opening channel…";
+    status("Funding is finalized. The relay is opening your channel. Its wallet usually finds the deposit in about a minute, and this can take up to about two minutes. No second transfer will be requested.");
     const opened = await openFundedChannel(pending, openDeadline);
     clearPendingFunding();
     showPendingFundingControls();

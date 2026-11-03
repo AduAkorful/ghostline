@@ -836,6 +836,8 @@ test("the settled view shows one channel-open link and no leftover funding link"
   assert.equal(h.elements.get("open-explorer-link").hidden, false);
   assert.equal(h.elements.get("open-tx-link").hidden, true);
   assert.equal(h.elements.get("pending-funding-link").hidden, true);
+  assert.equal(h.elements.get("observer-explorer").hidden, true);
+  assert.equal(h.elements.get("explorer-link").href, "https://explorer.tari.mw/tx/settle-test-tx");
 });
 
 test("a simulated overspend is refused with the paywall's message and leaves the total unchanged", async () => {

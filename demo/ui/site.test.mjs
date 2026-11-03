@@ -130,6 +130,16 @@ test("the current record is a template publish and one open, with no settlement"
   assert.equal(evidence.liveRunRecord, undefined);
 });
 
+test("the live instructions name Sapient 0.7.1, the fee ceiling, and the approval popup", () => {
+  assert.match(html["index.html"], /Sapient 0\.7\.1 or newer/);
+  assert.match(html["play.html"], /Max fee of 0\.02 TARI/);
+  assert.match(html["play.html"], /private-view prompt appears only when/);
+  assert.match(read("play.js"), /Scroll the Sapient popup if Approve & Sign is below the fold/);
+  assert.match(read("play.js"), /balance may stay blurred/);
+  assert.match(read("play.js"), /Max fee 0\.02 TARI is a ceiling/);
+  assert.match(read("play.js"), /usually finds the deposit in about a minute/);
+});
+
 test("the custodial relay is described the same way on the play page and in the Sapient notes", () => {
   const phrase = "on-chain observers see neither the deposit nor the split";
   assert.ok(html["play.html"].includes(phrase));

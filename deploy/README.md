@@ -84,8 +84,8 @@ database.
    Copy the service's HTTPS URL. The Render wallet daemon listens only on
    loopback inside this container; do not add a public port for it.
 5. In the Ghostline site's **Play** page, enter that HTTPS relay URL. Use a
-   Sapient wallet on Esmeralda and approve the clearly labelled 51 µT test
-   transfer and wallet fee. The first live run is not available until the
+   Sapient 0.7.1 or newer on Esmeralda and approve the clearly labelled 51 µT
+   test transfer. The approval Max fee is a 0.02 TARI cap, not the charge. The first live run is not available until the
    deployed contract/template address and indexer match the selected Esmeralda
    deployment. `GHOSTLINE_TEMPLATE` may be either raw 32-byte hex or an Ootle
    `template_<hex>` address; the relay stores the hex form for `ghostline spec`.
