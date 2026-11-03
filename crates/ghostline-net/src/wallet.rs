@@ -1131,8 +1131,9 @@ mod tests {
 
     #[test]
     fn submit_body_matches_walletd_0_45_field_names() {
+        // `is_seal_signer_authorized: true` is `main_signer: "SealSigner"` on tari_ootle_transaction 0.49.
         let tx: UnsignedTransaction = serde_json::from_str(
-            r#"{"V1":{"network":38,"fee_instructions":[],"instructions":[],"inputs":[],"min_epoch":null,"max_epoch":1,"is_seal_signer_authorized":true,"dry_run":false,"blobs":[],"nonce":0}}"#,
+            r#"{"V1":{"network":38,"fee_instructions":[],"instructions":[],"inputs":[],"min_epoch":null,"max_epoch":1,"main_signer":"SealSigner","dry_run":false,"blobs":[],"nonce":0}}"#,
         )
         .unwrap();
         let req = WalletSubmitRequest::new(
@@ -1141,7 +1142,7 @@ mod tests {
             vec![serde_json::from_str(DEFAULT_ACCOUNT_SIGNER_JSON).unwrap()],
         );
         let json = serde_json::to_value(&req).unwrap();
-        assert!(json["transaction"]["V1"].is_object());
+        assert_eq!(json["transaction"]["V1"]["main_signer"], "SealSigner");
         assert_eq!(json["seal_signer"]["Imported"]["local_key_id"], 1);
         assert_eq!(json["other_signers"][0]["Derived"]["key_branch"], "account");
         assert_eq!(json["detect_inputs"], true);
