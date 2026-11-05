@@ -431,6 +431,15 @@ mark_seed_initialized
 
 ensure_account "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME" "$GHOSTLINE_DEMO_FEE_KEY_INDEX"
 
+# A fresh wallet database starts stealth_mask at 0. That recreates a 51 µT
+# commitment this seed already published. The bump inserts a floor index only.
+bump_script="$(cd "$(dirname "$0")" && pwd)/bump-stealth-mask.sh"
+if [ ! -x "$bump_script" ]; then
+    echo "stealth_mask bump script is missing: $bump_script" >&2
+    exit 1
+fi
+TARI_BASE_DIR="$wallet_base" "$bump_script"
+
 # Public receive address only; key IDs and private key material stay hidden.
 fee_address="$(account_address "$GHOSTLINE_DEMO_FEE_ACCOUNT_NAME")"
 if [ -z "$fee_address" ]; then

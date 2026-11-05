@@ -110,7 +110,11 @@ the normal process lifetime, and an uptime monitor can reduce idle sleep. It is
 not durable storage: a replacement instance, redeploy, crash, or host restart
 can lose the channel mask, ledgers, and wallet database. A seed can recreate
 deterministic wallet keys and accounts, but it cannot reconstruct the relay's
-channel ledger by itself. Do not redeploy or restart while a demo channel is
+channel ledger or the stealth-mask counter by itself. After the wallet database
+is open, startup runs `bump-stealth-mask.sh`. That inserts a `stealth_mask`
+row at `GHOSTLINE_STEALTH_MASK_FLOOR` (default 10000) when the stored index is
+lower, so the next output uses index 10001 instead of a commitment already on
+chain. The row is an index only. Do not redeploy or restart while a demo channel is
 open. If the relay becomes unhealthy with open channels, stop accepting new
 sessions and recover/close them before replacing the instance.
 
