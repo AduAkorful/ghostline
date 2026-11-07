@@ -1,68 +1,28 @@
 {
   "label": "Current Esmeralda Ghostline record",
   "network": "Esmeralda",
-  "runDate": "2026-11-02",
-  "runDateNote": "runDate is the date of the current template publish and the 51 µT channel open.",
+  "runDate": "2026-11-07",
+  "runDateNote": "runDate is the date of the current template publish.",
   "templateRecord": {
-    "address": "template_a43092160888319098524681d196f9a49adacccc12615c74ed6936a88417c31e",
-    "publishedOn": "2026-11-02",
-    "publishTransactionId": "7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859",
-    "publishTransactionUrl": "https://explorer.tari.mw/tx/7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859",
-    "publishFeeMicroTari": 938653,
-    "publishFeeCapMicroTari": 938661,
-    "finality": "Finalized Commit"
-  },
-  "postResetOpen": {
-    "runDate": "2026-11-02",
-    "templateAddress": "template_a43092160888319098524681d196f9a49adacccc12615c74ed6936a88417c31e",
-    "depositMicroTari": 51,
-    "openTransactionId": "d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b",
-    "openTransactionUrl": "https://explorer.tari.mw/tx/d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b",
-    "openFinality": "Finalized Commit",
-    "openFeeCapMicroTari": 9815,
-    "openFeeNote": "The stealth open spends its fee cap. The dry-run required fee was 9815 µT and the broadcast used that cap.",
-    "note": "This open has no paid calls and no settlement. A later Sapient run on 3 Nov 2026 settled a different channel."
-  },
-  "sapientRun": {
-    "runDate": "2026-11-03",
-    "wallet": "Sapient 0.7.1",
-    "templateAddress": "template_a43092160888319098524681d196f9a49adacccc12615c74ed6936a88417c31e",
-    "depositMicroTari": 51,
-    "acceptedCalls": 5,
-    "priceMicroTari": 10,
-    "acceptedTotalMicroTari": 50,
-    "channelId": "cd85af34cf2661bfdfef98ada7c0fe75d45393a30a3cb5a01d81d2fec02b6914",
-    "expiryEpoch": 12849,
-    "fundingTransactionId": "be4bd7cc25a38cfaa0ae7c2baae913bd9a1a6ab9de75d8cc4b31dcf69ac99387",
-    "fundingTransactionUrl": "https://explorer.tari.mw/tx/be4bd7cc25a38cfaa0ae7c2baae913bd9a1a6ab9de75d8cc4b31dcf69ac99387",
-    "fundingFinality": "Finalized Commit",
-    "fundingFeeMicroTari": 17708,
-    "openTransactionId": "68979b7616f6d1d9c46bfecaec43ab1ca56aa3dcf94fd99124b1d29b2c2f13d3",
-    "openTransactionUrl": "https://explorer.tari.mw/tx/68979b7616f6d1d9c46bfecaec43ab1ca56aa3dcf94fd99124b1d29b2c2f13d3",
-    "openFinality": "Finalized Commit",
-    "openFeeMicroTari": 9964,
-    "settlementTransactionId": "44b9e3c545b4f82b4f52d608fca761f366f1b41dac8e3171719660c71472e40b",
-    "settlementTransactionUrl": "https://explorer.tari.mw/tx/44b9e3c545b4f82b4f52d608fca761f366f1b41dac8e3171719660c71472e40b",
-    "settlementFinality": "Finalized Commit",
-    "settlementFeeMicroTari": 18666,
-    "note": "Custodial relay run. Five accepted 10 µT calls and one refused 51 µT overspend are from the service ledger, not a chain proof. The settlement output amounts stay hidden. The Sapient wallet paid the 17,708 µT funding fee from public TARI. The relay paid the open and settlement fees."
+    "address": "template_21a4b9991eecbe50edfc72fd874b4d072b2fc5e44767dad83fa9dfef3131ac05",
+    "publishedOn": "2026-11-07",
+    "publishTransactionId": "806f5bb0452c3e0faab461767bcb6122c0427fe604dbd1fd357bfc7caf99755c",
+    "publishTransactionUrl": "https://explorer.tari.mw/tx/806f5bb0452c3e0faab461767bcb6122c0427fe604dbd1fd357bfc7caf99755c",
+    "publishFeeMicroTari": 938661,
+    "publishFeeCapMicroTari": 1500000,
+    "finality": "Indexer up, version 0",
+    "builtWith": "tari_template_lib 0.38.0"
   },
   "notes": [
-    "The current template was published on 2026-11-02 and finalized (7d29cb59…, fee 938653 µT). The indexer shows it up.",
-    "The same day a 51 µT channel opened and finalized (d179cf15…, fee cap 9815 µT). That open has no paid calls and no settlement. The stealth open spends that cap.",
-    "On 2026-11-03 a Sapient 0.7.1 wallet funded a different 51 µT channel (be4bd7cc…, fee 17708 µT), the relay opened it (68979b76…, fee 9964 µT), and settled it (44b9e3c5…, fee 18666 µT). All three finalized Commit. The five calls and the refused overspend are service-ledger facts.",
-    "Fees are public. Call counts come from a service ledger. This file is a static record; use the explorer links to inspect the chain."
+    "The current template was published on 2026-11-07 (806f5bb0…, fee 938661 µT) with tari_template_lib 0.38.0. The indexer shows it up at version 0.",
+    "Fees are public. This file is a static record; use the explorer link to inspect the chain."
   ],
   "explorerAvailability": {
-    "checkedOn": "2026-11-03",
+    "checkedOn": "2026-11-07",
     "explorer": "https://explorer.tari.mw",
-    "note": "Checked on indexer-a on 3 Nov 2026. All five transactions loaded. The public indexer keeps transaction bodies for about 50 epochs, so these links can age out later.",
+    "note": "Checked on indexer-a on 7 Nov 2026. The current link is the 7 Nov template publish. The public indexer keeps transaction bodies for about 50 epochs.",
     "transactions": {
-      "7d29cb59884c6910751bd3c83b68e7a78e955f801d931be44bb477ea986d1859": "loads",
-      "d179cf150b6aaface0a522d8ae0196badc1a59eb75e5dbc36361a31d026ec90b": "loads",
-      "be4bd7cc25a38cfaa0ae7c2baae913bd9a1a6ab9de75d8cc4b31dcf69ac99387": "loads",
-      "68979b7616f6d1d9c46bfecaec43ab1ca56aa3dcf94fd99124b1d29b2c2f13d3": "loads",
-      "44b9e3c545b4f82b4f52d608fca761f366f1b41dac8e3171719660c71472e40b": "loads"
+      "806f5bb0452c3e0faab461767bcb6122c0427fe604dbd1fd357bfc7caf99755c": "loads"
     }
   }
 }

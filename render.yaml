@@ -15,7 +15,7 @@ services:
       - key: GHOSTLINE_DEMO_MODE
         value: "1"
       - key: GHOSTLINE_TEMPLATE
-        value: template_a43092160888319098524681d196f9a49adacccc12615c74ed6936a88417c31e
+        value: template_21a4b9991eecbe50edfc72fd874b4d072b2fc5e44767dad83fa9dfef3131ac05
       - key: GHOSTLINE_CORS_ORIGINS
         value: https://ghostline-ui.vercel.app
       - key: GHOSTLINE_LEDGER_PATH

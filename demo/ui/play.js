@@ -179,7 +179,7 @@ function saveLiveChannel() {
 const SIMULATION_CHAIN_COPY = {
   subtitle: "Recorded Esmeralda proof, separate from these clicks",
   title: "No transaction was created by this demo.",
-  text: "The browser simulation never connects to a wallet or sends a transaction. After five calls, this panel shows the 2 Nov Esmeralda channel open. That open is a separate transaction. A later Sapient settlement is a different channel.",
+  text: "The browser simulation never connects to a wallet or sends a transaction. After five calls, this panel shows the current template publish. That publish is a separate transaction.",
 };
 
 function explorerTxUrl(transactionId) {
@@ -523,13 +523,13 @@ function refreshControls() {
   byId("run-simulation").textContent = remaining === countLimit
     ? `Run all ${countLimit} simulated calls`
     : remaining > 0 ? `Finish the remaining ${remaining} calls` : "Simulation complete";
-  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted.${paywall.calls === countLimit ? " The 2 Nov Esmeralda open is shown on the right. This simulation did not settle it." : " Run the next call or finish the remaining calls in one click."}`;
+  byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted.${paywall.calls === countLimit ? " The current template publish is shown on the right. This simulation did not create it." : " Run the next call or finish the remaining calls in one click."}`;
   byId("settle").disabled = paywall.calls !== countLimit;
   byId("settle").textContent = settlementShown
-    ? "Current open shown"
+    ? "Recorded publish shown"
     : paywall.calls === countLimit
-      ? "Show the current Esmeralda open · separate transaction"
-      : `Complete ${countLimit} calls to unlock the current open`;
+      ? "Show the current template publish · separate transaction"
+      : `Complete ${countLimit} calls to unlock the recorded publish`;
   if (settlementShown) byId("settle").disabled = true;
 }
 
@@ -564,7 +564,7 @@ function runRemainingSimulation() {
   const remaining = countLimit - paywall.calls;
   if (remaining <= 0) return;
   for (let index = 0; index < remaining; index += 1) payToll();
-  status(`Simulation complete: ${paywall.calls} paid calls, ${accepted.toString()} µT cumulative. The 2 Nov Esmeralda open on the right is a separate transaction. This simulation did not settle it.`);
+  status(`Simulation complete: ${paywall.calls} paid calls, ${accepted.toString()} µT cumulative. The current template publish on the right is a separate transaction. This simulation did not create it.`);
   byId("demo-progress").textContent = `${paywall.calls} of ${countLimit} simulated calls complete · ${accepted.toString()} µT accepted. That open was not created by these clicks.`;
 }
 
@@ -896,7 +896,7 @@ async function connectAndOpenLive() {
     if (liveSetupCancelled) return;
     setupStage = "loading live demo settings";
     const relay = await relayJson("/demo/config");
-    byId("funding-requirement").textContent = `Use Sapient 0.7.1 or newer. Switch it to Esmeralda. The deposit is ${relay.deposit} µT of private TARI. The wallet fee is paid from public TARI. Sapient shows a Max fee of 0.02 TARI; that is a cap, and the 3 Nov deposit was charged 17,708 µT. Sapient 0.7.0 reports a private balance of 0 and rejects the send. A private-view prompt appears only when this site does not already have one.`;
+    byId("funding-requirement").textContent = `Use Sapient 0.7.1 or newer. Switch it to Esmeralda. The deposit is ${relay.deposit} µT of private TARI. The wallet fee is paid from public TARI. Sapient shows a Max fee of 0.02 TARI; that is a cap, and the charge can be lower. Sapient 0.7.0 reports a private balance of 0 and rejects the send. A private-view prompt appears only when this site does not already have one.`;
     let pending = readPendingFunding();
     const retryingSavedTransfer = Boolean(pending?.fundingTxId);
     if (!pending?.fundingTxId) {
@@ -973,7 +973,7 @@ async function connectAndOpenLive() {
         method: "POST",
         body: JSON.stringify({ payerPublicKey: bytesToHex(channelKeys.payerPublic), refundAddress }),
       });
-      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. Scroll the Sapient popup if Approve & Sign is below the fold; its balance may stay blurred for a few seconds. Max fee 0.02 TARI is a ceiling paid from public TARI. The 3 Nov deposit was charged 17,708 µT, under that cap. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
+      byId("live-note").textContent = `Approve a private send of ${relaySession.deposit} µT to the relay. Scroll the Sapient popup if Approve & Sign is below the fold; its balance may stay blurred for a few seconds. Max fee 0.02 TARI is a ceiling paid from public TARI, and the charge can be lower. Five calls spend 50 µT; Ghostline reserves 1 µT for its fixed-shape change output. The relay opens the channel, then can settle or return the full deposit privately if it expires unsettled.`;
       setupStage = "waiting for Sapient approval";
       const memo = fundingMemo(relaySession.sessionId, bytesToHex(channelKeys.payerPublic), refundAddress);
       if (memo.length > 253) throw new Error("The encrypted funding memo is too long for a stealth output. Retry live setup.");
@@ -1463,31 +1463,31 @@ function renderRecordedObserverView() {
 }
 
 function showRecordedEvidence() {
-  if (!evidence?.postResetOpen || settlementShown) {
+  if (!evidence?.templateRecord || settlementShown) {
     if (settlementShown) return;
     status("Could not load the current Esmeralda record. Refresh and try again.");
     return;
   }
   settlementShown = true;
-  const opened = evidence.postResetOpen;
-  const runDate = formatRunDate(opened.runDate);
+  const template = evidence.templateRecord;
+  const runDate = formatRunDate(template.publishedOn || evidence.runDate);
   showResult({
-    label: "CURRENT OPEN · NOT CREATED BY THESE CLICKS",
-    summary: `${runDate}: a ${opened.depositMicroTari} µT channel opened on Esmeralda. This simulation did not submit it. A later Sapient settlement is a different channel.`,
-    txLabel: "Channel open transaction",
-    transactionId: opened.openTransactionId,
-    url: opened.openTransactionUrl,
-    linkText: "Inspect the channel open ↗",
-    note: `Your simulated clicks did not create or submit this transaction. It is the ${runDate} channel open. No paid-call settlement is recorded on this template.`,
+    label: "RECORDED PUBLISH · NOT CREATED BY THESE CLICKS",
+    summary: `${runDate}: the Esmeralda channel template was published. This simulation did not submit it.`,
+    txLabel: "Template publish transaction",
+    transactionId: template.publishTransactionId,
+    url: template.publishTransactionUrl,
+    linkText: "Inspect the template publish ↗",
+    note: `Your simulated clicks did not create or submit this transaction. It is the ${runDate} template publish.`,
   });
   byId("chain-panel").classList.add("is-settling");
-  status(`Current channel open: ${opened.openFinality}. The simulated run did not submit it, and it did not settle this channel.`);
+  status(`Recorded template publish: ${template.finality}. The simulated run did not submit it.`);
   if (window.matchMedia("(max-width: 760px)").matches) {
     byId("chain-panel").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
   }
   window.setTimeout(() => byId("chain-panel").classList.remove("is-settling"), 420);
   byId("settle").disabled = true;
-  byId("settle").textContent = "Current open shown";
+  byId("settle").textContent = "Recorded publish shown";
 }
 
 function abandonPendingFunding() {

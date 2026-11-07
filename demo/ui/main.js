@@ -247,14 +247,12 @@ function formatRunDate(isoDate) {
 function markExplorerStatus(link, evidence, transactionId) {
   const availability = evidence.explorerAvailability;
   const state = availability?.transactions?.[transactionId];
-  if (!link || !state) return;
+  if (!link || state !== "loads") return;
   link.parentElement.querySelector(`.explorer-status[data-for="${link.id}"]`)?.remove();
   const badge = document.createElement("span");
-  badge.className = state === "loads" ? "explorer-status is-live" : "explorer-status";
+  badge.className = "explorer-status is-live";
   badge.dataset.for = link.id;
-  badge.textContent = state === "loads"
-    ? `explorer: loads (checked ${formatRunDate(availability.checkedOn)})`
-    : `explorer: no longer indexed (checked ${formatRunDate(availability.checkedOn)})`;
+  badge.textContent = `explorer: loads (checked ${formatRunDate(availability.checkedOn)})`;
   link.after(badge);
 }
 
@@ -263,34 +261,18 @@ async function loadEvidence() {
   if (!response.ok) throw new Error("Evidence record could not be loaded.");
   const evidence = await response.json();
   const template = evidence.templateRecord;
-  const opened = evidence.postResetOpen;
   const templateAddress = template.address;
   document.querySelector("#template-address").textContent = `${templateAddress.slice(0, 12)}…${templateAddress.slice(-8)}`;
   document.querySelector("#template-tx-link").href = template.publishTransactionUrl;
   document.querySelector("#template-id-link").href = template.publishTransactionUrl;
   document.querySelector("#template-tx").textContent = template.publishTransactionId;
-  document.querySelector("#open-tx").textContent = opened.openTransactionId;
-  document.querySelector("#open-tx-link").href = opened.openTransactionUrl;
   document.querySelector("#publish-fee").textContent = `${number.format(template.publishFeeMicroTari)} µT`;
-  document.querySelector("#open-fee").textContent = `${number.format(opened.openFeeCapMicroTari)} µT`;
   document.querySelector("#template-finality").textContent = template.finality.toUpperCase();
-  document.querySelector("#open-finality").textContent = opened.openFinality.toUpperCase();
-  const sapient = evidence.sapientRun;
-  if (sapient) {
-    document.querySelector("#settlement-tx").textContent = sapient.settlementTransactionId;
-    document.querySelector("#settlement-tx-link").href = sapient.settlementTransactionUrl;
-    document.querySelector("#settlement-finality").textContent = sapient.settlementFinality.toUpperCase();
-    document.querySelector("#settlement-state").textContent = `${number.format(sapient.settlementFeeMicroTari)} µT`;
-  }
   const checked = evidence.explorerAvailability?.checkedOn;
   document.querySelector("#evidence-date").textContent = `Recorded ${formatRunDate(evidence.runDate)}${checked ? ` · explorer status checked ${formatRunDate(checked)}` : ""}. Static evidence, not a live network read.`;
-  const links = [
-    ["#template-tx-link", template.publishTransactionId],
-    ["#template-id-link", template.publishTransactionId],
-    ["#open-tx-link", opened.openTransactionId],
-  ];
-  if (sapient) links.push(["#settlement-tx-link", sapient.settlementTransactionId]);
-  for (const [selector, transactionId] of links) markExplorerStatus(document.querySelector(selector), evidence, transactionId);
+  for (const selector of ["#template-tx-link", "#template-id-link"]) {
+    markExplorerStatus(document.querySelector(selector), evidence, template.publishTransactionId);
+  }
 }
 
 loadEvidence().catch(() => {

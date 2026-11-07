@@ -57,13 +57,12 @@ const SETTLEMENT_RECORD = {
 };
 
 const EVIDENCE_FIXTURE = {
-  runDate: "2026-11-02",
-  postResetOpen: {
-    runDate: "2026-11-02",
-    depositMicroTari: 51,
-    openTransactionId: "recorded-open-tx",
-    openTransactionUrl: "https://explorer.tari.mw/tx/recorded-open-tx",
-    openFinality: "Finalized Commit",
+  runDate: "2026-11-07",
+  templateRecord: {
+    publishedOn: "2026-11-07",
+    publishTransactionId: "recorded-publish-tx",
+    publishTransactionUrl: "https://explorer.tari.mw/tx/recorded-publish-tx",
+    finality: "Indexer up, version 0",
   },
 };
 
@@ -305,12 +304,12 @@ test("after a settled live run, five simulated calls show the recorded run witho
   assert.equal(h.elements.get("settle").hidden, false);
   for (let i = 0; i < 5; i += 1) await h.elements.get("pay").click();
   assert.doesNotMatch(h.elements.get("status").textContent, /Voucher rejected/);
-  assert.match(h.elements.get("result-label").textContent, /CURRENT OPEN · NOT CREATED BY THESE CLICKS/);
-  assert.match(h.elements.get("record-summary").textContent, /2 Nov 2026: a 51 µT channel opened on Esmeralda/);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED PUBLISH · NOT CREATED BY THESE CLICKS/);
+  assert.match(h.elements.get("record-summary").textContent, /7 Nov 2026: the Esmeralda channel template was published/);
   assert.match(h.elements.get("result-note").textContent, /did not create or submit/);
   assert.doesNotMatch(h.elements.get("result-note").textContent, /Sapient created/);
-  assert.equal(h.elements.get("recorded-tx-id").textContent, "recorded-open-tx");
-  assert.equal(h.elements.get("explorer-link").href, "https://explorer.tari.mw/tx/recorded-open-tx");
+  assert.equal(h.elements.get("recorded-tx-id").textContent, "recorded-publish-tx");
+  assert.equal(h.elements.get("explorer-link").href, "https://explorer.tari.mw/tx/recorded-publish-tx");
   assert.equal(h.elements.get("open-explorer-link").hidden, true);
   assert.equal(h.elements.get("reset").disabled, false);
 
@@ -349,7 +348,7 @@ test("a finished live run enables Start a new live run, which clears it and offe
   assert.equal(reset.textContent, "Reset simulation");
   assert.match(h.elements.get("chain-empty-title").textContent, /No transaction was created/);
   await h.elements.get("run-simulation").click();
-  assert.match(h.elements.get("result-label").textContent, /CURRENT OPEN/);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED PUBLISH/);
 });
 
 test("a restored settled channel shows its total and result, and can start over", async () => {
@@ -387,7 +386,7 @@ test("simulation alone completes five calls, shows the recorded run and can be r
   await new Promise((resolve) => setTimeout(resolve, 20));
   await h.elements.get("run-simulation").click();
   assert.doesNotMatch(h.elements.get("status").textContent, /Voucher rejected/);
-  assert.match(h.elements.get("result-label").textContent, /CURRENT OPEN/);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED PUBLISH/);
   assert.equal(h.elements.get("reset").disabled, false);
   await h.elements.get("reset").click();
   assert.equal(h.elements.get("chain-result").hidden, true);
@@ -890,7 +889,7 @@ test("an unreachable relay shows the down banner, and its button runs the simula
   assert.match(h.elements.get("relay-banner-text").textContent, /isn't answering/);
   await h.elements.get("banner-simulate").click();
   assert.equal(h.elements.get("relay-banner").hidden, true);
-  assert.match(h.elements.get("result-label").textContent, /CURRENT OPEN/);
+  assert.match(h.elements.get("result-label").textContent, /RECORDED PUBLISH/);
   assert.equal(h.walletCalls.length, 0);
 });
 
@@ -909,10 +908,10 @@ test("the simulation shows the current channel open and does not invent a settle
   await new Promise((resolve) => setTimeout(resolve, 20));
   await h.elements.get("run-simulation").click();
   assert.equal(h.elements.get("observer-view").hidden, true);
-  assert.match(h.elements.get("result-label").textContent, /CURRENT OPEN/);
-  assert.equal(h.elements.get("recorded-tx-id").textContent, "recorded-open-tx");
+  assert.match(h.elements.get("result-label").textContent, /RECORDED PUBLISH/);
+  assert.equal(h.elements.get("recorded-tx-id").textContent, "recorded-publish-tx");
   assert.match(h.elements.get("record-summary").textContent, /did not submit it/);
-  assert.match(h.elements.get("record-summary").textContent, /different channel/);
+  assert.match(h.elements.get("record-summary").textContent, /template was published/);
 });
 
 test("the live observer view loads public fields only on request, and notes a refusal", async () => {

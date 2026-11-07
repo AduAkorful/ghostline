@@ -17,35 +17,12 @@ export function explorerStatus(evidence, transactionId) {
 // Each run lists only fields the record has; nothing is filled in from elsewhere.
 export function describeRuns(evidence) {
   const template = evidence.templateRecord;
-  const opened = evidence.postResetOpen;
-  const runs = [];
-  if (template) {
-    runs.push({
-      title: `Channel template publish · ${formatRunDate(template.publishedOn || evidence.runDate)}`,
-      summary: `Template ${template.address}; fee ${number.format(template.publishFeeMicroTari)} µT. ${template.finality}.`,
-      transactions: [["Template publish", template.publishTransactionId, template.publishTransactionUrl]],
-    });
-  }
-  if (opened) {
-    runs.push({
-      title: `Channel open · ${formatRunDate(opened.runDate)}`,
-      summary: `${opened.depositMicroTari} µT deposit. Fee cap ${number.format(opened.openFeeCapMicroTari)} µT. ${opened.openFeeNote || ""} ${opened.note || ""}`.replace(/\s+/g, " ").trim(),
-      transactions: [["Channel open", opened.openTransactionId, opened.openTransactionUrl]],
-    });
-  }
-  const sapient = evidence.sapientRun;
-  if (sapient) {
-    runs.push({
-      title: `Sapient paid calls · ${formatRunDate(sapient.runDate)}`,
-      summary: `${sapient.wallet}. Deposit ${sapient.depositMicroTari} µT. ${sapient.acceptedCalls} accepted calls, ${sapient.acceptedTotalMicroTari} µT, from the service ledger. ${sapient.note || ""}`.replace(/\s+/g, " ").trim(),
-      transactions: [
-        ["Sapient funding", sapient.fundingTransactionId, sapient.fundingTransactionUrl],
-        ["Channel open", sapient.openTransactionId, sapient.openTransactionUrl],
-        ["Settlement", sapient.settlementTransactionId, sapient.settlementTransactionUrl],
-      ],
-    });
-  }
-  return runs;
+  if (!template) return [];
+  return [{
+    title: `Channel template publish · ${formatRunDate(template.publishedOn || evidence.runDate)}`,
+    summary: `Template ${template.address}; fee ${number.format(template.publishFeeMicroTari)} µT. ${template.builtWith ? `${template.builtWith}. ` : ""}${template.finality}.`,
+    transactions: [["Template publish", template.publishTransactionId, template.publishTransactionUrl]],
+  }];
 }
 
 function render(evidence) {
@@ -74,10 +51,13 @@ function render(evidence) {
       link.rel = "noopener noreferrer";
       link.textContent = `${transactionId} ↗`;
       const state = explorerStatus(evidence, transactionId);
-      const badge = document.createElement("span");
-      badge.className = state === "loads" ? "badge badge-ok" : "badge";
-      badge.textContent = state === "loads" ? "Explorer: loads" : `Explorer: ${state}`;
-      item.append(name, link, badge);
+      item.append(name, link);
+      if (state === "loads") {
+        const badge = document.createElement("span");
+        badge.className = "badge badge-ok";
+        badge.textContent = "Explorer: loads";
+        item.append(badge);
+      }
       list.append(item);
     }
     article.append(title, summary, list);

@@ -57,28 +57,23 @@ test("dates use one format: day, short month, year", () => {
 
 test("landing evidence links ship real hrefs that match evidence.json", () => {
   const index = html["index.html"];
-  const opened = evidence.postResetOpen;
   const expected = {
-    "open-tx-link": opened.openTransactionUrl,
     "template-tx-link": evidence.templateRecord.publishTransactionUrl,
     "template-id-link": evidence.templateRecord.publishTransactionUrl,
-    "settlement-tx-link": evidence.sapientRun.settlementTransactionUrl,
   };
   for (const [id, url] of Object.entries(expected)) {
     const tag = new RegExp(`<a\\b[^>]*\\bid="${id}"[^>]*>`).exec(index)?.[0];
     assert.ok(tag, `landing has #${id}`);
     assert.equal(/href="([^"]*)"/.exec(tag)?.[1], url, `#${id} links to the recorded transaction`);
   }
-  assert.ok(index.includes(opened.openTransactionId) && index.includes(evidence.templateRecord.publishTransactionId), "ids are present without JavaScript");
+  assert.ok(index.includes(evidence.templateRecord.publishTransactionId), "the publish id is present without JavaScript");
   assert.doesNotMatch(index, /9986c19d|1684aad9|61bad5eb|22 Oct 2026|23 Oct 2026/);
 });
 
 test("landing copy matches the current template record", () => {
   const index = html["index.html"];
-  assert.match(index, /2 Nov 2026/);
-  assert.match(index, /51 µT/);
-  assert.match(index, /3 Nov 2026 Sapient settlement/);
-  assert.ok(index.includes(evidence.sapientRun.settlementTransactionId));
+  assert.match(index, /7 Nov 2026/);
+  assert.match(index, /806f5bb0452c3e0faab461767bcb6122c0427fe604dbd1fd357bfc7caf99755c/);
   assert.match(index, /Try the 5-call simulation \(no wallet\)/);
   assert.match(index, /Mediums, start here/);
   assert.doesNotMatch(index.replace(/\b(class|id|aria-labelledby)="[^"]*judge[^"]*"/g, ""), /judge/i, "visible copy never addresses judges");
@@ -124,17 +119,20 @@ test("the play page has the observer view, overspend control and relay banner", 
   assert.match(read("play.js"), /\["Fees, timing, settle branch, two-output shape", live \? "Visible/);
 });
 
-test("the current record keeps the 2 Nov open and the 3 Nov Sapient settlement", () => {
-  assert.equal(evidence.postResetOpen.depositMicroTari, 51);
-  assert.equal(evidence.postResetOpen.templateAddress, evidence.templateRecord.address);
-  assert.equal(evidence.postResetOpen.note.includes("no paid calls"), true);
-  assert.equal(evidence.sapientRun.templateAddress, evidence.templateRecord.address);
-  assert.equal(evidence.sapientRun.depositMicroTari, 51);
-  assert.equal(evidence.sapientRun.acceptedCalls, 5);
-  assert.equal(evidence.sapientRun.acceptedTotalMicroTari, 50);
-  assert.equal(evidence.sapientRun.settlementFeeMicroTari, 18666);
+test("the current record is only the 7 Nov template publish", () => {
+  assert.equal(evidence.templateRecord.publishedOn, "2026-11-07");
+  assert.equal(evidence.templateRecord.builtWith, "tari_template_lib 0.38.0");
+  assert.equal(evidence.postResetOpen, undefined);
+  assert.equal(evidence.sapientRun, undefined);
+  assert.equal(evidence.templateRecord.previousAddress, undefined);
   assert.equal(evidence.chainRecord, undefined);
   assert.equal(evidence.liveRunRecord, undefined);
+});
+
+test("the public UI does not name the previous template or its transactions", () => {
+  const sources = ["index.html", "play.html", "evidence.html", "evidence.json", "play.js", "main.js", "evidence-view.js", "README.md"];
+  const stale = /a4309216|d179cf15|44b9e3c5|be4bd7cc|68979b76|7d29cb59|previous template|2 Nov 2026|3 Nov 2026/;
+  for (const source of sources) assert.doesNotMatch(read(source), stale, source);
 });
 
 test("the live instructions name Sapient 0.7.1, the fee ceiling, and the approval popup", () => {
