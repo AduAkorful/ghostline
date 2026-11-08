@@ -1156,11 +1156,16 @@ fn saved_open_from_entry(entry: &serde_json::Value) -> Result<SavedOpen, String>
     match indexed_transaction_status(entry) {
         "Finalized" => Ok(SavedOpen::Finalized),
         "Pending" | "Unknown" => Ok(SavedOpen::Pending),
-        "Rejected" => Ok(SavedOpen::Rejected {
-            reason: open_rejection_reason(entry),
-            executed: false,
-            fee_charged: false,
-        }),
+        "Rejected" => {
+            let reason = open_rejection_reason(entry);
+            Ok(SavedOpen::Rejected {
+                // Naming an input means that input was submitted as a create. A new mask
+                // cannot fix it, so this stays non-replaceable.
+                executed: abort_names_existing_input(&reason, &transaction_input_ids(entry)),
+                reason,
+                fee_charged: false,
+            })
+        }
         "FinalizedAbort" => Ok(SavedOpen::Rejected {
             reason: open_rejection_reason(entry),
             executed: true,
@@ -1191,7 +1196,10 @@ async fn saved_open_from_indexer_entry(
         Err(error) if indexer_lookup_missing(&error) => None,
         Err(error) => return Err(format!("could not read the channel-open abort: {error}")),
     };
-    Ok(saved_open_from_fee_intent(abort.as_deref()))
+    Ok(saved_open_from_fee_intent(
+        abort.as_deref(),
+        &transaction_input_ids(entry),
+    ))
 }
 
 async fn indexed_open_outcome(config: &RelayConfig, tx: &str) -> Result<SavedOpen, String> {
@@ -1249,14 +1257,53 @@ fn is_output_collision_reject(reason: &str, executed: bool) -> bool {
     !executed && reason.contains(OUTPUT_ALREADY_EXISTS)
 }
 
+/// Substate ids the open already spent. The indexer body lists them at
+/// `/transaction/transaction/V1/body/transaction/inputs`.
+fn transaction_input_ids(entry: &serde_json::Value) -> Vec<String> {
+    entry
+        .pointer("/transaction/transaction/V1/body/transaction/inputs")
+        .and_then(serde_json::Value::as_array)
+        .map(|inputs| {
+            inputs
+                .iter()
+                .filter_map(|input| {
+                    input
+                        .get("substate_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `Substate <id>:<version>` inside an engine abort. Ids do not contain a colon.
+fn substate_named_in_abort(reason: &str) -> Option<&str> {
+    let rest = reason.split("Substate ").nth(1)?;
+    let id = rest.split(':').next()?.trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id)
+    }
+}
+
+/// True when the abort names a substate this transaction already included as an input.
+/// That is an unversioned create of the deposit or fee substate, not a new stealth output.
+fn abort_names_existing_input(reason: &str, inputs: &[String]) -> bool {
+    substate_named_in_abort(reason).is_some_and(|id| inputs.iter().any(|input| input == id))
+}
+
 /// `FeeIntentCommit` is not a channel commit. Only the output-already-exists abort is safe to
-/// replace: the fee was charged and the channel output was not created. Any other abort, or a
-/// missing abort, stays executed so the retry loop will not build another output.
-fn saved_open_from_fee_intent(abort: Option<&str>) -> SavedOpen {
+/// replace, and only when the named substate is the new stealth output. The same sentence
+/// about an input this transaction already spent is not a mask collision: replacing the output
+/// charges the fee again and fails the same way. Any other abort, or a missing abort, stays
+/// executed so the retry loop will not build another output.
+fn saved_open_from_fee_intent(abort: Option<&str>, inputs: &[String]) -> SavedOpen {
     match abort.map(str::trim).filter(|text| !text.is_empty()) {
         Some(reason) if reason.contains(OUTPUT_ALREADY_EXISTS) => SavedOpen::Rejected {
+            executed: abort_names_existing_input(reason, inputs),
             reason: reason.to_owned(),
-            executed: false,
             fee_charged: true,
         },
         Some(reason) => SavedOpen::Rejected {
@@ -3584,7 +3631,7 @@ mod tests {
     #[test]
     fn fee_intent_output_collision_is_replaceable_and_other_aborts_are_not() {
         let abort = "Failed to lock outputs: Substate utxo_0101…c7e550:0 already exists and cannot be created as an output";
-        match saved_open_from_fee_intent(Some(abort)) {
+        match saved_open_from_fee_intent(Some(abort), &[]) {
             SavedOpen::Rejected {
                 reason,
                 executed,
@@ -3596,9 +3643,10 @@ mod tests {
             }
             _ => panic!("expected a fee-intent collision"),
         }
-        match saved_open_from_fee_intent(Some(
-            "Insufficient fees to fund native verification requiring 14142000 points",
-        )) {
+        match saved_open_from_fee_intent(
+            Some("Insufficient fees to fund native verification requiring 14142000 points"),
+            &[],
+        ) {
             SavedOpen::Rejected {
                 executed,
                 fee_charged,
@@ -3609,7 +3657,7 @@ mod tests {
             }
             _ => panic!("expected a hard fee-intent stop"),
         }
-        match saved_open_from_fee_intent(None) {
+        match saved_open_from_fee_intent(None, &[]) {
             SavedOpen::Rejected {
                 reason,
                 executed,
@@ -3621,6 +3669,73 @@ mod tests {
                 assert!(!is_output_collision_reject(&reason, executed));
             }
             _ => panic!("expected a missing-abort stop"),
+        }
+    }
+
+    #[test]
+    fn fee_intent_that_names_an_existing_input_is_not_replaced() {
+        let funding = "utxo_0101010101010101010101010101010101010101010101010101010101010101_a05e8ec2e0930c5f9414bd1b45d06c3b4edbf222ad34fa421e129d5d0043275d";
+        let entry = serde_json::json!({
+            "transaction": {
+                "transaction": {
+                    "V1": {
+                        "body": {
+                            "transaction": {
+                                "inputs": [
+                                    {"substate_id": funding, "version": null, "is_write": true}
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let inputs = transaction_input_ids(&entry);
+        assert_eq!(inputs, vec![funding.to_string()]);
+        let named_input = format!(
+            "Failed to lock outputs: Substate {funding}:0 already exists and cannot be created as an output"
+        );
+        match saved_open_from_fee_intent(Some(&named_input), &inputs) {
+            SavedOpen::Rejected {
+                executed,
+                fee_charged,
+                ..
+            } => {
+                assert!(executed, "an existing input is not a mask collision");
+                assert!(fee_charged);
+                assert!(!is_output_collision_reject(&named_input, executed));
+            }
+            _ => panic!("expected a non-replaceable fee-intent rejection"),
+        }
+
+        let created = "utxo_0101010101010101010101010101010101010101010101010101010101010101_06652d17275aba958c80e9e5dffea10701da9755863dee0be917586a5e5cf050";
+        let named_output = format!(
+            "Failed to lock outputs: Substate {created}:0 already exists and cannot be created as an output"
+        );
+        match saved_open_from_fee_intent(Some(&named_output), &inputs) {
+            SavedOpen::Rejected { executed, .. } => {
+                assert!(!executed, "a new stealth output can still be replaced");
+                assert!(is_output_collision_reject(&named_output, executed));
+            }
+            _ => panic!("expected a replaceable output collision"),
+        }
+
+        let rejected = serde_json::json!({
+            "transaction": {
+                "rejected_reason": named_input,
+                "transaction": entry["transaction"]["transaction"].clone()
+            }
+        });
+        match saved_open_from_entry(&rejected).unwrap() {
+            SavedOpen::Rejected {
+                executed,
+                fee_charged,
+                ..
+            } => {
+                assert!(executed);
+                assert!(!fee_charged);
+            }
+            _ => panic!("expected a non-replaceable pre-execution rejection"),
         }
     }
 

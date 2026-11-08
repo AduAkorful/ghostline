@@ -3498,6 +3498,10 @@ fn pinned_submit_request(
 ) -> WalletSubmitRequest {
     let mut request = WalletSubmitRequest::new(transaction, seal_signer, Vec::new());
     request.lock_ids = vec![lock_id];
+    // `WalletSubmitRequest::new` leaves detected inputs unversioned. An existing stealth
+    // UTXO submitted that way is rejected as a create after the fee is taken (p124).
+    // Pin the version walletd detected. Other submits still use the unversioned default.
+    request.detect_inputs_use_unversioned = false;
     request
 }
 
@@ -3801,6 +3805,22 @@ fn decode_tx(tx_hex: &str) -> Result<ghostline_net::Transaction, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_open_stamps_the_version_walletd_detected() {
+        let transaction: UnsignedTransaction = serde_json::from_str(
+            r#"{"V1":{"network":38,"fee_instructions":[],"instructions":[],"inputs":[],"min_epoch":null,"max_epoch":1,"main_signer":"SealSigner","dry_run":false,"blobs":[],"nonce":0}}"#,
+        )
+        .unwrap();
+        let request = pinned_submit_request(
+            transaction,
+            serde_json::json!({"Imported":{"local_key_id":1}}),
+            7,
+        );
+        assert!(request.detect_inputs);
+        assert!(!request.detect_inputs_use_unversioned);
+        assert_eq!(request.lock_ids, vec![7]);
+    }
 
     #[test]
     fn faucet_claim_accepts_only_an_accept_finalize() {
