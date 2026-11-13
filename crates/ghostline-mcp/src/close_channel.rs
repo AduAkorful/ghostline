@@ -368,7 +368,7 @@ fn build_settle(
         resource,
         statement,
         record.max_epoch,
-        Some((fee, 100_000)),
+        Some((fee, close_max_fee()?)),
     ))
 }
 
@@ -394,7 +394,7 @@ fn build_refund(
         resource,
         statement,
         record.max_epoch,
-        Some((fee, 100_000)),
+        Some((fee, close_max_fee()?)),
     ))
 }
 
@@ -460,6 +460,26 @@ fn read_key_id(path: &std::path::Path) -> Result<serde_json::Value, String> {
     serde_json::from_str(raw.trim()).map_err(|e| format!("seal-key-id: {e}"))
 }
 
+/// Fee cap for the close transaction, from `GHOSTLINE_CLOSE_MAX_FEE` (default 100,000 µT).
+///
+/// `pay_fee` withdraws the whole cap from the fee account before execution and refunds the excess, so the account
+/// needs at least this much revealed TARI. A cap above its balance is rejected before any fee is charged.
+fn close_max_fee() -> Result<u64, String> {
+    parse_close_max_fee(std::env::var("GHOSTLINE_CLOSE_MAX_FEE").ok().as_deref())
+}
+
+fn parse_close_max_fee(value: Option<&str>) -> Result<u64, String> {
+    match value.map(str::trim).filter(|v| !v.is_empty()) {
+        None => Ok(100_000),
+        Some(v) => match v.parse::<u64>() {
+            Ok(0) | Err(_) => Err(format!(
+                "GHOSTLINE_CLOSE_MAX_FEE must be a positive integer number of µT, got {v}"
+            )),
+            Ok(fee) => Ok(fee),
+        },
+    }
+}
+
 fn env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
@@ -509,6 +529,14 @@ async fn output_is_down(indexer_url: &str, utxo_json: &std::path::Path) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_fee_cap_defaults_and_rejects_nonsense() {
+        assert_eq!(super::parse_close_max_fee(None).unwrap(), 100_000);
+        assert_eq!(super::parse_close_max_fee(Some("35000")).unwrap(), 35_000);
+        assert!(super::parse_close_max_fee(Some("0")).is_err());
+        assert!(super::parse_close_max_fee(Some("lots")).is_err());
+    }
 
     #[test]
     fn close_spends_only_the_open_window() {

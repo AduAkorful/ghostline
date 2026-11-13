@@ -132,6 +132,20 @@ fn vendor_from_env() -> Result<RistrettoPublicKeyBytes, String> {
     RistrettoPublicKeyBytes::from_hex(hex.trim()).map_err(|e| e.to_string())
 }
 
+/// The JSON of `GHOSTLINE_CHANNEL_FILE`, if it is set.
+fn channel_file_value() -> Result<Option<serde_json::Value>, String> {
+    let Ok(file) = std::env::var("GHOSTLINE_CHANNEL_FILE") else {
+        return Ok(None);
+    };
+    if file.trim().is_empty() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("channel file: {e}"))?;
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|e| format!("channel file: {e}"))
+}
+
 fn session_store(params: ChannelParams) -> Result<ChannelStore, String> {
     let path = std::env::var("GHOSTLINE_SESSION").map_err(|_| "set GHOSTLINE_SESSION")?;
     ChannelStore::open_or_create(path, params).map_err(|e| e.to_string())
@@ -487,21 +501,40 @@ pub fn unblind_tx(args: &TxHexArgs) -> Result<Vec<UnblindedOutput>, String> {
 }
 
 pub async fn channel_status(args: &StatusArgs) -> Result<ChannelStatus, String> {
-    let session_path = std::env::var("GHOSTLINE_SESSION").map_err(|_| "set GHOSTLINE_SESSION")?;
+    // Env vars win; otherwise read the same fields from GHOSTLINE_CHANNEL_FILE, as the other channel tools do.
+    let file = channel_file_value()?;
+    let file_str = |key: &str| {
+        file.as_ref()
+            .and_then(|value| value.get(key))
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let session_path =
+        payer_session_path()?.ok_or("set GHOSTLINE_SESSION or session on the channel file")?;
     let session = ChannelStore::open(&session_path).map_err(|e| e.to_string())?;
-    let ledger = match std::env::var("GHOSTLINE_LEDGER") {
-        Ok(path) => Some(ChannelStore::open(path).map_err(|e| e.to_string())?),
-        Err(_) => None,
+    let ledger = match std::env::var("GHOSTLINE_LEDGER")
+        .ok()
+        .or_else(|| file_str("ledger"))
+    {
+        Some(path) => Some(ChannelStore::open(path).map_err(|e| e.to_string())?),
+        None => None,
     };
     let expiry_epoch = args.expiry_epoch.or_else(|| {
         std::env::var("GHOSTLINE_EXPIRY_EPOCH")
             .ok()
             .and_then(|s| s.parse().ok())
+            .or_else(|| {
+                file.as_ref()
+                    .and_then(|value| value.get("expiry_epoch"))
+                    .and_then(serde_json::Value::as_u64)
+            })
     });
     let indexer_url = args
         .indexer_url
         .clone()
-        .or_else(|| std::env::var("GHOSTLINE_INDEXER_URL").ok());
+        .or_else(|| std::env::var("GHOSTLINE_INDEXER_URL").ok())
+        .or_else(|| file_str("indexer_url"));
     let current_epoch = match indexer_url.as_deref() {
         Some(url) => {
             let stats = ghostline_net::IndexerClient::connect(url)
