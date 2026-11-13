@@ -1,0 +1,35 @@
+{
+  "network": "mainnet",
+  "networkByte": 0,
+  "recordedOn": "2026-11-13",
+  "source": {
+    "commit": "c454e41",
+    "tag": "mainnet-publish-2026-11-13",
+    "toolchain": "rust-toolchain.toml (wasm32-unknown-unknown --release)",
+    "note": "walletd optimizes WASM before publishing, so the on-chain binary differs from the local build. Compare against the template substate on the indexer, not the local file hash."
+  },
+  "publisher": {
+    "account": "component_12d62617b885f7f05c98e6718790c846f8ee0dfd81371345faa44deaa32307a7",
+    "publicKey": "728870aee9b9fb66e69fcf45510440e54b59387a7efe3816713e054014d3b230",
+    "walletd": "0.53.3"
+  },
+  "feeConfig": {
+    "template": "template_b3628ed057f88c73b88f3c5653b494a10258067c43cf0c667d1dcf17e85e9f45",
+    "publishTransaction": "651aff4202a1dd6675c6d82903ebb036e6673075f06428dea8844d4d31a13983",
+    "publishFeeMicroTari": 802603,
+    "localWasmSha256": "766a60e8108e5856b03d24a1bae6b6eca39df5b2eac9df2de7186fdd15eae311",
+    "component": "component_37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5",
+    "createTransaction": "1fdbb90905399f5427ad2dc8894d84c43c44af4d6da83ce97f5f0f5b93211fd9",
+    "createFeeMicroTari": 2392,
+    "owner": "728870aee9b9fb66e69fcf45510440e54b59387a7efe3816713e054014d3b230",
+    "treasury": "728870aee9b9fb66e69fcf45510440e54b59387a7efe3816713e054014d3b230"
+  },
+  "channel": {
+    "template": "template_ae13cead3c34052116c49fc09e4645f3a62edf55857c0e2e45226dd7093cef9c",
+    "publishTransaction": "3ff0500cf6deef1c66dce31cce01e68105658b0ac9ae7043b7962649f17b2eec",
+    "publishFeeMicroTari": 1027585,
+    "builtWithFeeConfig": "37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5",
+    "localWasmSha256": "2aede4428350a13069362e9d6ace3270a43ea7f7835f9cc707759d6c7347cfd6"
+  },
+  "verified": "All three substates return HTTP 200 (version 0) from indexer-a and indexer-b.ootle.tari.com; template substates contain GhostlineFeeConfig and GhostlineChannel."
+}
