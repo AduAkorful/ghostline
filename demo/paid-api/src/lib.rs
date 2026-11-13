@@ -41,7 +41,8 @@ pub use recovery::{
     seal as seal_recovery_receipt,
 };
 
-const PRICE: u64 = 100;
+/// Per-call price of the local demo router. A multiple of 100 µT so the protocol fee divides exactly.
+pub const PRICE: u64 = 100;
 
 #[derive(Clone)]
 pub struct AppState {

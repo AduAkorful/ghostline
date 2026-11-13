@@ -68,10 +68,11 @@ async fn run_calls(
     payer_secret: RistrettoSecretKey,
     service: RistrettoPublicKeyBytes,
 ) -> Result<(), String> {
+    let price = ghostline_paid_api::PRICE;
     let budget = u64::from(calls)
-        .checked_mul(10)
+        .checked_mul(price)
         .ok_or_else(|| "call total overflow".to_string())?;
-    let policy = Policy::new(budget, 10).allow_vendor(service);
+    let policy = Policy::new(budget, price).allow_vendor(service);
     let mut payer = AgentPayer::new(PaymentSession::new(params), policy, service);
     let client = reqwest::Client::new();
     for call in 1..=calls {
