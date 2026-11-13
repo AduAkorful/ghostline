@@ -142,6 +142,30 @@ impl WalletSubmitRequest {
 #[derive(Debug, Deserialize)]
 pub struct WalletSubmitResponse {
     pub transaction_id: TransactionId,
+    /// walletd 0.53+: the fee to submit a dry-run transfer with. walletd no longer stores dry runs,
+    /// so `transactions.get` cannot return their quote.
+    #[serde(default)]
+    pub required_fees: Option<u64>,
+    /// walletd 0.53+: the dry run's `ExecuteResult`, as JSON.
+    #[serde(default)]
+    pub dry_run_result: Option<Value>,
+}
+
+impl WalletSubmitResponse {
+    /// The inline dry-run quote as `(engine total_fees_required, walletd required_fees)`, when
+    /// walletd returned one. The walletd figure is the one to submit with: a build at that fee
+    /// selects the inputs the dry run priced.
+    pub fn inline_fee_quote(&self) -> Option<(u64, u64)> {
+        let required = self.required_fees?;
+        let engine = self
+            .dry_run_result
+            .as_ref()
+            .and_then(|result| result.get("finalize"))
+            .and_then(|finalize| finalize.get("total_fees_required"))
+            .and_then(Value::as_u64)
+            .unwrap_or(required);
+        Some((engine, required))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1242,11 +1266,36 @@ mod tests {
 
         std::fs::write(&cookie, "tc_secret other").unwrap();
         let err = client.use_cookie_file(&cookie).unwrap_err().to_string();
-        assert!(!err.contains("tc_secret"), "errors must not echo the cookie: {err}");
+        assert!(
+            !err.contains("tc_secret"),
+            "errors must not echo the cookie: {err}"
+        );
 
-        let err = client.use_cookie_file(&dir.join("missing")).unwrap_err().to_string();
+        let err = client
+            .use_cookie_file(&dir.join("missing"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("cannot read cookie"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn inline_fee_quote_prefers_walletd_required_fees() {
+        let response: WalletSubmitResponse = serde_json::from_value(serde_json::json!({
+            "transaction_id": "92fdca8630abbdb4e09346d8da0a67c8db107b6a9f9c68de1ac17eea412e5526",
+            "required_fees": 11070,
+            "dry_run_result": { "finalize": { "total_fees_required": 11058 } }
+        }))
+        .unwrap();
+        assert_eq!(response.inline_fee_quote(), Some((11058, 11070)));
+
+        let live: WalletSubmitResponse = serde_json::from_value(serde_json::json!({
+            "transaction_id": "92fdca8630abbdb4e09346d8da0a67c8db107b6a9f9c68de1ac17eea412e5526",
+            "required_fees": null,
+            "dry_run_result": null
+        }))
+        .unwrap();
+        assert_eq!(live.inline_fee_quote(), None);
     }
 
     #[test]

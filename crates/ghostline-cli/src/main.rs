@@ -17,9 +17,10 @@ use ghostline_core::{ChannelParams, SignedVoucher, from_hex, to_hex};
 use ghostline_net::{
     AccountsCreateRequest, ChannelOpenParams, IndexerClient, StealthTransferRequest,
     SubstatePresence, TransactionEnvelope, TransactionId, UtxoInputSelection, WalletClient,
-    WalletStealthUtxo, WalletSubmitRequest, channel_open_utxo, execution_accepted,
-    funding_key_path_addresses, indexer_result_status, pinned_funding_statement_request,
-    pinned_statement_matches_funding, settle_fee_signers, stealth_utxos_from_wallet_tx,
+    WalletStealthUtxo, WalletSubmitRequest, WalletSubmitResponse, channel_open_utxo,
+    execution_accepted, funding_key_path_addresses, indexer_result_status,
+    pinned_funding_statement_request, pinned_statement_matches_funding, settle_fee_signers,
+    stealth_utxos_from_wallet_tx,
 };
 #[cfg(test)]
 use ghostline_sdk::OutputScan;
@@ -1182,7 +1183,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|e| wallet_open_error(e.to_string()))?;
                 println!("transaction_id={}", submitted.transaction_id);
                 if dry_run {
-                    print_wallet_open_fee_quote(&wallet, submitted.transaction_id).await?;
+                    let (estimated, required) = read_open_fee_quote(&wallet, &submitted).await?;
+                    println!("estimated_fee={estimated}");
+                    println!("required_fee={required}");
                     println!("max_fee={max_fee}");
                     println!("dry_run=true");
                     println!("utxo dump needs an Accepted live open (dry-run is not stored)");
@@ -3306,6 +3309,7 @@ async fn open_channel_from_file(
         .default_account_address()
         .await
         .map_err(|error| error.to_string())?;
+    let mut inline_quote = None;
     let submitted = if funding_commitments.is_empty() {
         let spend_fee = if dry_run {
             ceiling
@@ -3320,7 +3324,7 @@ async fn open_channel_from_file(
                 true,
             )
             .await?;
-            let (estimated, required) = read_open_fee_quote(&wallet, quoted).await?;
+            let (estimated, required) = read_open_fee_quote(&wallet, &quoted).await?;
             println!("estimated_fee={estimated}");
             println!("required_fee={required}");
             let fee = capped_open_fee(required, ceiling)?;
@@ -3330,7 +3334,7 @@ async fn open_channel_from_file(
         if !dry_run && let Some(ledger) = &record.ledger {
             ensure_channel_ledger(ledger, channel.params())?;
         }
-        submit_channel_open(
+        let response = submit_channel_open(
             &wallet,
             &record,
             &channel,
@@ -3339,7 +3343,9 @@ async fn open_channel_from_file(
             spend_fee,
             dry_run,
         )
-        .await?
+        .await?;
+        inline_quote = response.inline_fee_quote();
+        response.transaction_id
     } else {
         submit_pinned_channel_open(
             &wallet,
@@ -3356,7 +3362,13 @@ async fn open_channel_from_file(
     println!("transaction_id={submitted}");
     if dry_run {
         if funding_commitments.is_empty() {
-            print_wallet_open_fee_quote(&wallet, submitted).await?;
+            match inline_quote {
+                Some((estimated, required)) => {
+                    println!("estimated_fee={estimated}");
+                    println!("required_fee={required}");
+                }
+                None => print_wallet_open_fee_quote(&wallet, submitted).await?,
+            }
             println!("max_fee={ceiling}");
         }
         println!("dry_run=true");
@@ -3377,7 +3389,7 @@ async fn submit_channel_open(
     resource: &str,
     max_fee: u64,
     dry_run: bool,
-) -> Result<TransactionId, String> {
+) -> Result<WalletSubmitResponse, String> {
     let request = StealthTransferRequest::channel_open(ChannelOpenParams {
         account_name: record.opener_account.clone(),
         destination_address: destination.to_string(),
@@ -3399,7 +3411,7 @@ async fn submit_channel_open(
         .stealth_transfer(&request)
         .await
         .map_err(|error| wallet_open_error(error.to_string()))?;
-    Ok(submitted.transaction_id)
+    Ok(submitted)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3645,7 +3657,19 @@ fn wallet_open_error(message: String) -> String {
     }
 }
 
+/// Reads a dry-run open's quote as `(estimate, fee to submit with)`. walletd 0.53+ returns it
+/// inline; older daemons stored the dry run for `transactions.get`.
 async fn read_open_fee_quote(
+    wallet: &WalletClient,
+    response: &WalletSubmitResponse,
+) -> Result<(u64, u64), String> {
+    if let Some(quote) = response.inline_fee_quote() {
+        return Ok(quote);
+    }
+    read_stored_open_fee_quote(wallet, response.transaction_id).await
+}
+
+async fn read_stored_open_fee_quote(
     wallet: &WalletClient,
     transaction_id: TransactionId,
 ) -> Result<(u64, u64), String> {
@@ -3669,7 +3693,7 @@ async fn print_wallet_open_fee_quote(
     wallet: &WalletClient,
     transaction_id: TransactionId,
 ) -> Result<(), String> {
-    let (estimated, required) = read_open_fee_quote(wallet, transaction_id).await?;
+    let (estimated, required) = read_stored_open_fee_quote(wallet, transaction_id).await?;
     println!("estimated_fee={estimated}");
     println!("required_fee={required}");
     Ok(())

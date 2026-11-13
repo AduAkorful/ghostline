@@ -213,12 +213,18 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
         .await
         .map_err(|e| e.to_string())?;
     if !submit {
-        let transaction = wallet
-            .transaction_get(submitted.transaction_id)
-            .await
-            .map_err(|e| format!("open fee quote: {e}"))?;
-        let (estimated_fee, required_fee) = open_fee_quote(&transaction)
-            .ok_or("wallet dry-run fee quote is missing final_fee or total_fees_required")?;
+        // walletd 0.53+ returns the quote inline and no longer stores dry runs.
+        let (estimated_fee, required_fee) = match submitted.inline_fee_quote() {
+            Some(quote) => quote,
+            None => {
+                let transaction = wallet
+                    .transaction_get(submitted.transaction_id)
+                    .await
+                    .map_err(|e| format!("open fee quote: {e}"))?;
+                open_fee_quote(&transaction)
+                    .ok_or("wallet dry-run fee quote is missing final_fee or total_fees_required")?
+            }
+        };
         return Ok(OpenOutcome {
             dry_run: true,
             transaction_id: submitted.transaction_id.to_string(),
