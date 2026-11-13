@@ -5,12 +5,14 @@
 
 mod support;
 
-use ghostline_core::{NONCE_LEN, SignedVoucher, VOUCHER_DOMAIN, sign_with_nonce, voucher_message};
+use ghostline_core::{
+    FEE_DIVISOR, NONCE_LEN, SignedVoucher, VOUCHER_DOMAIN, sign_with_nonce, voucher_message,
+};
 use ghostline_sdk::{
     Channel, ChannelSpec, MaskAndValue, OutputScan, refund, settle, unblind_output,
 };
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT, LOCALNET_TAG, fund};
+use support::{DEPOSIT, LOCALNET_TAG, fund, templates};
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -43,6 +45,8 @@ use tari_utilities::ByteArray;
 
 struct Fixture {
     test: TemplateTest,
+    treasury: RistrettoPublicKeyBytes,
+    treasury_secret: RistrettoSecretKey,
     channel: Channel,
     resource: ResourceAddress,
     deposit: MaskAndValue,
@@ -53,10 +57,7 @@ struct Fixture {
 
 impl Fixture {
     fn new(expiry: u64) -> Self {
-        let mut test = TemplateTest::new(
-            env!("CARGO_MANIFEST_DIR"),
-            ["templates/faucet", "../../contracts/channel"],
-        );
+        let (mut test, fee) = templates();
         let (payer, payer_public) = create_key_pair_from_seed(11);
         let (service, service_public) = create_key_pair_from_seed(13);
         let (other, _) = create_key_pair_from_seed(14);
@@ -67,12 +68,16 @@ impl Fixture {
             deposit: DEPOSIT,
             expiry_epoch: expiry,
             nonce: [45; NONCE_LEN],
-            channel_template: test.get_template_address(CHANNEL),
+            channel_template: fee.channel_template,
+            fee_config: fee.config,
         })
         .unwrap();
         let (resource, mask) = fund(&mut test, OutputAuthSpec::Conditions(channel.leaves_vec()));
         Self {
             test,
+            treasury: fee.treasury,
+            // `support::templates` derives the treasury from seed 202.
+            treasury_secret: create_key_pair_from_seed(202).0,
             channel,
             resource,
             deposit: MaskAndValue {
@@ -148,6 +153,13 @@ impl Fixture {
                 SpendAuthorization::Script(self.channel.params().payer_root),
                 self.channel.spec().payer,
             ),
+            output(
+                self.resource,
+                voucher.amount / FEE_DIVISOR,
+                fee_mask(&voucher.mask),
+                SpendAuthorization::Key(self.treasury),
+                self.treasury,
+            ),
         ]
     }
 
@@ -165,6 +177,10 @@ impl Fixture {
         .unwrap();
         no_claim_statement(self.deposit.clone(), witness, outputs, revealed)
     }
+}
+
+fn fee_mask(service_mask: &RistrettoSecretKey) -> RistrettoSecretKey {
+    service_mask * &RistrettoSecretKey::from(FEE_DIVISOR).invert().unwrap()
 }
 
 fn output(
@@ -246,12 +262,12 @@ fn reject(
 fn omission_preserves_template_authorization_and_value_conservation() {
     let mut f = Fixture::new(10);
     f.epoch(1);
-    let voucher = f.voucher(30);
+    let voucher = f.voucher(300);
 
     // Submit raw adversarial statements directly to the engine, bypassing SDK-side voucher validation.
     let forged =
-        SignedVoucher::sign(&f.other, f.channel.params(), 30, f.channel.spec().service).unwrap();
-    let statement = f.raw_settle(forged.witness_data(), &f.outputs(&forged, 70), None);
+        SignedVoucher::sign(&f.other, f.channel.params(), 300, f.channel.spec().service).unwrap();
+    let statement = f.raw_settle(forged.witness_data(), &f.outputs(&forged, 697), None);
     reject(
         &mut f.test,
         f.resource,
@@ -263,10 +279,10 @@ fn omission_preserves_template_authorization_and_value_conservation() {
     let mut params = f.channel.params().clone();
     params.network_tag = 2;
     let wrong_network =
-        SignedVoucher::sign(&f.payer, &params, 30, f.channel.spec().service).unwrap();
+        SignedVoucher::sign(&f.payer, &params, 300, f.channel.spec().service).unwrap();
     let statement = f.raw_settle(
         wrong_network.witness_data(),
-        &f.outputs(&wrong_network, 70),
+        &f.outputs(&wrong_network, 697),
         None,
     );
     reject(
@@ -277,7 +293,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         "invalid voucher signature",
     );
 
-    let mut wrong_commitment = f.outputs(&voucher, 70);
+    let mut wrong_commitment = f.outputs(&voucher, 697);
     wrong_commitment[0].witness.mask = RistrettoSecretKey::random(&mut rand::rng());
     let statement = f.raw_settle(voucher.witness_data(), &wrong_commitment, None);
     reject(
@@ -288,7 +304,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         "unauthorized output",
     );
 
-    let mut diverted = f.outputs(&voucher, 70);
+    let mut diverted = f.outputs(&voucher, 697);
     diverted[1].auth = SpendAuthorization::Key(f.channel.spec().service);
     let statement = f.raw_settle(voucher.witness_data(), &diverted, None);
     reject(
@@ -299,7 +315,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         "unauthorized output",
     );
 
-    let mut extra_output = f.outputs(&voucher, 69);
+    let mut extra_output = f.outputs(&voucher, 696);
     extra_output.push(output(
         f.resource,
         1,
@@ -313,10 +329,10 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         f.resource,
         statement,
         &f.service,
-        "settle must have exactly two outputs",
+        "settle must have exactly three outputs",
     );
 
-    let mut disclosing = f.outputs(&voucher, 70);
+    let mut disclosing = f.outputs(&voucher, 697);
     disclosing[0].witness.minimum_value_promise = voucher.amount;
     let statement = f.raw_settle(voucher.witness_data(), &disclosing, None);
     reject(
@@ -330,7 +346,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
     let revealed = RevealedOutput::new(Amount::from_u64(1), f.channel.spec().service);
     let statement = f.raw_settle(
         voucher.witness_data(),
-        &f.outputs(&voucher, 69),
+        &f.outputs(&voucher, 696),
         Some(revealed),
     );
     reject(
@@ -341,7 +357,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         "cannot create revealed output value",
     );
 
-    let statement = f.raw_settle(voucher.witness_data(), &f.outputs(&voucher, 71), None);
+    let statement = f.raw_settle(voucher.witness_data(), &f.outputs(&voucher, 698), None);
     reject(
         &mut f.test,
         f.resource,
@@ -350,7 +366,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         "Balance proof signature verification failed",
     );
 
-    let statement = f.raw_settle(voucher.witness_data(), &f.outputs(&voucher, 70), None);
+    let statement = f.raw_settle(voucher.witness_data(), &f.outputs(&voucher, 697), None);
     reject(
         &mut f.test,
         f.resource,
@@ -360,7 +376,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
     );
 
     f.epoch(10);
-    let statement = f.raw_settle(voucher.witness_data(), &f.outputs(&voucher, 70), None);
+    let statement = f.raw_settle(voucher.witness_data(), &f.outputs(&voucher, 697), None);
     reject(
         &mut f.test,
         f.resource,
@@ -375,6 +391,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         f.deposit,
         &voucher,
         f.channel.spec().service,
+        f.treasury,
         OutputScan::localnet(f.resource),
     )
     .unwrap();
@@ -386,6 +403,8 @@ fn omission_preserves_template_authorization_and_value_conservation() {
         .map(|o| {
             let key = if o.auth == SpendAuthorization::Key(voucher.service_output_key) {
                 &f.service
+            } else if o.auth == SpendAuthorization::Key(f.treasury) {
+                &f.treasury_secret
             } else {
                 &f.payer
             };
@@ -394,7 +413,7 @@ fn omission_preserves_template_authorization_and_value_conservation() {
                 .value
         })
         .collect();
-    assert_eq!(recovered, vec![70, 30]);
+    assert_eq!(recovered, vec![697, 300, 3]);
     let tx = Transaction::builder_localnet(Epoch(2))
         .stealth_transfer(f.resource, statement)
         .finish()
@@ -421,7 +440,7 @@ fn template_rejects_single_output_full_deposit_settlement() {
         f.resource,
         statement,
         &f.service,
-        "exactly two outputs",
+        "exactly three outputs",
     );
 }
 
@@ -480,10 +499,7 @@ fn native_refund_is_private_and_remains_unilateral_long_after_expiry() {
 
 #[test]
 fn relay_refund_key_can_refund_after_expiry_without_replacing_payer_signature() {
-    let mut test = TemplateTest::new(
-        env!("CARGO_MANIFEST_DIR"),
-        ["templates/faucet", "../../contracts/channel"],
-    );
+    let (mut test, fee) = templates();
     let (payer, payer_public) = create_key_pair_from_seed(101);
     let (refund_authority, refund_public) = create_key_pair_from_seed(102);
     let (service, service_public) = create_key_pair_from_seed(103);
@@ -495,7 +511,8 @@ fn relay_refund_key_can_refund_after_expiry_without_replacing_payer_signature() 
             deposit: DEPOSIT,
             expiry_epoch: 10,
             nonce: [46; NONCE_LEN],
-            channel_template: test.get_template_address(CHANNEL),
+            channel_template: fee.channel_template,
+            fee_config: fee.config,
         },
         refund_public.to_byte_type(),
     )
@@ -517,7 +534,7 @@ fn relay_refund_key_can_refund_after_expiry_without_replacing_payer_signature() 
     let forged = SignedVoucher::sign(
         &refund_authority,
         channel.params(),
-        30,
+        300,
         channel.spec().service,
     )
     .unwrap();
@@ -573,10 +590,7 @@ fn relay_refund_key_can_refund_after_expiry_without_replacing_payer_signature() 
 
 #[test]
 fn genuine_balance_covenant_still_requires_a_partition_claim() {
-    let mut test = TemplateTest::new(
-        env!("CARGO_MANIFEST_DIR"),
-        ["templates/faucet", "../../contracts/channel"],
-    );
+    let mut test = TemplateTest::new(env!("CARGO_MANIFEST_DIR"), ["templates/faucet"]);
     let leaf = SpendCondition::covenant(Covenant::BalancePreserved(0));
     let leaves = vec![leaf.clone()];
     let (resource, mask) = fund(&mut test, OutputAuthSpec::Conditions(leaves.clone()));
@@ -634,7 +648,8 @@ fn settlement_can_pay_its_fee_from_a_separate_stealth_input() {
     f.epoch(1);
     let (_settlement_key, settlement_public) = create_key_pair_from_seed(91);
     let settlement_public = settlement_public.to_byte_type();
-    let voucher = SignedVoucher::sign(&f.payer, f.channel.params(), 30, settlement_public).unwrap();
+    let voucher =
+        SignedVoucher::sign(&f.payer, f.channel.params(), 300, settlement_public).unwrap();
 
     // Create a separate native-TARI stealth UTXO for fee funding. The fee amount is revealed, but
     // this route needs no public Account.pay_fee component in the settlement transaction.
@@ -683,6 +698,7 @@ fn settlement_can_pay_its_fee_from_a_separate_stealth_input() {
         f.deposit.clone(),
         &voucher,
         settlement_public,
+        f.treasury,
         OutputScan::localnet(f.resource),
     )
     .unwrap();
@@ -717,17 +733,19 @@ fn settlement_can_pay_its_fee_from_a_separate_stealth_input() {
     let result = f.test.execute_expect_success(tx, vec![]);
     // The fee intent is the engine's three-call stealth sequence. Settlement adds the
     // script entry plus data, verify, inputs, both revealed amounts, and outputs.
-    // tari_engine 0.49 charges that shape 10; the 0.45 engine charged 11.
+    // tari_engine 0.53.1 charges that shape 11 (the 0.49 engine charged 10). Reading the fee config component
+    // inside the settle predicate adds one more, so 12.
     assert_eq!(
         result
             .finalize
             .fee_receipt
             .fee_breakdown()
             .get(FeeSource::RuntimeCall),
-        10
+        12
     );
     assert_eq!(result.finalize.fee_receipt.unpaid_debt(), 0);
-    assert_eq!(result.finalize.fee_receipt.total_fee_overcharge(), 90);
+    // The fee transfer reveals a 100 µT reserve. 12 is charged, so 88 is overcharge.
+    assert_eq!(result.finalize.fee_receipt.total_fee_overcharge(), 88);
     // The channel's service authorization key closes the channel; the independent one-time key owns the payout.
     assert_ne!(settlement_public, f.channel.spec().service);
 }

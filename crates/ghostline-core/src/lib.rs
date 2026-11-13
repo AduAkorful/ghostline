@@ -34,6 +34,20 @@ pub const CHANNEL_ID_LEN: usize = 32;
 pub const MESSAGE_LEN: usize = CHANNEL_ID_LEN + 32 + 32;
 /// Keep one micro-unit of payer change so every settlement has the same public output count.
 pub const SETTLEMENT_RESERVE: u64 = 1;
+/// Protocol fee divisor; must equal `FEE_DIVISOR` in the channel template. The fee is `payout / FEE_DIVISOR`.
+pub const FEE_DIVISOR: u64 = 100;
+
+/// Protocol fee owed on a settled service payout. Payouts that are not a multiple of [`FEE_DIVISOR`] cannot settle,
+/// because the template checks the fee as an exact quotient on commitments.
+pub fn settlement_fee(payout: u64) -> Result<u64, VoucherError> {
+    if !payout.is_multiple_of(FEE_DIVISOR) {
+        return Err(VoucherError::NotFeeAligned {
+            amount: payout,
+            divisor: FEE_DIVISOR,
+        });
+    }
+    Ok(payout / FEE_DIVISOR)
+}
 
 fn sign_with_domain(
     secret: &RistrettoSecretKey,
@@ -48,7 +62,7 @@ fn sign_with_domain(
 /// Schnorr challenge for a template signature in the shared scope (`tari_ootle_common_types` 0.49).
 ///
 /// `signature.verify` in the channel template uses that scope, so the challenge binds `network_tag`
-/// and the domain. `network_tag` must be an Ootle network byte (Esmeralda is 38).
+/// and the domain. `network_tag` must be an Ootle network byte (mainnet is 0, Esmeralda is 38).
 pub fn sign_with_nonce(
     secret: &RistrettoSecretKey,
     nonce: RistrettoSecretKey,
@@ -86,4 +100,40 @@ pub fn from_hex(hex: &str) -> Result<Vec<u8>, VoucherError> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| VoucherError::Malformed))
         .collect()
+}
+
+#[cfg(test)]
+mod fee_tests {
+    use super::*;
+
+    const TEMPLATE_SOURCE: &str = include_str!("../../../contracts/channel/src/lib.rs");
+
+    fn template_const(name: &str) -> String {
+        let start = TEMPLATE_SOURCE
+            .find(&format!("pub const {name}"))
+            .expect("template constant exists");
+        let rest = &TEMPLATE_SOURCE[start..];
+        let rest = &rest[rest.find('=').unwrap() + 1..];
+        let value = &rest[..rest.find(';').unwrap()];
+        value.split_whitespace().collect()
+    }
+
+    #[test]
+    fn fee_divisor_matches_the_template() {
+        assert_eq!(template_const("FEE_DIVISOR"), FEE_DIVISOR.to_string());
+    }
+
+    #[test]
+    fn fee_is_exact_quotient() {
+        assert_eq!(settlement_fee(100), Ok(1));
+        assert_eq!(settlement_fee(10_000), Ok(100));
+        assert_eq!(settlement_fee(0), Ok(0));
+        assert_eq!(
+            settlement_fee(150),
+            Err(VoucherError::NotFeeAligned {
+                amount: 150,
+                divisor: FEE_DIVISOR
+            })
+        );
+    }
 }

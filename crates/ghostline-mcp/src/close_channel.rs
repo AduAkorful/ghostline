@@ -89,6 +89,8 @@ struct CloseRecord {
     expiry_epoch: u64,
     nonce_hex: String,
     template_hex: String,
+    #[serde(default)]
+    fee_config: String,
     indexer_url: String,
     ootle_network: String,
     max_epoch: u64,
@@ -179,7 +181,7 @@ pub async fn close_channel() -> Result<CloseOutcome, String> {
         .map_err(|_| "set GHOSTLINE_SEAL_KEY_ID_FILE")?;
     let seal_signer = read_key_id(std::path::Path::new(&seal_path))?;
     let mut wallet = WalletClient::connect(&wallet_url).map_err(|e| e.to_string())?;
-    wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+    wallet.authenticate().await.map_err(|e| e.to_string())?;
     let got = wallet
         .account_get(&fee_name)
         .await
@@ -305,8 +307,16 @@ fn build_settle(
     let deposit = funded(record, &channel)?;
     let resource = STEALTH_TARI_RESOURCE_ADDRESS;
     let scan = scan(record)?;
-    let statement = settle(&channel, deposit, &voucher, channel.spec().service, scan)
-        .map_err(|e| e.to_string())?;
+    let treasury = ghostline_sdk::treasury_from_env()?;
+    let statement = settle(
+        &channel,
+        deposit,
+        &voucher,
+        channel.spec().service,
+        treasury,
+        scan,
+    )
+    .map_err(|e| e.to_string())?;
     let fee = parse_component(
         "fee-account",
         record
@@ -380,18 +390,23 @@ fn channel_from(record: &CloseRecord) -> Result<Channel, String> {
         nonce,
         channel_template: Hash32::from_hex(&record.template_hex)
             .map_err(|e| format!("template: {e}"))?,
+        fee_config: ghostline_sdk::parse_fee_config(&record.fee_config)?,
     })
     .map_err(|e| e.to_string())
 }
 
 fn scan(record: &CloseRecord) -> Result<OutputScan, String> {
     match record.ootle_network.as_str() {
-        "localnet" => Ok(OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS)),
-        "esmeralda" => Ok(OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS)),
-        other => Err(format!(
-            "ootle_network: expected localnet or esmeralda, got {other}"
-        )),
+        "localnet" => OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        "esmeralda" => OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS),
+        "mainnet" => OutputScan::mainnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        other => {
+            return Err(format!(
+                "ootle_network: expected localnet, esmeralda, or mainnet, got {other}"
+            ));
+        }
     }
+    .require_channel_tag(record.network_tag)
 }
 
 fn parse_component(label: &str, addr: &str) -> Result<ComponentAddress, String> {

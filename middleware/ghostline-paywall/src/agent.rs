@@ -154,14 +154,14 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
         let session = PaymentSession::new(params.clone());
-        let policy = Policy::new(15, 10);
+        let policy = Policy::new(150, 100);
         let mut agent = AgentPayer::new(session, policy, payer);
-        let quote = PaymentRequired::new(10, &params.channel_id());
+        let quote = PaymentRequired::new(100, &params.channel_id());
         agent.pay(&quote, &secret).unwrap();
         let err = agent.pay(&quote, &secret).unwrap_err();
         assert!(matches!(err, AgentError::Policy(_)));
@@ -175,13 +175,13 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
-        let engine = PolicyEngine::new(Policy::new(100, 10)).require_human();
+        let engine = PolicyEngine::new(Policy::new(1_000, 100)).require_human();
         let mut agent = AgentPayer::with_engine(PaymentSession::new(params.clone()), engine, payer);
-        let quote = PaymentRequired::new(10, &params.channel_id());
+        let quote = PaymentRequired::new(100, &params.channel_id());
         assert!(matches!(
             agent.pay(&quote, &secret),
             Err(AgentError::Policy(PolicyError::NeedsHumanApproval { .. }))
@@ -200,23 +200,23 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
         let mut agent = AgentPayer::new(
             PaymentSession::new(params.clone()),
-            Policy::new(100, 10),
+            Policy::new(1_000, 100),
             payer,
         );
 
-        let bad_channel = PaymentRequired::new(10, &[0xabu8; 32]);
+        let bad_channel = PaymentRequired::new(100, &[0xabu8; 32]);
         assert!(matches!(
             agent.pay(&bad_channel, &secret),
             Err(AgentError::Paywall(PaywallError::InvalidQuote(_)))
         ));
 
-        let wrong_recipient = PaymentRequired::new(10, &params.channel_id())
+        let wrong_recipient = PaymentRequired::new(100, &params.channel_id())
             .with_terms(&PaymentTerms::new(other, 20, 100).unwrap());
         assert!(matches!(
             agent.pay(&wrong_recipient, &secret),
@@ -236,19 +236,19 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
         let mut agent = AgentPayer::new(
             PaymentSession::new(params.clone()),
-            Policy::new(100, 10),
+            Policy::new(1_000, 100),
             vendor,
         );
         let terms = PaymentTerms::new(vendor, 20, 100)
             .unwrap()
             .with_service_output_key(payout_public.to_byte_type());
-        let quote = PaymentRequired::new(10, &params.channel_id()).with_terms(&terms);
+        let quote = PaymentRequired::new(100, &params.channel_id()).with_terms(&terms);
         let voucher = agent.pay(&quote, &secret).unwrap();
 
         assert_eq!(voucher.service_output_key, payout_public.to_byte_type());
@@ -264,7 +264,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
@@ -273,12 +273,12 @@ mod tests {
         let path = dir.join("channel.json");
         let _ = std::fs::remove_file(&path);
         let mut store = ChannelStore::create(&path, params.clone()).unwrap();
-        let engine = PolicyEngine::new(Policy::new(100, 10));
-        let (first, engine) = gated_sign(&mut store, engine, payer, 10, &secret, false).unwrap();
-        assert_eq!(first.amount, 10);
-        let (second, _) = gated_sign(&mut store, engine, payer, 10, &secret, false).unwrap();
-        assert_eq!(second.amount, 20);
+        let engine = PolicyEngine::new(Policy::new(1_000, 100));
+        let (first, engine) = gated_sign(&mut store, engine, payer, 100, &secret, false).unwrap();
+        assert_eq!(first.amount, 100);
+        let (second, _) = gated_sign(&mut store, engine, payer, 100, &secret, false).unwrap();
+        assert_eq!(second.amount, 200);
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.session().unwrap().cumulative(), 20);
+        assert_eq!(loaded.session().unwrap().cumulative(), 200);
     }
 }

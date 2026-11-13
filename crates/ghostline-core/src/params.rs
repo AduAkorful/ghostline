@@ -23,6 +23,25 @@ impl ChannelParams {
         self.deposit.saturating_sub(crate::SETTLEMENT_RESERVE)
     }
 
+    /// Largest cumulative total that can still settle: a multiple of [`crate::FEE_DIVISOR`] whose protocol fee and
+    /// the one micro-unit of payer change both fit in the deposit (`payout + payout / FEE_DIVISOR < deposit`).
+    pub fn max_settleable(&self) -> u64 {
+        self.max_spend() / (crate::FEE_DIVISOR + 1) * crate::FEE_DIVISOR
+    }
+
+    /// Rejects a cumulative total the channel template could not settle.
+    pub fn check_settleable(&self, amount: u64) -> Result<(), crate::VoucherError> {
+        crate::settlement_fee(amount)?;
+        let max = self.max_settleable();
+        if amount > max {
+            return Err(crate::VoucherError::ExceedsDeposit {
+                amount,
+                deposit: max,
+            });
+        }
+        Ok(())
+    }
+
     pub fn channel_id(&self) -> [u8; CHANNEL_ID_LEN] {
         let mut hasher = Blake2b256::new();
         hasher.update(CHANNEL_ID_DOMAIN);

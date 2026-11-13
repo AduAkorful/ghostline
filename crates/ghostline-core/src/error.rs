@@ -13,6 +13,7 @@ pub enum VoucherError {
     ChannelMismatch,
     Overflow,
     ZeroAmount,
+    NotFeeAligned { amount: u64, divisor: u64 },
     Malformed,
 }
 
@@ -41,6 +42,10 @@ impl fmt::Display for VoucherError {
             Self::ChannelMismatch => write!(f, "voucher channel id does not match this channel"),
             Self::Overflow => write!(f, "amount overflow"),
             Self::ZeroAmount => write!(f, "voucher amount must be greater than zero"),
+            Self::NotFeeAligned { amount, divisor } => write!(
+                f,
+                "settled amount {amount} is not a multiple of the protocol fee divisor {divisor}"
+            ),
             Self::Malformed => write!(f, "voucher encoding malformed"),
         }
     }

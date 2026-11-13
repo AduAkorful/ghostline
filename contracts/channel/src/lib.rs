@@ -7,15 +7,28 @@
 //! settle leaf as an offline-participant fallback. The condition tree is assembled client-side so the deposit stays
 //! an ordinary stealth output.
 //!
+//! Every settlement pays a protocol fee of `1 / FEE_DIVISOR` of the service payout to the treasury key held by the
+//! fee config component. The fee is checked on commitments, so its amount stays hidden from observers.
+//!
 //! [`settle`]: channel::GhostlineChannel::settle
 
 use tari_template_lib::prelude::*;
-use curve25519_dalek::{ristretto::{CompressedRistretto, RistrettoPoint}, traits::Identity};
+use curve25519_dalek::{ristretto::{CompressedRistretto, RistrettoPoint}, scalar::Scalar, traits::Identity};
 
 custom_signature_domain!(VoucherDomain, b"ghostline.channel.voucher.v1");
 custom_signature_domain!(BatchBalanceDomain, b"ghostline.channel.batch-balance.v1");
 
 const CHANNEL_ID_LEN: usize = 32;
+
+/// The fee is `service_payout / FEE_DIVISOR`. Settled payouts must therefore be multiples of this divisor: the engine
+/// range-proves outputs to 64 bits and `FEE_DIVISOR * 2^64` is far below the group order, so the point equation
+/// `FEE_DIVISOR * C_fee == C_service` only holds for the exact integer quotient.
+pub const FEE_DIVISOR: u64 = 100;
+
+/// Hex address of the `GhostlineFeeConfig` component whose treasury key receives fees, fixed when this template is
+/// built. It cannot be a client argument: a payer could point settlement at a config holding their own key. The
+/// config's owner can change the treasury without republishing this template.
+const FEE_CONFIG: &str = env!("GHOSTLINE_FEE_CONFIG");
 
 #[template]
 mod channel {
@@ -39,6 +52,7 @@ mod channel {
             channel_id: Hash32,
             payer: RistrettoPublicKeyBytes,
             payer_root: Hash32,
+            fee_config: ComponentAddress,
             ctx: SpendContext,
         ) {
             let (output_commitment, service_output_key, signature): (
@@ -81,9 +95,12 @@ mod channel {
             let outputs = ctx.outputs();
             // A payer-change output is always required. This keeps the settlement's output count fixed even when
             // the cumulative voucher is at the channel's spend limit.
-            assert!(outputs.len() == 2, "settle must have exactly two outputs");
+            assert!(outputs.len() == 3, "settle must have exactly three outputs");
+            let treasury = treasury_auth(fee_config);
+            let required_fee = decode_commitment(&output_commitment);
             let mut service_output_found = false;
             let mut payer_change_found = false;
+            let mut fee_output_found = false;
             for output in outputs {
                 assert!(
                     output.minimum_value_promise == 1,
@@ -97,6 +114,13 @@ mod channel {
                 } else if output.auth == SpendAuthorization::Script(payer_root) {
                     assert!(!payer_change_found, "duplicate payer change output");
                     payer_change_found = true;
+                } else if output.auth == treasury {
+                    assert!(!fee_output_found, "duplicate fee output");
+                    assert!(
+                        fee_matches(&output.commitment, required_fee),
+                        "fee output does not match the service payout"
+                    );
+                    fee_output_found = true;
                 } else {
                     panic!("settle contains an unauthorized output");
                 }
@@ -106,6 +130,7 @@ mod channel {
                 payer_change_found,
                 "reserved payer change output is missing"
             );
+            assert!(fee_output_found, "fee output is missing");
         }
 
         /// Spend predicate for a bounded batch close. Every channel input carries the same manifest, with its own
@@ -115,6 +140,7 @@ mod channel {
             channel_id: Hash32,
             payer: RistrettoPublicKeyBytes,
             payer_root: Hash32,
+            fee_config: ComponentAddress,
             ctx: SpendContext,
         ) {
             // Entry: channel id, input commitment, payer key, payer change root, voucher commitment, signature.
@@ -152,7 +178,8 @@ mod channel {
             assert!((batch_index as usize) < entries.len(), "batch index out of range");
 
             let outputs = ctx.outputs();
-            assert!(outputs.len() == entries.len() + 1, "batch output count mismatch");
+            assert!(outputs.len() == entries.len() + 2, "batch output count mismatch");
+            let fee_share = Scalar::from(FEE_DIVISOR).invert();
             let mut pooled_commitment = RistrettoPoint::identity();
             for (index, entry) in entries.iter().enumerate() {
                 let (
@@ -189,8 +216,12 @@ mod channel {
                     .find(|output| output.auth == SpendAuthorization::Script(*entry_payer_root))
                     .expect("batch payer change output is missing")
                     .commitment;
+                // Each channel also funds its own share of the pooled fee, `voucher / FEE_DIVISOR`. A voucher that is
+                // not a multiple of the divisor leaves a non-64-bit remainder that no range-proved change can balance.
+                let voucher_point = decode_commitment(voucher_commitment);
                 let excess_point = decode_commitment(input_commitment)
-                    - decode_commitment(voucher_commitment)
+                    - voucher_point
+                    - fee_share * voucher_point
                     - decode_commitment(&change_commitment);
                 let excess_key = RistrettoPublicKeyBytes::from_bytes(
                     &excess_point.compress().to_bytes(),
@@ -215,8 +246,11 @@ mod channel {
             assert!(own.3 == payer_root, "batch payer root mismatch");
             assert!(own.1 == current.commitment, "batch current input mismatch");
 
+            let required_fee = pooled_commitment;
             let pooled_commitment = PedersenCommitmentBytes::from_array(pooled_commitment.compress().to_bytes());
+            let treasury = treasury_auth(fee_config);
             let mut pooled_output_found = false;
+            let mut fee_output_found = false;
             let mut own_change = None;
             let mut change_roots_found: Vec<Hash32> = Vec::with_capacity(entries.len());
             for output in outputs {
@@ -228,6 +262,13 @@ mod channel {
                     assert!(!pooled_output_found, "duplicate pooled service output");
                     assert!(output.commitment == pooled_commitment, "pooled service commitment mismatch");
                     pooled_output_found = true;
+                } else if output.auth == treasury {
+                    assert!(!fee_output_found, "duplicate batch fee output");
+                    assert!(
+                        fee_matches(&output.commitment, required_fee),
+                        "batch fee output does not match the pooled payout"
+                    );
+                    fee_output_found = true;
                 } else if let SpendAuthorization::Script(root) = output.auth {
                     assert!(
                         entries.iter().any(|entry| entry.3 == root),
@@ -246,6 +287,7 @@ mod channel {
                 }
             }
             assert!(pooled_output_found, "pooled service output is missing");
+            assert!(fee_output_found, "batch fee output is missing");
             assert!(
                 change_roots_found.len() == entries.len(),
                 "batch payer change outputs are incomplete"
@@ -254,6 +296,21 @@ mod channel {
             let _ = own_change.expect("payer change output is missing");
         }
     }
+}
+
+/// The engine only lets a spend script read components named in its bound arguments, so the leaf carries the config
+/// address and this check pins it to the one the template was built against.
+fn treasury_auth(fee_config: ComponentAddress) -> SpendAuthorization {
+    let config = ComponentAddress::from_hex(FEE_CONFIG).expect("fee config address is valid hex");
+    assert!(fee_config == config, "channel names the wrong fee config");
+    // `GhostlineFeeConfig` keeps the treasury key at field index 0.
+    let (treasury, _owner): (RistrettoPublicKeyBytes, RistrettoPublicKeyBytes) =
+        ComponentManager::get(config).get_state();
+    SpendAuthorization::Key(treasury)
+}
+
+fn fee_matches(fee_commitment: &PedersenCommitmentBytes, service_payout: RistrettoPoint) -> bool {
+    Scalar::from(FEE_DIVISOR) * decode_commitment(fee_commitment) == service_payout
 }
 
 fn decode_commitment(commitment: &PedersenCommitmentBytes) -> RistrettoPoint {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Local integration harness for play.html. No browser extension, chain, or funds are used.
+// Local integration harness for the /demo page (demo/index.html). No browser extension, chain, or funds are used.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
@@ -40,9 +40,9 @@ class Element {
   getAttribute(name) { return this.attributes?.[name] ?? null; }
 }
 
-// play.js may only touch elements that play.html really has: a missing id is null in a browser,
+// play.js may only touch elements that index.html really has: a missing id is null in a browser,
 // so the harness must not invent it (QA UI audit #1 hid behind invented elements).
-const PLAY_HTML = readFileSync(new URL("./play.html", import.meta.url), "utf8");
+const PLAY_HTML = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const PLAY_IDS = new Set([...PLAY_HTML.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
 
 const INDEXER = "https://ootle-indexer-a.tari.com";

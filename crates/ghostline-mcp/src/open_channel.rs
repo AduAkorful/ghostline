@@ -98,6 +98,7 @@ fn channel_from_value(value: &serde_json::Value) -> Result<Channel, String> {
         nonce,
         channel_template: Hash32::from_hex(&record.template_hex)
             .map_err(|e| format!("template: {e}"))?,
+        fee_config: ghostline_sdk::parse_fee_config(&record.fee_config)?,
     })
     .map_err(|e| e.to_string())
 }
@@ -158,6 +159,8 @@ struct OpenRecord {
     expiry_epoch: u64,
     nonce_hex: String,
     template_hex: String,
+    #[serde(default)]
+    fee_config: String,
     opener_account: String,
     opener_wallet_url: String,
     #[serde(default)]
@@ -189,7 +192,7 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
     )?;
     let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
     let mut wallet = WalletClient::connect(&record.opener_wallet_url).map_err(|e| e.to_string())?;
-    wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+    wallet.authenticate().await.map_err(|e| e.to_string())?;
     let destination = wallet
         .default_account_address()
         .await
@@ -338,12 +341,14 @@ fn recover_deposit(
     let scan = match record.ootle_network.as_str() {
         "localnet" => OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
         "esmeralda" => OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS),
+        "mainnet" => OutputScan::mainnet(STEALTH_TARI_RESOURCE_ADDRESS),
         other => {
             return Err(format!(
-                "ootle_network: expected localnet or esmeralda, got {other}"
+                "ootle_network: expected localnet, esmeralda, or mainnet, got {other}"
             ));
         }
-    };
+    }
+    .require_channel_tag(record.network_tag)?;
     let tag = u32::try_from(utxo.tag).map_err(|_| format!("tag: {}", utxo.tag))?;
     unblind_output(&output, UtxoTag::new(tag), &secret, scan).map_err(|e| e.to_string())
 }
@@ -410,6 +415,7 @@ mod fee_tests {
             expiry_epoch: 50,
             nonce: [3u8; NONCE_LEN],
             channel_template: Hash32::from_array([9u8; 32]),
+            fee_config: tari_template_lib::types::ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let terms = PaymentTerms::new(service.to_byte_type(), 40, 60).unwrap();

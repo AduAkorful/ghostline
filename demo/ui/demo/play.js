@@ -1603,7 +1603,7 @@ configureLiveRelay();
 begin();
 refreshControls();
 void restoreLiveChannel();
-fetch("./evidence.json")
+fetch("/evidence.json")
   .then((response) => {
     if (!response.ok) throw new Error("evidence fetch failed");
     return response.json();

@@ -41,7 +41,7 @@ pub use recovery::{
     seal as seal_recovery_receipt,
 };
 
-const PRICE: u64 = 10;
+const PRICE: u64 = 100;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -926,7 +926,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 38,
             payer: payer_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([0u8; 32]),
             nonce: [5u8; NONCE_LEN],
         };
@@ -967,7 +967,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 38,
             payer: payer_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([8u8; 32]),
             nonce: [6u8; NONCE_LEN],
         };
@@ -1088,7 +1088,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 38,
             payer: payer_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([0u8; 32]),
             nonce: [4u8; NONCE_LEN],
         };
@@ -1134,7 +1134,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 38,
             payer: payer_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([0u8; 32]),
             nonce: [6u8; NONCE_LEN],
         };
@@ -1161,7 +1161,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 38,
             payer: payer_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([0u8; 32]),
             nonce: [5u8; NONCE_LEN],
         };
@@ -1267,7 +1267,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
@@ -1308,7 +1308,7 @@ mod tests {
         .unwrap();
         let mut agent = AgentPayer::new(
             PaymentSession::new(params),
-            Policy::new(100, PRICE),
+            Policy::new(1_000, PRICE),
             service,
         );
         let voucher = agent.voucher_header(&quote, &payer_secret).unwrap();
@@ -1374,7 +1374,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([8u8; 32]),
             nonce: [4u8; NONCE_LEN],
         };
@@ -1411,7 +1411,7 @@ mod tests {
         .unwrap();
         let mut agent = AgentPayer::new(
             PaymentSession::new(params),
-            Policy::new(100, PRICE),
+            Policy::new(1_000, PRICE),
             service,
         );
         let voucher = agent.voucher_header(&quote, &payer_secret).unwrap();
@@ -1458,7 +1458,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer,
-            deposit: 10_001,
+            deposit: 101_001,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
@@ -1468,12 +1468,12 @@ mod tests {
         let app = router(state);
         let mut agent = AgentPayer::new(
             PaymentSession::new(params),
-            Policy::new(10_000, PRICE),
+            Policy::new(100_000, PRICE),
             service,
         );
         let started = Instant::now();
 
-        for (index, expected_total) in (PRICE..=10_000).step_by(PRICE as usize).enumerate() {
+        for (index, expected_total) in (PRICE..=100_000).step_by(PRICE as usize).enumerate() {
             let quote_response = app
                 .clone()
                 .oneshot(

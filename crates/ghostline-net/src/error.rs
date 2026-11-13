@@ -20,4 +20,6 @@ pub enum NetError {
     Decode { path: String, details: String },
     #[error("wallet daemon RPC {method} failed: {message}")]
     WalletRpc { method: String, message: String },
+    #[error("wallet daemon login failed: {0}")]
+    WalletAuth(String),
 }

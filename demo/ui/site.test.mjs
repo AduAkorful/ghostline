@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { describeRuns, explorerStatus, formatRunDate } from "./evidence-view.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
-const PAGES = ["index.html", "play.html", "evidence.html", "docs/install.html", "docs/quickstart.html", "docs/interfaces.html"];
+const PAGES = ["index.html", "demo/index.html", "evidence.html", "docs/install.html", "docs/quickstart.html", "docs/interfaces.html"];
 const html = Object.fromEntries(PAGES.map((page) => [page, read(page)]));
 const evidence = JSON.parse(read("evidence.json"));
 
@@ -93,7 +93,7 @@ test("every transaction id in the evidence has a checked explorer status", () =>
 });
 
 test("pages link to the readable evidence view, which links back to the site", () => {
-  assert.match(html["play.html"], /href="evidence\.html"/);
+  assert.match(html["demo/index.html"], /href="\/evidence\.html"/);
   assert.match(html["index.html"], /href="evidence\.html"/);
   assert.match(html["evidence.html"], /href="index\.html#evidence"/);
   assert.match(html["evidence.html"], /href="evidence\.json"/);
@@ -103,20 +103,20 @@ test("the install guide states that macOS and Windows are not supported", () => 
   assert.match(html["docs/install.html"], /macOS and Windows are not supported/);
 });
 
-test("play.js only looks up element ids that play.html defines", () => {
-  const ids = new Set([...html["play.html"].matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
-  const used = new Set([...read("play.js").matchAll(/byId\("([^"]+)"\)/g)].map((match) => match[1]));
-  for (const id of used) assert.ok(ids.has(id), `play.html is missing #${id}`);
-  assert.doesNotMatch(read("play.js"), /querySelector\("\.(fine-print|result-label)"\)/, "result fields are addressed by id, not by the first matching class");
+test("demo/play.js only looks up element ids that demo/index.html defines", () => {
+  const ids = new Set([...html["demo/index.html"].matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
+  const used = new Set([...read("demo/play.js").matchAll(/byId\("([^"]+)"\)/g)].map((match) => match[1]));
+  for (const id of used) assert.ok(ids.has(id), `demo/index.html is missing #${id}`);
+  assert.doesNotMatch(read("demo/play.js"), /querySelector\("\.(fine-print|result-label)"\)/, "result fields are addressed by id, not by the first matching class");
 });
 
 test("the play page has the observer view, overspend control and relay banner", () => {
-  const play = html["play.html"];
+  const play = html["demo/index.html"];
   for (const id of ["observer-view", "observer-rows", "observer-leaks", "overspend", "relay-banner", "banner-simulate"]) {
-    assert.match(play, new RegExp(`id="${id}"`), `play.html has #${id}`);
+    assert.match(play, new RegExp(`id="${id}"`), `demo/index.html has #${id}`);
   }
   // Fees and timing are public; the panel must never label them hidden.
-  assert.match(read("play.js"), /\["Fees, timing, settle branch, two-output shape", live \? "Visible/);
+  assert.match(read("demo/play.js"), /\["Fees, timing, settle branch, two-output shape", live \? "Visible/);
 });
 
 test("the current record is only the 7 Nov template publish", () => {
@@ -130,24 +130,24 @@ test("the current record is only the 7 Nov template publish", () => {
 });
 
 test("the public UI does not name the previous template or its transactions", () => {
-  const sources = ["index.html", "play.html", "evidence.html", "evidence.json", "play.js", "main.js", "evidence-view.js", "README.md"];
+  const sources = ["index.html", "demo/index.html", "evidence.html", "evidence.json", "demo/play.js", "main.js", "evidence-view.js", "README.md"];
   const stale = /a4309216|d179cf15|44b9e3c5|be4bd7cc|68979b76|7d29cb59|previous template|2 Nov 2026|3 Nov 2026/;
   for (const source of sources) assert.doesNotMatch(read(source), stale, source);
 });
 
 test("the live instructions name Sapient 0.7.1, the fee ceiling, and the approval popup", () => {
   assert.match(html["index.html"], /Sapient 0\.7\.1 or newer/);
-  assert.match(html["play.html"], /Max fee of 0\.02 TARI/);
-  assert.match(html["play.html"], /private-view prompt appears only when/);
-  assert.match(read("play.js"), /Scroll the Sapient popup if Approve & Sign is below the fold/);
-  assert.match(read("play.js"), /balance may stay blurred/);
-  assert.match(read("play.js"), /Max fee 0\.02 TARI is a ceiling/);
-  assert.match(read("play.js"), /usually finds the deposit in about a minute/);
+  assert.match(html["demo/index.html"], /Max fee of 0\.02 TARI/);
+  assert.match(html["demo/index.html"], /private-view prompt appears only when/);
+  assert.match(read("demo/play.js"), /Scroll the Sapient popup if Approve & Sign is below the fold/);
+  assert.match(read("demo/play.js"), /balance may stay blurred/);
+  assert.match(read("demo/play.js"), /Max fee 0\.02 TARI is a ceiling/);
+  assert.match(read("demo/play.js"), /usually finds the deposit in about a minute/);
 });
 
 test("the custodial relay is described the same way on the play page and in the Sapient notes", () => {
   const phrase = "on-chain observers see neither the deposit nor the split";
-  assert.ok(html["play.html"].includes(phrase));
+  assert.ok(html["demo/index.html"].includes(phrase));
   assert.ok(readFileSync(new URL("../../docs/sapient.md", import.meta.url), "utf8").includes(phrase));
   for (const page of PAGES) assert.doesNotMatch(html[page], /never holds (your )?funds|relay never sees/i, `${page} overstates the relay`);
 });
@@ -158,3 +158,28 @@ test("any demo video the landing page embeds is in the published files", () => {
   }
 });
 
+
+test("the contest demo lives at /demo/ and the old play.html link redirects there", () => {
+  const redirect = read("play.html");
+  assert.match(redirect, /http-equiv="refresh" content="0; url=\/demo\/"/);
+  assert.match(redirect, /location\.replace\("\/demo\/"/);
+  for (const page of PAGES) assert.doesNotMatch(html[page], /href="(\.\.\/)?play\.html"/, `${page} still links to play.html`);
+  assert.match(html["index.html"], /href="demo\/"/);
+});
+
+test("the demo page uses root paths so /demo and /demo/ both load its assets", () => {
+  const demo = html["demo/index.html"];
+  for (const [, attr, path] of demo.matchAll(/\b(href|src)="([^"]+)"/g)) {
+    if (/^(https?:|#|mailto:)/.test(path)) continue;
+    assert.match(path, /^\//, `demo/index.html ${attr}="${path}" must be root-relative`);
+  }
+  assert.match(read("demo/play.css"), /@import url\("\.\.\/styles\.css"\)/);
+  assert.match(read("demo/play.js"), /fetch\("\/evidence\.json"\)/);
+});
+
+test("the demo page says it is the Esmeralda contest demo and will be retired", () => {
+  const note = /<p id="retiring-note"[^>]*>([\s\S]*?)<\/p>/.exec(html["demo/index.html"])?.[1] ?? "";
+  assert.match(note, /Esmeralda testnet demo/);
+  assert.match(note, /custodial test relay/);
+  assert.match(note, /retired after the contest winners are announced/);
+});

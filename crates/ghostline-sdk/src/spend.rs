@@ -2,7 +2,7 @@
 
 #[cfg(feature = "trusted-local-batch-prototype")]
 use ghostline_core::{BATCH_BALANCE_DOMAIN, sign_with_nonce};
-use ghostline_core::{SignedVoucher, VoucherError};
+use ghostline_core::{FEE_DIVISOR, SignedVoucher, VoucherError, settlement_fee};
 use ootle_byte_type::ToByteType;
 use ootle_network::Network;
 use tari_crypto::{
@@ -52,6 +52,26 @@ impl OutputScan {
             network: Network::Esmeralda,
             resource,
         }
+    }
+
+    /// Tags for mainnet (`Network::MainNet` / `0x00`) and the given resource.
+    pub fn mainnet(resource: ResourceAddress) -> Self {
+        Self {
+            network: Network::MainNet,
+            resource,
+        }
+    }
+
+    /// The voucher `network_tag` is the same byte the sealed transaction uses.
+    pub fn require_channel_tag(self, network_tag: u8) -> Result<Self, String> {
+        let expected = self.network.as_byte();
+        if network_tag == expected {
+            return Ok(self);
+        }
+        Err(format!(
+            "network_tag {network_tag} does not match ootle network {} (byte {expected})",
+            self.network.as_key_str()
+        ))
     }
 }
 
@@ -155,15 +175,19 @@ fn fund_open_with_leaves(
     Ok(OpenStatement { statement, deposit })
 }
 
-/// Spends the channel UTXO with a voucher: service receives `amount`, remainder returns under `payer_root`.
+/// Spends the channel UTXO with a voucher: service receives `amount`, the treasury receives the protocol fee
+/// `amount / FEE_DIVISOR`, and the remainder returns under `payer_root`.
 ///
-/// Amount and mask stay in the off-chain voucher. Public outputs use a one-unit minimum-value promise. One micro-unit
-/// is reserved for payer change so the settlement always has the same public output count.
+/// `treasury` must be the key currently held by the fee config component the channel template pins; any other key
+/// fails the template check. Amount and mask stay in the off-chain voucher. Public outputs use a one-unit
+/// minimum-value promise. One micro-unit is reserved for payer change so the settlement always has the same public
+/// output count.
 pub fn settle(
     channel: &Channel,
     deposit: MaskAndValue,
     voucher: &SignedVoucher,
     service_output_key: RistrettoPublicKeyBytes,
+    treasury: RistrettoPublicKeyBytes,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     settle_with_leaves(
@@ -173,6 +197,7 @@ pub fn settle(
         deposit,
         voucher,
         service_output_key,
+        treasury,
         scan,
     )
 }
@@ -186,6 +211,7 @@ pub fn settle_batched_individually(
     deposit: MaskAndValue,
     voucher: &SignedVoucher,
     service_output_key: RistrettoPublicKeyBytes,
+    treasury: RistrettoPublicKeyBytes,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     settle_with_leaves(
@@ -195,10 +221,12 @@ pub fn settle_batched_individually(
         deposit,
         voucher,
         service_output_key,
+        treasury,
         scan,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn settle_with_leaves(
     channel: &Channel,
     leaves: Vec<tari_template_lib::types::stealth::SpendCondition>,
@@ -206,6 +234,7 @@ fn settle_with_leaves(
     deposit: MaskAndValue,
     voucher: &SignedVoucher,
     service_output_key: RistrettoPublicKeyBytes,
+    treasury: RistrettoPublicKeyBytes,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     voucher.verify(channel.params())?;
@@ -219,19 +248,90 @@ fn settle_with_leaves(
         });
     }
 
-    let remainder = channel.params().deposit.checked_sub(voucher.amount).ok_or(
-        VoucherError::ExceedsDeposit {
-            amount: voucher.amount,
-            deposit: channel.params().deposit,
-        },
-    )?;
+    let fee = settlement_fee(voucher.amount)?;
+    let fee_output = FeeOutput {
+        amount: fee,
+        mask: fee_mask(&voucher.mask),
+        auth: Some(SpendAuthorization::Key(treasury)),
+        recipient: treasury,
+    };
+    settle_statement(
+        channel,
+        &leaves,
+        settle_leaf,
+        deposit,
+        voucher,
+        service_output_key,
+        fee_output,
+        scan,
+    )
+}
+
+struct FeeOutput {
+    amount: u64,
+    mask: RistrettoSecretKey,
+    /// `None` omits the fee output.
+    auth: Option<SpendAuthorization>,
+    recipient: RistrettoPublicKeyBytes,
+}
+
+/// A deliberately malformed fee output for template rejection tests.
+#[cfg(feature = "adversarial-test-builders")]
+pub struct FeeOverride {
+    pub amount: u64,
+    /// `None` uses the honest mask derived from the voucher.
+    pub mask: Option<RistrettoSecretKey>,
+    /// `None` omits the fee output.
+    pub auth: Option<SpendAuthorization>,
+    pub recipient: RistrettoPublicKeyBytes,
+}
+
+/// Builds a settlement with a caller-chosen fee output and no fee validation. Test use only.
+#[cfg(feature = "adversarial-test-builders")]
+pub fn settle_with_fee_override(
+    channel: &Channel,
+    deposit: MaskAndValue,
+    voucher: &SignedVoucher,
+    service_output_key: RistrettoPublicKeyBytes,
+    fee: FeeOverride,
+    scan: OutputScan,
+) -> Result<StealthTransferStatement, SdkError> {
+    voucher.verify(channel.params())?;
+    let fee_output = FeeOutput {
+        amount: fee.amount,
+        mask: fee.mask.unwrap_or_else(|| fee_mask(&voucher.mask)),
+        auth: fee.auth,
+        recipient: fee.recipient,
+    };
+    settle_statement(
+        channel,
+        &channel.leaves_vec(),
+        channel.settle_leaf(),
+        deposit,
+        voucher,
+        service_output_key,
+        fee_output,
+        scan,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn settle_statement(
+    channel: &Channel,
+    leaves: &[tari_template_lib::types::stealth::SpendCondition],
+    settle_leaf: &tari_template_lib::types::stealth::SpendCondition,
+    deposit: MaskAndValue,
+    voucher: &SignedVoucher,
+    service_output_key: RistrettoPublicKeyBytes,
+    fee: FeeOutput,
+    scan: OutputScan,
+) -> Result<StealthTransferStatement, SdkError> {
+    let fee_paid = if fee.auth.is_some() { fee.amount } else { 0 };
+    let remainder = payer_remainder(channel.params().deposit, voucher.amount, fee_paid)?;
 
     let (witness, _) =
-        stealth::script_path_witness_with_data(&leaves, settle_leaf, voucher.witness_data())?;
+        stealth::script_path_witness_with_data(leaves, settle_leaf, voucher.witness_data())?;
 
-    if remainder == 0 {
-        return Err(SdkError::DepositTooSmall);
-    }
     let mut outputs = vec![output(
         remainder,
         SpendAuthorization::Script(channel.params().payer_root),
@@ -245,6 +345,15 @@ fn settle_with_leaves(
         &service_output_key,
         scan,
     )?);
+    if let Some(auth) = fee.auth {
+        outputs.push(output_with_mask(
+            fee.amount,
+            fee.mask,
+            auth,
+            &fee.recipient,
+            scan,
+        )?);
+    }
 
     channel_close_statement(deposit, witness, &outputs)
 }
@@ -262,6 +371,7 @@ fn settle_with_leaves(
 pub fn settle_batch(
     channels: &[(&Channel, MaskAndValue, &SignedVoucher)],
     service_output_key: RistrettoPublicKeyBytes,
+    treasury: RistrettoPublicKeyBytes,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     if !(2..=12).contains(&channels.len()) {
@@ -271,7 +381,7 @@ pub fn settle_batch(
     let mut sum_value = 0u64;
     let mut sum_mask = RistrettoSecretKey::default();
     let mut input_mask = RistrettoSecretKey::default();
-    let mut outputs = Vec::with_capacity(channels.len() + 1);
+    let mut outputs = Vec::with_capacity(channels.len() + 2);
 
     for (channel, deposit, voucher) in channels {
         voucher.verify(channel.params())?;
@@ -284,15 +394,8 @@ pub fn settle_batch(
                 actual: deposit.value,
             });
         }
-        let remainder = channel.params().deposit.checked_sub(voucher.amount).ok_or(
-            ghostline_core::VoucherError::ExceedsDeposit {
-                amount: voucher.amount,
-                deposit: channel.params().deposit,
-            },
-        )?;
-        if remainder == 0 {
-            return Err(SdkError::DepositTooSmall);
-        }
+        let fee = settlement_fee(voucher.amount)?;
+        let remainder = payer_remainder(channel.params().deposit, voucher.amount, fee)?;
         sum_value = sum_value
             .checked_add(voucher.amount)
             .ok_or(SdkError::Overflow)?;
@@ -322,12 +425,20 @@ pub fn settle_batch(
 
     let pooled = output_with_mask(
         sum_value,
-        sum_mask,
+        sum_mask.clone(),
         SpendAuthorization::Key(service_output_key),
         &service_output_key,
         scan,
     )?;
     outputs.insert(0, pooled);
+    // Each voucher is a multiple of the divisor, so the pooled fee is the exact sum of per-channel fees.
+    let pooled_fee = output_with_mask(
+        sum_value / FEE_DIVISOR,
+        fee_mask(&sum_mask),
+        SpendAuthorization::Key(treasury),
+        &treasury,
+        scan,
+    )?;
 
     let mut entries = Vec::with_capacity(channels.len());
     let mut aggregate_excess = RistrettoSecretKey::default();
@@ -339,7 +450,8 @@ pub fn settle_batch(
                 .to_byte_type();
         let input_commitment = deposit.to_commitment().to_byte_type();
         let channel_id = Hash32::from_array(voucher.channel_id);
-        let mask_excess = &deposit.mask - &voucher.mask - &change.witness.mask;
+        let mask_excess =
+            &deposit.mask - &voucher.mask - &fee_mask(&voucher.mask) - &change.witness.mask;
         if mask_excess == RistrettoSecretKey::default() {
             return Err(SdkError::DegenerateBatchProof);
         }
@@ -375,6 +487,7 @@ pub fn settle_batch(
     if aggregate_excess == RistrettoSecretKey::default() {
         return Err(SdkError::DegenerateBatchProof);
     }
+    outputs.push(pooled_fee);
 
     let mut input_witnesses = Vec::with_capacity(channels.len());
     for (index, (channel, deposit, _voucher)) in channels.iter().enumerate() {
@@ -534,6 +647,29 @@ fn channel_close_statement(
     })
 }
 
+/// Payer change after the service payout and protocol fee. At least one micro-unit must remain so every settlement
+/// has the same output count.
+fn payer_remainder(deposit: u64, payout: u64, fee: u64) -> Result<u64, SdkError> {
+    let spent = payout.checked_add(fee).ok_or(SdkError::Overflow)?;
+    match deposit.checked_sub(spent) {
+        Some(remainder) if remainder > 0 => Ok(remainder),
+        _ => Err(VoucherError::ExceedsDeposit {
+            amount: spent,
+            deposit: deposit.saturating_sub(ghostline_core::SETTLEMENT_RESERVE),
+        }
+        .into()),
+    }
+}
+
+/// The template checks `FEE_DIVISOR * C_fee == C_service`, which needs the fee mask to be the service mask divided by
+/// the divisor in the scalar field.
+fn fee_mask(service_mask: &RistrettoSecretKey) -> RistrettoSecretKey {
+    let inverse = RistrettoSecretKey::from(FEE_DIVISOR)
+        .invert()
+        .expect("fee divisor is a non-zero scalar");
+    service_mask * &inverse
+}
+
 fn output(
     amount: u64,
     auth: SpendAuthorization,
@@ -585,11 +721,15 @@ mod tests {
     use ghostline_core::{NONCE_LEN, SignedVoucher};
     use ootle_byte_type::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-    use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+    use tari_template_lib::types::{ComponentAddress, Hash32};
 
     fn scan() -> OutputScan {
         OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS)
+    }
+
+    fn treasury() -> RistrettoPublicKeyBytes {
+        create_key_pair_from_seed(202).1.to_byte_type()
     }
 
     fn channel_and_keys() -> (RistrettoSecretKey, Channel, RistrettoPublicKeyBytes) {
@@ -601,10 +741,11 @@ mod tests {
             network_tag: 1,
             payer,
             service,
-            deposit: 100,
+            deposit: 1_000,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         (payer_secret, channel, service)
@@ -620,15 +761,45 @@ mod tests {
     #[test]
     fn settle_outputs_use_non_disclosing_promises() {
         let (secret, channel, service) = channel_and_keys();
-        let voucher = SignedVoucher::sign(&secret, channel.params(), 30, service).unwrap();
-        let statement = settle(&channel, funded(100), &voucher, service, scan()).unwrap();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 300, service).unwrap();
+        let statement = settle(
+            &channel,
+            funded(1_000),
+            &voucher,
+            service,
+            treasury(),
+            scan(),
+        )
+        .unwrap();
         let promises: Vec<u64> = statement
             .outputs_statement
             .outputs
             .iter()
             .map(|o| o.output.minimum_value_promise)
             .collect();
-        assert_eq!(promises, vec![1, 1]);
+        assert_eq!(promises, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn settle_fee_output_opens_to_the_quotient_and_balances() {
+        let (secret, channel, service) = channel_and_keys();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 300, service).unwrap();
+        let statement = settle(
+            &channel,
+            funded(1_000),
+            &voucher,
+            service,
+            treasury(),
+            scan(),
+        )
+        .unwrap();
+        let fee = &statement.outputs_statement.outputs[2];
+        assert_eq!(fee.auth, SpendAuthorization::Key(treasury()));
+        let expected = MaskAndValue::new(3, fee_mask(&voucher.mask))
+            .to_commitment()
+            .to_byte_type();
+        assert_eq!(fee.output.commitment, expected);
+        tari_engine_types::stealth::validate_transfer(&statement, None).unwrap();
     }
 
     #[cfg(feature = "trusted-local-batch-prototype")]
@@ -646,15 +817,16 @@ mod tests {
                 network_tag: 1,
                 payer: payer_public.to_byte_type(),
                 service: service_public.to_byte_type(),
-                deposit: 100,
+                deposit: 1_000,
                 expiry_epoch: u64::MAX,
                 nonce: [index; NONCE_LEN],
                 channel_template: Hash32::from_array([7u8; 32]),
+                fee_config: ComponentAddress::from_array([8u8; 32]),
             })
             .unwrap();
-            let deposit = funded(100);
+            let deposit = funded(1_000);
             let voucher =
-                SignedVoucher::sign(&payer, channel.params(), 30, payout_public.to_byte_type())
+                SignedVoucher::sign(&payer, channel.params(), 300, payout_public.to_byte_type())
                     .unwrap();
             channels.push(channel);
             deposits.push(deposit);
@@ -667,9 +839,15 @@ mod tests {
             .zip(vouchers.iter())
             .map(|((channel, deposit), voucher)| (channel, deposit, voucher))
             .collect();
-        let statement = settle_batch(&participants, payout_public.to_byte_type(), scan()).unwrap();
+        let statement = settle_batch(
+            &participants,
+            payout_public.to_byte_type(),
+            treasury(),
+            scan(),
+        )
+        .unwrap();
         assert_eq!(statement.inputs_statement.inputs.len(), 12);
-        assert_eq!(statement.outputs_statement.outputs.len(), 13);
+        assert_eq!(statement.outputs_statement.outputs.len(), 14);
         for input in &statement.inputs_statement.inputs {
             let (_, _, data) = input.witness.as_script_path().unwrap();
             assert!(data.len() <= 4096);
@@ -679,20 +857,48 @@ mod tests {
     #[test]
     fn maximum_spend_keeps_reserved_payer_change_output() {
         let (secret, channel, service) = channel_and_keys();
-        let voucher = SignedVoucher::sign(&secret, channel.params(), 99, service).unwrap();
-        let statement = settle(&channel, funded(100), &voucher, service, scan()).unwrap();
-        assert_eq!(statement.outputs_statement.outputs.len(), 2);
+        // 900 + 9 fee leaves 91; the next aligned payout, 1_000, exceeds the deposit.
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 900, service).unwrap();
+        let statement = settle(
+            &channel,
+            funded(1_000),
+            &voucher,
+            service,
+            treasury(),
+            scan(),
+        )
+        .unwrap();
+        assert_eq!(statement.outputs_statement.outputs.len(), 3);
+    }
+
+    #[test]
+    fn settle_refuses_a_payout_whose_fee_consumes_the_reserve() {
+        let (secret, channel, service) = channel_and_keys();
+        let channel = Channel::open(ChannelSpec {
+            deposit: 101,
+            ..channel.spec().clone()
+        })
+        .unwrap();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 100, service).unwrap();
+        let err = settle(&channel, funded(101), &voucher, service, treasury(), scan()).unwrap_err();
+        assert!(matches!(
+            err,
+            SdkError::Voucher(VoucherError::ExceedsDeposit {
+                amount: 101,
+                deposit: 100
+            })
+        ));
     }
 
     #[test]
     fn voucher_cannot_spend_the_reserved_micro_unit() {
         let (secret, channel, service) = channel_and_keys();
-        let err = SignedVoucher::sign(&secret, channel.params(), 100, service).unwrap_err();
+        let err = SignedVoucher::sign(&secret, channel.params(), 1_000, service).unwrap_err();
         assert!(matches!(
             err,
             ghostline_core::VoucherError::ExceedsDeposit {
-                amount: 100,
-                deposit: 99
+                amount: 1_000,
+                deposit: 999
             }
         ));
     }
@@ -707,7 +913,7 @@ mod tests {
     #[test]
     fn refund_returns_the_deposit() {
         let (_secret, channel, _service) = channel_and_keys();
-        let statement = refund(&channel, funded(100), channel.spec().payer, scan()).unwrap();
+        let statement = refund(&channel, funded(1_000), channel.spec().payer, scan()).unwrap();
         assert_eq!(statement.outputs_statement.outputs.len(), 1);
         assert_eq!(
             statement.outputs_statement.outputs[0]
@@ -720,13 +926,13 @@ mod tests {
     #[test]
     fn settle_rejects_wrong_utxo_value() {
         let (secret, channel, service) = channel_and_keys();
-        let voucher = SignedVoucher::sign(&secret, channel.params(), 30, service).unwrap();
-        let err = settle(&channel, funded(99), &voucher, service, scan()).unwrap_err();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 300, service).unwrap();
+        let err = settle(&channel, funded(999), &voucher, service, treasury(), scan()).unwrap_err();
         assert!(matches!(
             err,
             SdkError::DepositMismatch {
-                expected: 100,
-                actual: 99
+                expected: 1_000,
+                actual: 999
             }
         ));
     }
@@ -735,9 +941,16 @@ mod tests {
     fn settle_rejects_invalid_voucher_before_building_transaction() {
         let (_secret, channel, service) = channel_and_keys();
         let (wrong_secret, _) = create_key_pair_from_seed(12);
-        let voucher = SignedVoucher::sign(&wrong_secret, channel.params(), 30, service).unwrap();
+        let voucher = SignedVoucher::sign(&wrong_secret, channel.params(), 300, service).unwrap();
         assert!(matches!(
-            settle(&channel, funded(100), &voucher, service, scan()),
+            settle(
+                &channel,
+                funded(1_000),
+                &voucher,
+                service,
+                treasury(),
+                scan()
+            ),
             Err(SdkError::Voucher(
                 ghostline_core::VoucherError::InvalidSignature
             ))
@@ -747,7 +960,7 @@ mod tests {
     #[test]
     fn open_commits_the_channel_tree() {
         let (_secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
+        let opened = fund_open(&channel, [funded(1_000)], channel.spec().payer, scan()).unwrap();
         assert_eq!(opened.statement.outputs_statement.outputs.len(), 1);
         assert_eq!(
             opened.statement.outputs_statement.outputs[0]
@@ -761,13 +974,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opened.statement.outputs_statement.outputs[0].auth, expected);
-        assert_eq!(opened.deposit.value, 100);
+        assert_eq!(opened.deposit.value, 1_000);
     }
 
     #[test]
     fn open_outputs_use_non_disclosing_promises() {
         let (_secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(130)], channel.spec().payer, scan()).unwrap();
+        let opened = fund_open(&channel, [funded(1_030)], channel.spec().payer, scan()).unwrap();
         let promises: Vec<u64> = opened
             .statement
             .outputs_statement
@@ -783,7 +996,7 @@ mod tests {
         let (_secret, channel, _service) = channel_and_keys();
         let err = fund_open(
             &channel,
-            [funded(40), funded(50)],
+            [funded(400), funded(500)],
             channel.spec().payer,
             scan(),
         )
@@ -791,8 +1004,8 @@ mod tests {
         assert!(matches!(
             err,
             SdkError::InsufficientFunds {
-                have: 90,
-                need: 100
+                have: 900,
+                need: 1_000
             }
         ));
     }
@@ -800,14 +1013,14 @@ mod tests {
     #[test]
     fn open_statement_validates() {
         let (_secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
+        let opened = fund_open(&channel, [funded(1_000)], channel.spec().payer, scan()).unwrap();
         tari_engine_types::stealth::validate_transfer(&opened.statement, None).unwrap();
     }
 
     #[test]
     fn payer_wallet_recomputes_the_deposit_tag() {
         let (secret, channel, _service) = channel_and_keys();
-        let opened = fund_open(&channel, [funded(100)], channel.spec().payer, scan()).unwrap();
+        let opened = fund_open(&channel, [funded(1_000)], channel.spec().payer, scan()).unwrap();
         let out = &opened.statement.outputs_statement.outputs[0];
         let nonce =
             RistrettoPublicKey::from_canonical_bytes(out.output.sender_public_nonce.as_bytes())

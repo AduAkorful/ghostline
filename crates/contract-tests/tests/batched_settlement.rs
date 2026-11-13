@@ -11,7 +11,7 @@ use ghostline_sdk::{
     unblind_output,
 };
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT};
+use support::{DEPOSIT, templates};
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
@@ -37,6 +37,7 @@ type BatchWitnessEntry = (
 
 struct BatchFixture {
     test: TemplateTest,
+    treasury: RistrettoPublicKeyBytes,
     resource: ResourceAddress,
     relayer: RistrettoSecretKey,
     payout: RistrettoSecretKey,
@@ -47,10 +48,7 @@ struct BatchFixture {
 
 impl BatchFixture {
     fn new() -> Self {
-        let mut test = TemplateTest::new(
-            env!("CARGO_MANIFEST_DIR"),
-            ["templates/faucet", "../../contracts/channel"],
-        );
+        let (mut test, fee) = templates();
         test.set_virtual_substate(
             VirtualSubstateId::CurrentEpoch,
             VirtualSubstate::CurrentEpoch(1),
@@ -60,7 +58,7 @@ impl BatchFixture {
         let (_service, service_public) = create_key_pair_from_seed(103);
         let (relayer, _) = create_key_pair_from_seed(105);
         let (payout, payout_public) = create_key_pair_from_seed(104);
-        let template = test.get_template_address(CHANNEL);
+        let template = fee.channel_template;
         let make_channel = |payer: &RistrettoPublicKey| {
             Channel::open(ChannelSpec {
                 network_tag: support::LOCALNET_TAG,
@@ -70,6 +68,7 @@ impl BatchFixture {
                 expiry_epoch: 100,
                 nonce: [payer.as_bytes()[0]; NONCE_LEN],
                 channel_template: template,
+                fee_config: fee.config,
             })
             .unwrap()
         };
@@ -93,11 +92,12 @@ impl BatchFixture {
         ];
         let payout_public = payout_public.to_byte_type();
         let vouchers = [
-            SignedVoucher::sign(&payer1, channels[0].params(), 30, payout_public).unwrap(),
-            SignedVoucher::sign(&payer2, channels[1].params(), 20, payout_public).unwrap(),
+            SignedVoucher::sign(&payer1, channels[0].params(), 300, payout_public).unwrap(),
+            SignedVoucher::sign(&payer2, channels[1].params(), 200, payout_public).unwrap(),
         ];
         Self {
             test,
+            treasury: fee.treasury,
             resource,
             relayer,
             payout,
@@ -122,6 +122,7 @@ impl BatchFixture {
                 ),
             ],
             self.vouchers[0].service_output_key,
+            self.treasury,
             OutputScan::localnet(self.resource),
         )
         .unwrap()
@@ -145,7 +146,7 @@ fn two_channels_settle_to_one_pooled_confidential_output_and_rejects_tampering()
     let mut f = BatchFixture::new();
     let statement = f.statement();
     assert_eq!(statement.inputs_statement.inputs.len(), 2);
-    assert_eq!(statement.outputs_statement.outputs.len(), 3);
+    assert_eq!(statement.outputs_statement.outputs.len(), 4);
     let pool = &statement.outputs_statement.outputs[0];
     assert_eq!(
         pool.auth,
@@ -163,7 +164,23 @@ fn two_channels_settle_to_one_pooled_confidential_output_and_rejects_tampering()
         )
         .unwrap()
         .value,
-        50
+        500
+    );
+    let pooled_fee = &statement.outputs_statement.outputs[3];
+    assert_eq!(
+        pooled_fee.auth,
+        tari_template_lib::types::stealth::SpendAuthorization::Key(f.treasury)
+    );
+    assert_eq!(
+        unblind_output(
+            &pooled_fee.output,
+            pooled_fee.tag,
+            &create_key_pair_from_seed(202).0,
+            OutputScan::localnet(f.resource)
+        )
+        .unwrap()
+        .value,
+        5
     );
 
     let mut wrong_index = statement.clone();
@@ -193,6 +210,19 @@ fn two_channels_settle_to_one_pooled_confidential_output_and_rejects_tampering()
     cross_subsidy.outputs_statement.outputs[2].auth = first_root;
     reject(&mut f, cross_subsidy, "invalid per-channel balance proof");
 
+    let mut wrong_fee = statement.clone();
+    wrong_fee.outputs_statement.outputs[3].output.commitment =
+        wrong_fee.outputs_statement.outputs[1].output.commitment;
+    reject(
+        &mut f,
+        wrong_fee,
+        "batch fee output does not match the pooled payout",
+    );
+
+    let mut missing_fee = statement.clone();
+    missing_fee.outputs_statement.outputs.pop();
+    reject(&mut f, missing_fee, "batch output count mismatch");
+
     let tx = Transaction::builder_localnet(Epoch(2))
         .stealth_transfer(f.resource, statement)
         .finish()
@@ -209,12 +239,13 @@ fn batch_enabled_channel_can_settle_individually_as_an_offline_participant_fallb
         f.deposits[0].clone(),
         &f.vouchers[0],
         service_key,
+        f.treasury,
         OutputScan::localnet(f.resource),
     )
     .unwrap();
 
     assert_eq!(statement.inputs_statement.inputs.len(), 1);
-    assert_eq!(statement.outputs_statement.outputs.len(), 2);
+    assert_eq!(statement.outputs_statement.outputs.len(), 3);
     let service_output = statement
         .outputs_statement
         .outputs

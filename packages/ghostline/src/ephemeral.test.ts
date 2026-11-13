@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createEphemeralChannelKeys } from "../../../demo/ui/ephemeral-keys.js";
+import { createEphemeralChannelKeys } from "../../../demo/ui/demo/ephemeral-keys.js";
 import { publicKeyFromSecret, scalarFromWide } from "./voucher.ts";
 
 test("separate browser channels receive fresh payer and settlement-output keys", () => {

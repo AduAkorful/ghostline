@@ -1,6 +1,6 @@
 # Sapient integration spike
 
-**Checked:** 2026-10-22 against Tari's [integration reference](https://universe.tari.mw/integration/llms-full.txt) and the deployed demo UI. The browser simulation stays local by default. `play.html` loads Tari's connector script with `defer` when the page opens; the simulation does not call the wallet unless the user starts live mode.
+**Checked:** 2026-10-22 against Tari's [integration reference](https://universe.tari.mw/integration/llms-full.txt) and the deployed demo UI. The browser simulation stays local by default. The demo page (`demo/ui/demo/index.html`, served at `/demo/`) loads Tari's connector script with `defer` when the page opens; the simulation does not call the wallet unless the user starts live mode.
 
 ## Verified wallet surface
 

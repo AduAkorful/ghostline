@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { numberToBytesLE } from "@noble/curves/utils.js";
-import { SimulatedPaywall, PRICE } from "../../../demo/ui/sim-service.js";
+import { SimulatedPaywall, PRICE } from "../../../demo/ui/demo/sim-service.js";
 import { scalarFromWide, signVoucher, publicKeyFromSecret } from "./voucher.ts";
 import type { ChannelParams } from "./channel.ts";
 

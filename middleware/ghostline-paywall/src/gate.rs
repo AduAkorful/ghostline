@@ -88,7 +88,7 @@ mod tests {
         let params = ghostline_core::ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
@@ -104,7 +104,7 @@ mod tests {
     fn missing_voucher_is_payment_required() {
         let (_payer, mut ledger, _secret, _service) = setup();
         assert_eq!(
-            charge(&mut ledger, 10, None),
+            charge(&mut ledger, 100, None),
             Err(PaywallError::MissingVoucher)
         );
     }
@@ -112,41 +112,41 @@ mod tests {
     #[test]
     fn exact_price_is_accepted() {
         let (mut payer, mut ledger, secret, service_key) = setup();
-        let voucher = payer.sign_next(&secret, 10, service_key).unwrap();
+        let voucher = payer.sign_next(&secret, 100, service_key).unwrap();
         let hex = encode_voucher_header(&voucher);
-        assert_eq!(charge(&mut ledger, 10, Some(&hex)).unwrap(), 10);
-        assert_eq!(charge(&mut ledger, 10, Some(&hex)).unwrap(), 0);
+        assert_eq!(charge(&mut ledger, 100, Some(&hex)).unwrap(), 100);
+        assert_eq!(charge(&mut ledger, 100, Some(&hex)).unwrap(), 0);
     }
 
     #[test]
     fn service_rejects_voucher_directed_to_an_unquoted_output_key() {
         let (mut payer, mut ledger, secret, service_key) = setup();
-        let voucher = payer.sign_next(&secret, 10, service_key).unwrap();
+        let voucher = payer.sign_next(&secret, 100, service_key).unwrap();
         let hex = encode_voucher_header(&voucher);
         let (_, other_public) = create_key_pair_from_seed(99);
         let other_key = other_public.to_byte_type();
 
         assert_eq!(
-            charge_to_output_key(&mut ledger, 10, Some(&hex), &other_key),
+            charge_to_output_key(&mut ledger, 100, Some(&hex), &other_key),
             Err(PaywallError::WrongServiceOutputKey)
         );
         assert_eq!(ledger.accepted(), 0);
         assert_eq!(
-            charge_to_output_key(&mut ledger, 10, Some(&hex), &service_key).unwrap(),
-            10
+            charge_to_output_key(&mut ledger, 100, Some(&hex), &service_key).unwrap(),
+            100
         );
     }
 
     #[test]
     fn overpaying_the_call_is_rejected() {
         let (mut payer, mut ledger, secret, service_key) = setup();
-        let voucher = payer.sign_next(&secret, 20, service_key).unwrap();
+        let voucher = payer.sign_next(&secret, 200, service_key).unwrap();
         let hex = encode_voucher_header(&voucher);
         assert_eq!(
-            charge(&mut ledger, 10, Some(&hex)),
+            charge(&mut ledger, 100, Some(&hex)),
             Err(PaywallError::WrongPrice {
-                paid: 20,
-                price: 10
+                paid: 200,
+                price: 100
             })
         );
         assert_eq!(ledger.accepted(), 0);

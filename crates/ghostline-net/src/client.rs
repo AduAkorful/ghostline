@@ -695,8 +695,8 @@ mod tests {
     use ootle_byte_type::ToByteType;
     use tari_crypto::keys::SecretKey as _;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-    use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+    use tari_template_lib::types::{ComponentAddress, Hash32};
 
     fn sample_tx() -> Transaction {
         let (payer_secret, payer_public) = create_key_pair_from_seed(11);
@@ -706,21 +706,22 @@ mod tests {
             network_tag: 1,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let voucher = ghostline_core::SignedVoucher::sign(
             &payer_secret,
             channel.params(),
-            30,
+            100,
             channel.spec().service,
         )
         .unwrap();
         let funded = MaskAndValue {
-            value: 100,
+            value: 1_000,
             mask: tari_crypto::ristretto::RistrettoSecretKey::random(&mut rand::rng()),
         };
         let statement = settle(
@@ -728,6 +729,7 @@ mod tests {
             funded,
             &voucher,
             service_public.to_byte_type(),
+            create_key_pair_from_seed(202).1.to_byte_type(),
             ghostline_sdk::OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
         )
         .unwrap();

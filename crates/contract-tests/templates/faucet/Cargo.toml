@@ -7,7 +7,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-tari_template_lib = "0.37.0"
+tari_template_lib = "=0.40.1"
 
 [lib]
 crate-type = ["cdylib"]

@@ -25,6 +25,7 @@ pub struct OpenSpec {
     pub expiry_epoch: u64,
     pub nonce: [u8; NONCE_LEN],
     pub channel_template: Hash32,
+    pub fee_config: ComponentAddress,
 }
 
 pub struct SettleArgs<'a> {
@@ -32,6 +33,8 @@ pub struct SettleArgs<'a> {
     pub deposit: MaskAndValue,
     pub voucher: &'a SignedVoucher,
     pub service_output: RistrettoPublicKeyBytes,
+    /// Must be the fee config's current treasury key, or the template rejects the settlement.
+    pub treasury: RistrettoPublicKeyBytes,
     pub resource: ResourceAddress,
     pub max_epoch: u64,
     pub scan: OutputScan,
@@ -55,6 +58,7 @@ pub fn channel(spec: OpenSpec) -> Result<Channel, String> {
         expiry_epoch: spec.expiry_epoch,
         nonce: spec.nonce,
         channel_template: spec.channel_template,
+        fee_config: spec.fee_config,
     };
     match spec.refund {
         Some(refund_key) => Channel::open_with_refund_key(channel_spec, refund_key),
@@ -123,10 +127,20 @@ pub fn parse_scan(name: &str, resource: ResourceAddress) -> Result<OutputScan, S
     match name {
         "localnet" => Ok(OutputScan::localnet(resource)),
         "esmeralda" => Ok(OutputScan::esmeralda(resource)),
+        "mainnet" => Ok(OutputScan::mainnet(resource)),
         other => Err(format!(
-            "ootle-network: expected localnet or esmeralda, got {other}"
+            "ootle-network: expected localnet, esmeralda, or mainnet, got {other}"
         )),
     }
+}
+
+/// Scan for a seal whose channel `network_tag` is that network's byte.
+pub fn parse_channel_scan(
+    name: &str,
+    resource: ResourceAddress,
+    network_tag: u8,
+) -> Result<OutputScan, String> {
+    parse_scan(name, resource)?.require_channel_tag(network_tag)
 }
 
 pub fn seal_open(
@@ -154,6 +168,7 @@ pub fn seal_settle(
         args.deposit,
         args.voucher,
         args.service_output,
+        args.treasury,
         args.scan,
     )
     .map_err(|e| e.to_string())?;
@@ -177,6 +192,7 @@ pub fn unsigned_settle(
         args.deposit,
         args.voucher,
         args.service_output,
+        args.treasury,
         args.scan,
     )
     .map_err(|e| e.to_string())?;
@@ -236,6 +252,22 @@ mod tests {
         let id = utxo_substate_id(STEALTH_TARI_RESOURCE_ADDRESS, &commitment).unwrap();
         let resource_key = STEALTH_TARI_RESOURCE_ADDRESS.as_object_key().to_string();
         assert_eq!(id, format!("utxo_{resource_key}_{commitment}"));
+    }
+
+    #[test]
+    fn mainnet_scan_requires_network_byte_zero() {
+        let resource = STEALTH_TARI_RESOURCE_ADDRESS;
+        let scan = parse_channel_scan("mainnet", resource, 0).unwrap();
+        assert_eq!(scan.network.as_byte(), 0);
+        let mismatch = parse_channel_scan("mainnet", resource, 38).unwrap_err();
+        assert!(mismatch.contains("network_tag 38"));
+        assert!(
+            parse_scan("esmeralda", resource)
+                .unwrap()
+                .require_channel_tag(38)
+                .is_ok()
+        );
+        assert!(parse_scan("nope", resource).is_err());
     }
 
     #[test]

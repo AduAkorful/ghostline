@@ -19,6 +19,9 @@ pub struct ChannelFile {
     pub expiry_epoch: u64,
     pub nonce_hex: String,
     pub template_hex: String,
+    /// Fee config component the channel template was built against. Empty in records made before the protocol fee.
+    #[serde(default)]
+    pub fee_config: String,
     pub indexer_url: String,
     pub ootle_network: String,
     pub max_epoch: u64,
@@ -503,6 +506,7 @@ mod tests {
             expiry_epoch: 50,
             nonce_hex: "cc".into(),
             template_hex: "dd".into(),
+            fee_config: "08".repeat(32),
             indexer_url: "http://127.0.0.1:1/".into(),
             ootle_network: "esmeralda".into(),
             max_epoch: 10,
@@ -537,6 +541,7 @@ mod tests {
             expiry_epoch: 50,
             nonce_hex: "33".repeat(32),
             template_hex: "44".repeat(32),
+            fee_config: "08".repeat(32),
             indexer_url: "http://127.0.0.1:1/".into(),
             ootle_network: "esmeralda".into(),
             max_epoch: 10,
@@ -615,6 +620,7 @@ mod tests {
             expiry_epoch: 50,
             nonce_hex: "33".repeat(32),
             template_hex: "44".repeat(32),
+            fee_config: "08".repeat(32),
             indexer_url: "http://127.0.0.1:1/".into(),
             ootle_network: "esmeralda".into(),
             max_epoch: 10,

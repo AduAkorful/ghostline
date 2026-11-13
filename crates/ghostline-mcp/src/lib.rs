@@ -754,7 +754,7 @@ mod tests {
             self.0.fetch_add(1, Ordering::SeqCst);
             match request {
                 ElicitRequestParams::FormElicitationParams { message, .. } => {
-                    assert!(message.contains("Approve payment of 10 µT"));
+                    assert!(message.contains("Approve payment of 100 µT"));
                     Ok(ElicitResult::new(ElicitationAction::Accept)
                         .with_content(serde_json::json!({"approve": true})))
                 }
@@ -770,7 +770,7 @@ mod tests {
         let channel = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
-            deposit: 100,
+            deposit: 1_000,
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
@@ -789,8 +789,8 @@ mod tests {
         unsafe {
             std::env::set_var("GHOSTLINE_SESSION", &session);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
-            std::env::set_var("GHOSTLINE_POLICY_BUDGET", "100");
-            std::env::set_var("GHOSTLINE_POLICY_MAX_PER_CALL", "10");
+            std::env::set_var("GHOSTLINE_POLICY_BUDGET", "1000");
+            std::env::set_var("GHOSTLINE_POLICY_MAX_PER_CALL", "100");
             std::env::set_var(
                 "GHOSTLINE_POLICY_VENDOR_HEX",
                 to_hex(public.to_byte_type().as_bytes()),
@@ -798,7 +798,10 @@ mod tests {
             std::env::set_var("GHOSTLINE_POLICY_REQUIRE_HUMAN", "1");
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
         }
-        let args = SignArgs { channel, price: 10 };
+        let args = SignArgs {
+            channel,
+            price: 100,
+        };
         let mut raw = serde_json::to_value(&args).unwrap();
         raw["attested"] = serde_json::Value::Bool(true);
         let parsed: SignArgs = serde_json::from_value(raw).unwrap();
@@ -821,7 +824,7 @@ mod tests {
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
-            deposit: 100,
+            deposit: 1_000,
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
@@ -830,12 +833,12 @@ mod tests {
         let path = dir.join("session.json");
         let _ = std::fs::remove_file(&path);
         let mut store = ChannelStore::create(&path, parse_params(&args).unwrap()).unwrap();
-        let engine = PolicyEngine::new(Policy::new(100, 50).allow_vendor(public.to_byte_type()));
+        let engine = PolicyEngine::new(Policy::new(1_000, 500).allow_vendor(public.to_byte_type()));
         let (voucher, _) = gated_sign(
             &mut store,
             engine,
             public.to_byte_type(),
-            30,
+            300,
             &secret,
             false,
         )
@@ -854,7 +857,7 @@ mod tests {
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
-            deposit: 100,
+            deposit: 1_000,
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
@@ -864,7 +867,7 @@ mod tests {
         let path = dir.join("session.json");
         let _ = std::fs::remove_file(&path);
         let store = ChannelStore::create(&path, params.clone()).unwrap();
-        let quote = PaymentRequired::new(10, &[0u8; 32]);
+        let quote = PaymentRequired::new(100, &[0u8; 32]);
         let id = to_hex(&store.channel_id().unwrap());
         assert_ne!(id, quote.channel_id);
         assert_eq!(id, to_hex(&params.channel_id()));
@@ -881,7 +884,7 @@ mod tests {
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
-            deposit: 100,
+            deposit: 1_000,
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
@@ -901,7 +904,7 @@ mod tests {
             .unwrap()
             .with_service_output_key(payout.to_byte_type());
         let quote = serde_json::to_string(
-            &PaymentRequired::new(10, &params.channel_id()).with_terms(&terms),
+            &PaymentRequired::new(100, &params.channel_id()).with_terms(&terms),
         )
         .unwrap();
 
@@ -964,7 +967,7 @@ mod tests {
         assert_eq!(result.status, 200);
         assert!(result.body.contains("fortune"));
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+        assert_eq!(loaded.session().unwrap().cumulative(), 100);
         let voucher_hex = captured_voucher.lock().unwrap().clone().unwrap();
         let voucher = SignedVoucher::from_bytes(&from_hex(&voucher_hex).unwrap()).unwrap();
         assert_eq!(voucher.service_output_key, payout.to_byte_type());
@@ -984,17 +987,18 @@ mod tests {
             network_tag: 1,
             payer: public.to_byte_type(),
             service: service.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: tari_template_lib::types::ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let scan = OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS);
         let opened = fund_open(
             &channel,
             [MaskAndValue {
-                value: 100,
+                value: 1_000,
                 mask: input_mask,
             }],
             channel.spec().payer,
@@ -1017,7 +1021,7 @@ mod tests {
             std::env::remove_var("GHOSTLINE_PAYER_SECRET");
         }
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].value, 100);
+        assert_eq!(found[0].value, 1_000);
         assert_eq!(found[0].mask_hex, to_hex(opened.deposit.mask.as_bytes()));
     }
 
@@ -1032,7 +1036,7 @@ mod tests {
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
-            deposit: 100,
+            deposit: 1_000,
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
@@ -1048,7 +1052,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.json");
         ChannelStore::create(&path, params.clone()).unwrap();
-        let quote = serde_json::to_string(&PaymentRequired::new(10, &params.channel_id())).unwrap();
+        let quote =
+            serde_json::to_string(&PaymentRequired::new(100, &params.channel_id())).unwrap();
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1076,8 +1081,8 @@ mod tests {
         unsafe {
             std::env::set_var("GHOSTLINE_SESSION", &path);
             std::env::set_var("GHOSTLINE_PAYER_SECRET", to_hex(secret.as_bytes()));
-            std::env::set_var("GHOSTLINE_POLICY_BUDGET", "100");
-            std::env::set_var("GHOSTLINE_POLICY_MAX_PER_CALL", "10");
+            std::env::set_var("GHOSTLINE_POLICY_BUDGET", "1000");
+            std::env::set_var("GHOSTLINE_POLICY_MAX_PER_CALL", "100");
             std::env::set_var(
                 "GHOSTLINE_POLICY_VENDOR_HEX",
                 to_hex(public.to_byte_type().as_bytes()),
@@ -1165,7 +1170,7 @@ mod tests {
             std::env::remove_var("GHOSTLINE_POLICY_UNSAFE");
         }
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+        assert_eq!(loaded.session().unwrap().cumulative(), 100);
     }
 
     #[tokio::test]
@@ -1179,7 +1184,7 @@ mod tests {
             let mut buf = [0u8; 1024];
             let _ = stream.read(&mut buf);
             let body =
-                "{\"scheme\":\"ghostline.channel.voucher.v1\",\"price\":10,\"channel_id\":\"aa\"}";
+                "{\"scheme\":\"ghostline.channel.voucher.v1\",\"price\":100,\"channel_id\":\"aa\"}";
             let resp = format!(
                 "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
@@ -1211,7 +1216,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [4u8; NONCE_LEN],
         };
@@ -1236,7 +1241,8 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let quote = serde_json::to_string(&PaymentRequired::new(10, &params.channel_id())).unwrap();
+        let quote =
+            serde_json::to_string(&PaymentRequired::new(100, &params.channel_id())).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let quote_for_thread = quote.clone();
@@ -1286,7 +1292,7 @@ mod tests {
         assert!(!paid.needs_channel);
         assert!(paid.body.contains("from-file"));
         let loaded = ChannelStore::open(&session_path).unwrap();
-        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+        assert_eq!(loaded.session().unwrap().cumulative(), 100);
         let text = std::fs::read_to_string(&file_path).unwrap();
         assert!(text.contains("deposit_mask_hex"));
     }
@@ -1317,12 +1323,13 @@ mod tests {
             &file_path,
             serde_json::json!({
                 "network_tag": 1,
-                "deposit": 100,
+                "deposit": 1_000,
                 "payer_hex": payer_hex,
                 "service_hex": service_hex,
                 "expiry_epoch": 50,
                 "nonce_hex": nonce_hex,
                 "template_hex": template_hex,
+                "fee_config": "08".repeat(32),
                 "opener_account": "ghostline",
                 "opener_wallet_url": "http://127.0.0.1:5100",
                 "deposit_mask_hex": mask,
@@ -1334,14 +1341,15 @@ mod tests {
             network_tag: 1,
             payer: public.to_byte_type(),
             service: service.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             expiry_epoch: 50,
             nonce: [6u8; NONCE_LEN],
             channel_template: Hash32::from_hex(&template_hex).unwrap(),
+            fee_config: tari_template_lib::types::ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let quote =
-            serde_json::to_string(&PaymentRequired::new(10, &channel.params().channel_id()))
+            serde_json::to_string(&PaymentRequired::new(100, &channel.params().channel_id()))
                 .unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1406,7 +1414,7 @@ mod tests {
         assert!(text.contains("session"));
         let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
         let loaded = ChannelStore::open(saved["session"].as_str().unwrap()).unwrap();
-        assert_eq!(loaded.session().unwrap().cumulative(), 10);
+        assert_eq!(loaded.session().unwrap().cumulative(), 100);
     }
 
     #[test]
@@ -1430,12 +1438,13 @@ mod tests {
             &file_path,
             serde_json::json!({
                 "network_tag": 1,
-                "deposit": 100,
+                "deposit": 1_000,
                 "payer_hex": to_hex(public.to_byte_type().as_bytes()),
                 "service_hex": to_hex(service.to_byte_type().as_bytes()),
                 "expiry_epoch": 50,
                 "nonce_hex": to_hex(&[3u8; NONCE_LEN]),
                 "template_hex": to_hex(&[9u8; 32]),
+                "fee_config": "08".repeat(32),
                 "opener_account": "ghostline",
                 "opener_wallet_url": "http://127.0.0.1:5100",
                 "deposit_mask_hex": mask,
@@ -1454,12 +1463,12 @@ mod tests {
         let mut store = ChannelStore::open(&first.session).unwrap();
         let mut session = store.session().unwrap();
         session
-            .sign_next(&secret, 10, create_key_pair_from_seed(13).1.to_byte_type())
+            .sign_next(&secret, 100, create_key_pair_from_seed(13).1.to_byte_type())
             .unwrap();
         store.save_session(&session).unwrap();
         let second = open_channel::ensure_session().unwrap();
         assert!(!second.created);
-        assert_eq!(second.cumulative, 10);
+        assert_eq!(second.cumulative, 100);
         let text = std::fs::read_to_string(&file_path).unwrap();
         assert!(text.contains(&mask));
         let mut other: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -1524,7 +1533,7 @@ mod tests {
         let args = ChannelArgs {
             network_tag: 1,
             payer_hex: to_hex(public.to_byte_type().as_bytes()),
-            deposit: 100,
+            deposit: 1_000,
             payer_root_hex: to_hex(Hash32::from_array([9u8; 32]).as_slice()),
             nonce_hex: to_hex(&[3u8; NONCE_LEN]),
         };
@@ -1555,7 +1564,7 @@ mod tests {
         unsafe {
             std::env::remove_var("GHOSTLINE_SESSION");
         }
-        assert_eq!(view.deposit, 100);
+        assert_eq!(view.deposit, 1_000);
         assert_eq!(view.cumulative, 0);
         assert_eq!(view.settle_window, ghostline_paywall::SettleWindow::Unknown);
         assert!(!view.observer.at_settle.is_empty());
@@ -1568,7 +1577,7 @@ mod tests {
         let params = ChannelParams {
             network_tag: 1,
             payer: public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         };
@@ -1584,25 +1593,26 @@ mod tests {
         let ledger_path = dir.join("ledger.json");
         let mut session = PaymentSession::new(params.clone());
         let voucher = session
-            .sign_next(&secret, 10, create_key_pair_from_seed(13).1.to_byte_type())
+            .sign_next(&secret, 100, create_key_pair_from_seed(13).1.to_byte_type())
             .unwrap();
         let mut ledger = ServiceLedger::new(params.clone());
-        assert_eq!(ledger.accept(&voucher).unwrap(), 10);
+        assert_eq!(ledger.accept(&voucher).unwrap(), 100);
         let mut store = ChannelStore::create(&ledger_path, params).unwrap();
         store.save_ledger(&ledger).unwrap();
-        store.record_call(10).unwrap();
+        store.record_call(100).unwrap();
         let mask = "55".repeat(32);
         let file_path = dir.join("due.file.json");
         std::fs::write(
             &file_path,
             serde_json::json!({
                 "network_tag": 1,
-                "deposit": 100,
+                "deposit": 1_000,
                 "payer_hex": "11".repeat(32),
                 "service_hex": "22".repeat(32),
                 "expiry_epoch": 50,
                 "nonce_hex": "33".repeat(32),
                 "template_hex": "44".repeat(32),
+                "fee_config": "08".repeat(32),
                 "indexer_url": "",
                 "ootle_network": "esmeralda",
                 "max_epoch": 10,
@@ -1631,16 +1641,16 @@ mod tests {
         assert!(!text.contains(&mask));
         assert!(!text.contains("component_secret"));
         assert!(!text.contains(&"11".repeat(32)));
-        assert_eq!(view.status.accepted, 10);
-        assert_eq!(view.status.remainder_at_accepted, 89);
+        assert_eq!(view.status.accepted, 100);
+        assert_eq!(view.status.remainder_at_accepted, 800);
         assert_eq!(view.output_presence, "not_checked");
         assert_eq!(listed.len(), 1);
         assert_eq!(
             calls,
             vec![channel_file::ChannelCallView {
                 file: "due.file.json".into(),
-                price: Some(10),
-                accepted: Some(10),
+                price: Some(100),
+                accepted: Some(100),
                 note: String::new(),
             }]
         );

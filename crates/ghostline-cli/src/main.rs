@@ -135,7 +135,7 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
-        /// Ootle network used for UTXO tags and the sealed transaction (`localnet` or `esmeralda`).
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
     },
@@ -153,6 +153,7 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
         /// Account component that pays revealed XTR fees (`pay_fee`). On settle this should be a service-owned account, not the opener.
@@ -190,6 +191,7 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
         /// Account component that pays revealed XTR fees (`pay_fee`). On refund this is the payer's fee account.
@@ -220,6 +222,7 @@ enum Command {
         resource_hex: Option<String>,
         #[arg(long)]
         secret_hex: Option<String>,
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
     },
@@ -322,6 +325,7 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
         #[arg(long)]
@@ -364,6 +368,7 @@ enum Command {
         max_epoch: u64,
         #[arg(long)]
         resource_hex: Option<String>,
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
         /// Payer account component that pays revealed XTR fees. Required when the refund is due.
@@ -399,6 +404,7 @@ enum ChannelCommand {
         open: Box<OpenArgs>,
         #[arg(long)]
         indexer_url: String,
+        /// Ootle network for UTXO tags and the sealed transaction (`localnet`, `esmeralda`, or `mainnet`).
         #[arg(long, default_value = "localnet")]
         ootle_network: String,
         #[arg(long)]
@@ -567,6 +573,8 @@ enum ChannelCommand {
     },
 }
 
+// Parsed once per process, so the size gap between variants costs nothing worth boxing for.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum WalletCommand {
     /// Allocate a fresh wallet-managed account signing key. Use one per service/channel settlement.
@@ -781,6 +789,9 @@ struct OpenArgs {
     nonce_hex: String,
     #[arg(long)]
     template_hex: String,
+    /// Fee config component the channel template pins (`component_<hex>` or raw hex).
+    #[arg(long)]
+    fee_config: String,
 }
 
 #[derive(clap::Args)]
@@ -825,6 +836,7 @@ fn open_spec(args: &OpenArgs) -> Result<seal::OpenSpec, String> {
         expiry_epoch: args.expiry_epoch,
         nonce: seal::parse_nonce(&args.nonce_hex)?,
         channel_template: seal::parse_template(&args.template_hex)?,
+        fee_config: ghostline_sdk::parse_fee_config(&args.fee_config)?,
     })
 }
 
@@ -1285,6 +1297,10 @@ async fn run(cli: Cli) -> Result<(), String> {
                     return Err("faucet claim max fee must be greater than zero".into());
                 }
                 let wallet = connect_wallet(&url).await?;
+                let network = wallet.network_name().await.map_err(|error| {
+                    format!("could not read wallet network; refusing faucet claim: {error}")
+                })?;
+                ghostline_net::faucet_claim_allowed(&network)?;
                 let claimed = wallet
                     .claim_faucet(name.trim(), max_fee)
                     .await
@@ -1387,7 +1403,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "input mask",
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
-            let scan = seal::parse_scan(&ootle_network, resource)?;
+            let scan = seal::parse_channel_scan(&ootle_network, resource, open.network_tag)?;
             let (tx, mask) = seal::seal_open(
                 &channel,
                 funded(input_value, &input_mask)?,
@@ -1423,7 +1439,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "deposit mask",
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
-            let scan = seal::parse_scan(&ootle_network, resource)?;
+            let scan = seal::parse_channel_scan(&ootle_network, resource, open.network_tag)?;
             let deposit = funded(channel.params().deposit, &deposit_mask)?;
             if unsigned_json {
                 let fee = match &fee_account {
@@ -1436,6 +1452,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         deposit,
                         voucher: &voucher,
                         service_output: voucher.service_output_key,
+                        treasury: ghostline_sdk::treasury_from_env()?,
                         resource,
                         max_epoch,
                         scan,
@@ -1479,6 +1496,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         deposit,
                         voucher: &voucher,
                         service_output: voucher.service_output_key,
+                        treasury: ghostline_sdk::treasury_from_env()?,
                         resource,
                         max_epoch,
                         scan,
@@ -1551,7 +1569,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "deposit mask",
             )?;
             let resource = seal::parse_resource(resource_hex.as_deref())?;
-            let scan = seal::parse_scan(&ootle_network, resource)?;
+            let scan = seal::parse_channel_scan(&ootle_network, resource, open.network_tag)?;
             let deposit = funded(channel.params().deposit, &deposit_mask)?;
             if unsigned_json {
                 let fee = match &fee_account {
@@ -1855,6 +1873,7 @@ fn open_args_from(file: &channel_file::ChannelFile) -> OpenArgs {
         expiry_epoch: file.expiry_epoch,
         nonce_hex: file.nonce_hex.clone(),
         template_hex: file.template_hex.clone(),
+        fee_config: file.fee_config.clone(),
     }
 }
 
@@ -2169,6 +2188,11 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             ledger,
             session,
         } => {
+            seal::parse_channel_scan(
+                &ootle_network,
+                tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS,
+                open.network_tag,
+            )?;
             let file = channel_file::ChannelFile {
                 network_tag: open.network_tag,
                 deposit: open.deposit,
@@ -2178,6 +2202,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 expiry_epoch: open.expiry_epoch,
                 nonce_hex: open.nonce_hex,
                 template_hex: open.template_hex,
+                fee_config: open.fee_config,
                 indexer_url,
                 ootle_network,
                 max_epoch,
@@ -2588,13 +2613,15 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
     };
     let channel = seal::channel(spec)?;
     let resource = seal::parse_resource(args.resource_hex.as_deref())?;
-    let scan = seal::parse_scan(&args.ootle_network, resource)?;
+    let scan =
+        seal::parse_channel_scan(&args.ootle_network, resource, channel.params().network_tag)?;
     let unsigned = seal::unsigned_settle(
         seal::SettleArgs {
             channel: &channel,
             deposit: funded(channel.params().deposit, &deposit_mask)?,
             voucher: &voucher,
             service_output: voucher.service_output_key,
+            treasury: ghostline_sdk::treasury_from_env()?,
             resource,
             max_epoch: args.max_epoch,
             scan,
@@ -2877,7 +2904,8 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
     };
     let channel = seal::channel(spec)?;
     let resource = seal::parse_resource(args.resource_hex.as_deref())?;
-    let scan = seal::parse_scan(&args.ootle_network, resource)?;
+    let scan =
+        seal::parse_channel_scan(&args.ootle_network, resource, channel.params().network_tag)?;
     let unsigned = seal::unsigned_refund(
         &channel,
         funded(channel.params().deposit, &deposit_mask)?,
@@ -3255,6 +3283,11 @@ async fn open_channel_from_file(
     let ceiling = open_max_fee(dry_run, max_fee)?;
     let mut record = channel_file::ChannelFile::load(path)?;
     let channel = seal::channel(open_spec(&open_args_from(&record))?)?;
+    seal::parse_channel_scan(
+        &record.ootle_network,
+        seal::parse_resource(None)?,
+        channel.params().network_tag,
+    )?;
     seal::print_ids(&channel);
     if !dry_run {
         secrets::load_secret(None, secrets::CLAIM_SECRET_ENV, "wallet claim secret")?;
@@ -3430,7 +3463,11 @@ async fn submit_pinned_channel_open(
             )
         })?;
     let resource_address = seal::parse_resource(None)?;
-    let scan = seal::parse_scan(&record.ootle_network, resource_address)?;
+    let scan = seal::parse_channel_scan(
+        &record.ootle_network,
+        resource_address,
+        channel.params().network_tag,
+    )?;
     let dry = wallet
         .submit_dry_run(&pinned_submit_request(
             pinned_open_transaction(
@@ -3640,7 +3677,7 @@ async fn print_wallet_open_fee_quote(
 
 async fn connect_wallet(url: &str) -> Result<WalletClient, String> {
     let mut wallet = WalletClient::connect(url).map_err(|e| e.to_string())?;
-    wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+    wallet.authenticate().await.map_err(|e| e.to_string())?;
     Ok(wallet)
 }
 
@@ -4343,13 +4380,14 @@ mod tests {
         let mask = "55".repeat(32);
         channel_file::ChannelFile {
             network_tag: 1,
-            deposit: 100,
+            deposit: 1_000,
             payer_hex: to_hex(payer_pk.as_bytes()),
             service_hex: to_hex(service_pk.as_bytes()),
             refund_hex: None,
             expiry_epoch: 50,
             nonce_hex: to_hex(&[3u8; 32]),
             template_hex: to_hex(&[9u8; 32]),
+            fee_config: "08".repeat(32),
             indexer_url: "http://127.0.0.1:1/".into(),
             ootle_network: "esmeralda".into(),
             max_epoch: 10,
@@ -4378,12 +4416,12 @@ mod tests {
         let mut store = ghostline_paywall::ChannelStore::open(&session_path).unwrap();
         let mut session = store.session().unwrap();
         session
-            .sign_next(&secret, 10, create_key_pair_from_seed(13).1.to_byte_type())
+            .sign_next(&secret, 100, create_key_pair_from_seed(13).1.to_byte_type())
             .unwrap();
         store.save_session(&session).unwrap();
         let (_, again, cumulative) = ensure_payer_session(&path).unwrap();
         assert!(!again);
-        assert_eq!(cumulative, 10);
+        assert_eq!(cumulative, 100);
         let other = dir.join("other.json");
         let mut mismatched = loaded;
         mismatched.nonce_hex = to_hex(&[4u8; 32]);
@@ -4415,8 +4453,8 @@ mod seal_tests {
     use tari_crypto::keys::SecretKey as _;
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-    use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+    use tari_template_lib::types::{ComponentAddress, Hash32};
 
     #[test]
     fn seal_open_then_settle_round_trip_hex() {
@@ -4425,17 +4463,18 @@ mod seal_tests {
         let (_, payout_public) = create_key_pair_from_seed(14);
         let channel = seal::channel(seal::OpenSpec {
             network_tag: 1,
-            deposit: 100,
+            deposit: 1_000,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
             refund: None,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let input = MaskAndValue {
-            value: 100,
+            value: 1_000,
             mask: RistrettoSecretKey::random(&mut rand::rng()),
         };
         let (open_hex, deposit_mask) = seal::seal_open(
@@ -4452,16 +4491,17 @@ mod seal_tests {
         let voucher = SignedVoucher::sign(
             &payer_secret,
             channel.params(),
-            30,
+            300,
             payout_public.to_byte_type(),
         )
         .unwrap();
         let settle_hex = seal::seal_settle(
             seal::SettleArgs {
                 channel: &channel,
-                deposit: funded(100, &deposit_mask).unwrap(),
+                deposit: funded(1_000, &deposit_mask).unwrap(),
                 voucher: &voucher,
                 service_output: voucher.service_output_key,
+                treasury: create_key_pair_from_seed(202).1.to_byte_type(),
                 resource: STEALTH_TARI_RESOURCE_ADDRESS,
                 max_epoch: 1,
                 scan: OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
@@ -4487,6 +4527,7 @@ mod seal_tests {
             expiry_epoch: 100,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         };
         let payer_refund = seal::channel(base.clone()).unwrap();
         let relay_refund = seal::channel(seal::OpenSpec {
@@ -4513,6 +4554,7 @@ mod seal_tests {
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let opened = ghostline_sdk::fund_open(
@@ -4551,6 +4593,7 @@ mod seal_tests {
                 expiry_epoch: u64::MAX,
                 nonce: [42u8; NONCE_LEN],
                 channel_template: Hash32::from_array([7u8; 32]),
+                fee_config: ComponentAddress::from_array([8u8; 32]),
             })
             .unwrap();
             let input = MaskAndValue {
@@ -4591,27 +4634,29 @@ mod seal_tests {
         let (_service_secret, service_public) = create_key_pair_from_seed(13);
         let channel = seal::channel(seal::OpenSpec {
             network_tag: 1,
-            deposit: 100,
+            deposit: 1_000,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
             refund: None,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let voucher =
-            SignedVoucher::sign(&payer_secret, channel.params(), 30, channel.spec().service)
+            SignedVoucher::sign(&payer_secret, channel.params(), 300, channel.spec().service)
                 .unwrap();
         let unsigned = seal::unsigned_settle(
             seal::SettleArgs {
                 channel: &channel,
                 deposit: MaskAndValue {
-                    value: 100,
+                    value: 1_000,
                     mask: RistrettoSecretKey::random(&mut rand::rng()),
                 },
                 voucher: &voucher,
                 service_output: voucher.service_output_key,
+                treasury: create_key_pair_from_seed(202).1.to_byte_type(),
                 resource: STEALTH_TARI_RESOURCE_ADDRESS,
                 max_epoch: 1,
                 scan: OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
@@ -4638,6 +4683,7 @@ mod seal_tests {
             expiry_epoch: 0,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let unsigned = seal::unsigned_refund(

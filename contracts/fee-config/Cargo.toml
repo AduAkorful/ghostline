@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "ghostline_fee_config"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Ghostline protocol fee configuration: owner-set treasury key read by channel settlement"
+
+[dependencies]
+tari_template_lib = "=0.40.1"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

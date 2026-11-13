@@ -37,7 +37,7 @@ jobs:
       - name: Run TypeScript tests
         run: npm ci --prefix packages/ghostline && npm run build:browser --prefix packages/ghostline && npm test --prefix packages/ghostline
       - name: Run site tests
-        run: node --test demo/ui/mock-wallet.test.mjs demo/ui/site.test.mjs
+        run: node --test demo/ui/demo/mock-wallet.test.mjs demo/ui/site.test.mjs
       - name: Execute the local quickstart smoke test
         run: bash scripts/quickstart-smoke.sh
       - name: Exercise the prebuilt-demo command without wallet configuration

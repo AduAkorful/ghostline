@@ -7,7 +7,7 @@ services:
     branch: main
     dockerfilePath: ./deploy/Dockerfile
     dockerContext: .
-    autoDeploy: true
+    autoDeploy: false
     healthCheckPath: /healthz
     envVars:
       - key: GHOSTLINE_NETWORK
@@ -25,7 +25,7 @@ services:
       - key: GHOSTLINE_CLI_BIN
         value: /usr/local/bin/ghostline
       - key: GHOSTLINE_DEMO_DEPOSIT
-        value: "51"
+        value: "506"
       - key: GHOSTLINE_DEMO_OPENER_ACCOUNT
         value: ghostline-demo-opener
       - key: GHOSTLINE_DEMO_OPENER_KEY_INDEX

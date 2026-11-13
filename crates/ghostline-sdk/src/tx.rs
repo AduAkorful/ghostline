@@ -151,8 +151,8 @@ mod tests {
     use ootle_byte_type::ToByteType;
     use tari_crypto::keys::SecretKey as _;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-    use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+    use tari_template_lib::types::{ComponentAddress, Hash32};
 
     #[test]
     fn seals_a_settle_statement() {
@@ -162,17 +162,18 @@ mod tests {
             network_tag: 1,
             payer: payer_public.to_byte_type(),
             service: service_public.to_byte_type(),
-            deposit: 100,
+            deposit: 1_000,
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let voucher =
-            SignedVoucher::sign(&payer_secret, channel.params(), 30, channel.spec().service)
+            SignedVoucher::sign(&payer_secret, channel.params(), 100, channel.spec().service)
                 .unwrap();
         let funded = MaskAndValue {
-            value: 100,
+            value: 1_000,
             mask: tari_crypto::ristretto::RistrettoSecretKey::random(&mut rand::rng()),
         };
         let statement = settle(
@@ -180,6 +181,7 @@ mod tests {
             funded,
             &voucher,
             service_public.to_byte_type(),
+            create_key_pair_from_seed(202).1.to_byte_type(),
             crate::OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
         )
         .unwrap();
@@ -210,6 +212,7 @@ mod tests {
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let opened = fund_open(
@@ -230,6 +233,45 @@ mod tests {
             &payer_secret,
         );
         assert_eq!(tx.network(), Network::Esmeralda.as_byte());
+        assert!(tx.fee_instructions().is_empty());
+    }
+
+    #[test]
+    fn seals_mainnet_network_byte() {
+        use crate::{OutputScan, fund_open};
+
+        let (payer_secret, payer_public) = create_key_pair_from_seed(11);
+        let (_, service_public) = create_key_pair_from_seed(13);
+        let channel = Channel::open(ChannelSpec {
+            network_tag: 0,
+            payer: payer_public.to_byte_type(),
+            service: service_public.to_byte_type(),
+            deposit: 100,
+            expiry_epoch: u64::MAX,
+            nonce: [42u8; NONCE_LEN],
+            channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
+        })
+        .unwrap();
+        let opened = fund_open(
+            &channel,
+            [MaskAndValue {
+                value: 100,
+                mask: tari_crypto::ristretto::RistrettoSecretKey::random(&mut rand::rng()),
+            }],
+            channel.spec().payer,
+            OutputScan::mainnet(STEALTH_TARI_RESOURCE_ADDRESS),
+        )
+        .unwrap();
+        let tx = seal_stealth_transfer(
+            Network::MainNet,
+            STEALTH_TARI_RESOURCE_ADDRESS,
+            opened.statement,
+            Epoch(1),
+            &payer_secret,
+        );
+        assert_eq!(tx.network(), 0);
+        assert_eq!(tx.network(), Network::MainNet.as_byte());
         assert!(tx.fee_instructions().is_empty());
     }
 }

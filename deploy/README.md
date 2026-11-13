@@ -22,7 +22,7 @@ database.
 
 1. In Render, create a Blueprint from this repository and select `main`. Review
    [`render.yaml`](../render.yaml); the service is named `ghostline-paywall`.
-   Every push to `main` triggers a Render deploy. The service stores wallet and
+   Auto-deploy is off, so a push to `main` does not deploy this service. The service stores wallet and
    channel state under ephemeral `/tmp`, so avoid pushing while a demo channel
    is open; a deploy can restart the process and lose that state.
 2. Before the first deploy, create a dedicated Esmeralda relay wallet. Keep its

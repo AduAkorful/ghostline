@@ -10,7 +10,7 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test src/channel.test.ts src/voucher.test.ts src/sim.test.ts src/ephemeral.test.ts",
-    "build:browser": "npx --yes esbuild@0.25.12 src/index.ts --bundle --format=esm --platform=browser --outfile=../../demo/ui/vendor/ghostline.js"
+    "build:browser": "npx --yes esbuild@0.25.12 src/index.ts --bundle --format=esm --platform=browser --outfile=dist/ghostline.browser.js"
   },
   "engines": {
     "node": ">=22"

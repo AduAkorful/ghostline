@@ -13,15 +13,15 @@ mod support;
 use ghostline_core::{NONCE_LEN, SignedVoucher};
 use ghostline_sdk::{Channel, ChannelSpec, MaskAndValue, OutputScan, fund_open, refund, settle};
 use ootle_byte_type::ToByteType;
-use support::{CHANNEL, DEPOSIT, fund};
+use support::{DEPOSIT, fund, templates};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-use tari_template_test_tooling::{TemplateTest, support::spec::OutputAuthSpec};
+use tari_template_test_tooling::support::spec::OutputAuthSpec;
 
 const NETWORK_TAG: u8 = support::LOCALNET_TAG;
 const NONCE: [u8; NONCE_LEN] = [42u8; NONCE_LEN];
-const SIGNED: u64 = 30;
+const SIGNED: u64 = 300;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Action {
@@ -72,11 +72,8 @@ impl Scenario {
 }
 
 fn run(s: Scenario) -> Result<(), String> {
-    let mut test = TemplateTest::new(
-        env!("CARGO_MANIFEST_DIR"),
-        ["templates/faucet", "../../contracts/channel"],
-    );
-    let channel_template = test.get_template_address(CHANNEL);
+    let (mut test, fee) = templates();
+    let channel_template = fee.channel_template;
 
     let (payer_secret, payer_public) = create_key_pair_from_seed(11);
     let (service_secret, service_public) = create_key_pair_from_seed(13);
@@ -92,6 +89,7 @@ fn run(s: Scenario) -> Result<(), String> {
         expiry_epoch: s.expiry,
         nonce: NONCE,
         channel_template,
+        fee_config: fee.config,
     })
     .map_err(|e| e.to_string())?;
 
@@ -119,6 +117,7 @@ fn run(s: Scenario) -> Result<(), String> {
                 funded,
                 &voucher,
                 service,
+                fee.treasury,
                 OutputScan::localnet(resource),
             )
             .map_err(|e| e.to_string())?
@@ -186,7 +185,7 @@ fn settle_forged_signature_is_rejected() {
 fn settle_changed_opening_is_rejected() {
     assert_rejected(
         run(Scenario {
-            claimed_amount: 60,
+            claimed_amount: 600,
             ..Scenario::settle()
         }),
         "do not open its commitment",
@@ -197,8 +196,8 @@ fn settle_changed_opening_is_rejected() {
 fn settle_amount_above_deposit_is_rejected() {
     assert_rejected(
         run(Scenario {
-            signed_amount: 150,
-            claimed_amount: 150,
+            signed_amount: 1_500,
+            claimed_amount: 1_500,
             ..Scenario::settle()
         }),
         "channel spend limit",
@@ -280,11 +279,8 @@ fn refund_by_non_payer_is_rejected() {
 
 #[test]
 fn sdk_open_from_key_path_then_settle() {
-    let mut test = TemplateTest::new(
-        env!("CARGO_MANIFEST_DIR"),
-        ["templates/faucet", "../../contracts/channel"],
-    );
-    let channel_template = test.get_template_address(CHANNEL);
+    let (mut test, fee) = templates();
+    let channel_template = fee.channel_template;
     let (payer_secret, payer_public) = create_key_pair_from_seed(11);
     let (service_secret, service_public) = create_key_pair_from_seed(13);
     let payer: RistrettoPublicKeyBytes = payer_public.to_byte_type();
@@ -297,6 +293,7 @@ fn sdk_open_from_key_path_then_settle() {
         expiry_epoch: u64::MAX,
         nonce: NONCE,
         channel_template,
+        fee_config: fee.config,
     })
     .unwrap();
 
@@ -323,6 +320,7 @@ fn sdk_open_from_key_path_then_settle() {
         opened.deposit,
         &voucher,
         service,
+        fee.treasury,
         OutputScan::localnet(resource),
     )
     .unwrap();

@@ -33,9 +33,9 @@ use tokio::sync::Mutex;
 use crate::AppState;
 
 const DEFAULT_OPEN_FEE_CAP: u64 = 100_000;
-// Five 10 µT calls leave only the mandatory 1 µT fixed-shape change output.
-// This avoids accepting a 1,000 µT deposit and stranding almost all of it after settlement.
-const DEFAULT_DEPOSIT: u64 = 51;
+// Five 100 µT calls (500 µT) plus the 5 µT protocol fee leave only the mandatory 1 µT fixed-shape
+// change output. This avoids accepting a larger deposit and stranding most of it after settlement.
+const DEFAULT_DEPOSIT: u64 = 506;
 const FEE_FLOAT_WARNING_THRESHOLD: u128 = 100_000;
 
 #[derive(Clone)]
@@ -440,7 +440,7 @@ pub async fn create_session(
     if validate_demo_deposit(config.deposit).is_err() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            "the current five-call demo requires a 51 µT deposit (50 µT spend plus 1 µT fixed-shape change)",
+            "the current five-call demo requires a 506 µT deposit (500 µT spend, 5 µT protocol fee, 1 µT fixed-shape change)",
         )
             .into_response();
     }
@@ -495,7 +495,7 @@ pub async fn create_session(
         .into_response()
 }
 
-const PRICE_PER_CALL: u64 = 10;
+const PRICE_PER_CALL: u64 = 100;
 
 pub async fn settle(
     State(state): State<AppState>,
@@ -896,6 +896,8 @@ async fn start_new_open(
             &nonce,
             "--template-hex",
             &config.template_hex,
+            "--fee-config",
+            &config.fee_config,
         ],
     )
     .await?;
@@ -926,6 +928,8 @@ async fn start_new_open(
         nonce.clone(),
         "--template-hex".into(),
         config.template_hex.clone(),
+        "--fee-config".into(),
+        config.fee_config.clone(),
         "--indexer-url".into(),
         config.indexer_url.clone(),
         "--ootle-network".into(),
@@ -1281,11 +1285,7 @@ fn transaction_input_ids(entry: &serde_json::Value) -> Vec<String> {
 fn substate_named_in_abort(reason: &str) -> Option<&str> {
     let rest = reason.split("Substate ").nth(1)?;
     let id = rest.split(':').next()?.trim();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id)
-    }
+    if id.is_empty() { None } else { Some(id) }
 }
 
 /// True when the abort names a substate this transaction already included as an input.
@@ -2193,7 +2193,7 @@ async fn create_wallet_key(config: &RelayConfig, path: &Path) -> Result<WalletKe
 
 async fn connect_wallet(config: &RelayConfig) -> Result<WalletClient, String> {
     let mut wallet = WalletClient::connect(&config.wallet_url).map_err(|e| e.to_string())?;
-    wallet.auth_none_admin().await.map_err(|e| e.to_string())?;
+    wallet.authenticate().await.map_err(|e| e.to_string())?;
     Ok(wallet)
 }
 
@@ -2422,6 +2422,8 @@ struct RelayConfig {
     claim_secret: String,
     recovery_key: [u8; 32],
     template_hex: String,
+    /// Fee config component the channel template pins; passed to every channel the relay opens.
+    fee_config: String,
     network_tag: u8,
     deposit: u64,
     expiry_epochs: u64,
@@ -2453,6 +2455,7 @@ impl RelayConfig {
             recovery_key: crate::recovery_key_from_hex(&required("GHOSTLINE_DEMO_STATE_KEY")?)
                 .map_err(|error| format!("invalid GHOSTLINE_DEMO_STATE_KEY: {error}"))?,
             template_hex: template_hex_from_env(&required("GHOSTLINE_TEMPLATE")?)?,
+            fee_config: required("GHOSTLINE_FEE_CONFIG")?,
             network_tag: std::env::var("GHOSTLINE_NETWORK_TAG")
                 .unwrap_or_else(|_| "38".into())
                 .parse()
@@ -2834,7 +2837,7 @@ fn validate_demo_deposit(deposit: u64) -> Result<(), &'static str> {
         Ok(())
     } else {
         Err(
-            "the current five-call demo requires a 51 µT deposit (50 µT spend plus 1 µT fixed-shape change)",
+            "the current five-call demo requires a 506 µT deposit (500 µT spend, 5 µT protocol fee, 1 µT fixed-shape change)",
         )
     }
 }
@@ -2861,8 +2864,9 @@ mod tests {
 
     #[test]
     fn five_call_demo_requires_only_the_minimum_change_remainder() {
-        assert!(validate_demo_deposit(51).is_ok());
-        assert!(validate_demo_deposit(50).is_err());
+        assert!(validate_demo_deposit(506).is_ok());
+        assert!(validate_demo_deposit(505).is_err());
+        assert!(validate_demo_deposit(51).is_err());
         assert!(validate_demo_deposit(1_000).is_err());
     }
 
@@ -3115,6 +3119,7 @@ mod tests {
             claim_secret: to_hex(view_secret.as_bytes()),
             recovery_key: [0u8; 32],
             template_hex: String::new(),
+            fee_config: String::new(),
             network_tag: 38,
             deposit: DEFAULT_DEPOSIT,
             expiry_epochs: 10,
@@ -3182,6 +3187,7 @@ mod tests {
             claim_secret: to_hex(view_secret.as_bytes()),
             recovery_key: [0u8; 32],
             template_hex: String::new(),
+            fee_config: String::new(),
             network_tag: 38,
             deposit: DEFAULT_DEPOSIT,
             expiry_epochs: 10,
@@ -3468,6 +3474,7 @@ mod tests {
             claim_secret: String::new(),
             recovery_key: [0u8; 32],
             template_hex: String::new(),
+            fee_config: String::new(),
             network_tag: 38,
             deposit: DEFAULT_DEPOSIT,
             expiry_epochs: 10,

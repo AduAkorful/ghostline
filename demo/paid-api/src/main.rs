@@ -47,7 +47,7 @@ enum Command {
         bind: SocketAddr,
         #[arg(long)]
         ledger: PathBuf,
-        #[arg(long, default_value_t = 10)]
+        #[arg(long, default_value_t = 100)]
         price: u64,
         /// Public key authorized to settle channels for this service.
         #[arg(long)]
@@ -73,7 +73,7 @@ enum Command {
         /// Directory for per-channel paywall ledgers. Must be on protected storage.
         #[arg(long)]
         channel_dir: Option<PathBuf>,
-        #[arg(long, default_value_t = 10)]
+        #[arg(long, default_value_t = 100)]
         price: u64,
     },
     /// Hit a paid URL, signing a voucher on each 402 until `--calls` succeed.
@@ -319,7 +319,7 @@ async fn run() -> Result<(), String> {
             }
             let session = store.session().map_err(|e| e.to_string())?;
             let cumulative = session.cumulative();
-            let remaining = session.params().max_spend().saturating_sub(cumulative);
+            let remaining = session.params().max_settleable().saturating_sub(cumulative);
             println!("ok_calls={ok}");
             println!("cumulative={cumulative}");
             println!("unspent_on_channel={remaining}");

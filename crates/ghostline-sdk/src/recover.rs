@@ -121,9 +121,9 @@ mod tests {
     use tari_crypto::keys::SecretKey as _;
     use tari_ootle_common_types::crypto::create_key_pair_from_seed;
     use tari_ootle_wallet_crypto::MaskAndValue;
-    use tari_template_lib::types::Hash32;
     use tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib::types::{ComponentAddress, Hash32};
 
     fn setup() -> (RistrettoSecretKey, crate::OpenStatement, OutputScan) {
         let (payer_secret, payer_public) = create_key_pair_from_seed(11);
@@ -137,6 +137,7 @@ mod tests {
             expiry_epoch: u64::MAX,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         })
         .unwrap();
         let scan = OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS);

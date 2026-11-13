@@ -3,7 +3,7 @@
 use ghostline_core::{ChannelParams, NONCE_LEN};
 use tari_ootle_wallet_crypto::stealth::condition_root;
 use tari_template_lib::types::{
-    FunctionName, Hash32, TemplateAddress,
+    ComponentAddress, FunctionName, Hash32, TemplateAddress,
     bytes::Bytes,
     crypto::RistrettoPublicKeyBytes,
     rule,
@@ -25,6 +25,9 @@ pub struct ChannelSpec {
     pub expiry_epoch: u64,
     pub nonce: [u8; NONCE_LEN],
     pub channel_template: TemplateAddress,
+    /// The fee config component that `channel_template` was built against. Settlement must name it so the engine
+    /// brings it into the spend script's scope; the template rejects any other address.
+    pub fee_config: ComponentAddress,
 }
 
 /// The channel condition leaves committed by a stealth deposit, plus the bound channel params.
@@ -79,6 +82,7 @@ impl Channel {
                     encode_arg(&Hash32::from_array(params.channel_id()))?,
                     encode_arg(&spec.payer)?,
                     encode_arg(&payer_root)?,
+                    encode_arg(&spec.fee_config)?,
                 ],
             )),
             SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),
@@ -93,6 +97,7 @@ impl Channel {
                     encode_arg(&Hash32::from_array(params.channel_id()))?,
                     encode_arg(&spec.payer)?,
                     encode_arg(&payer_root)?,
+                    encode_arg(&spec.fee_config)?,
                 ],
             )),
             SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),
@@ -105,6 +110,7 @@ impl Channel {
                     encode_arg(&Hash32::from_array(params.channel_id()))?,
                     encode_arg(&spec.payer)?,
                     encode_arg(&payer_root)?,
+                    encode_arg(&spec.fee_config)?,
                 ],
             )),
             SpendCondition::builtin(BuiltinPredicate::BeforeEpoch(spec.expiry_epoch)),
@@ -199,6 +205,17 @@ mod tests {
     use super::*;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
+    #[test]
+    fn settle_leaves_bind_the_fee_config() {
+        let channel = Channel::open(spec()).unwrap();
+        let mut other = spec();
+        other.fee_config = ComponentAddress::from_array([9u8; 32]);
+        let other = Channel::open(other).unwrap();
+        assert_ne!(channel.settle_leaf(), other.settle_leaf());
+        assert_ne!(channel.batch_settle_leaf(), other.batch_settle_leaf());
+        assert_eq!(channel.params().channel_id(), other.params().channel_id());
+    }
+
     fn spec() -> ChannelSpec {
         ChannelSpec {
             network_tag: 1,
@@ -208,6 +225,7 @@ mod tests {
             expiry_epoch: 50,
             nonce: [42u8; NONCE_LEN],
             channel_template: Hash32::from_array([7u8; 32]),
+            fee_config: ComponentAddress::from_array([8u8; 32]),
         }
     }
 

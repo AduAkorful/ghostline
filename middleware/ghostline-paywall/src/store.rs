@@ -503,7 +503,7 @@ mod tests {
         ChannelParams {
             network_tag: 1,
             payer: RistrettoPublicKeyBytes::from_bytes(&[7u8; 32]).unwrap(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         }
@@ -523,7 +523,7 @@ mod tests {
         let (secret, public) = create_key_pair_from_seed(11);
         let mut params = params();
         params.payer = public.to_byte_type();
-        let voucher = SignedVoucher::sign(&secret, &params, 10, service_key()).unwrap();
+        let voucher = SignedVoucher::sign(&secret, &params, 100, service_key()).unwrap();
         let mut ledger = ServiceLedger::new(params.clone());
         ledger.accept(&voucher).unwrap();
         (params, ledger, crate::encode_voucher_header(&voucher))
@@ -608,15 +608,18 @@ mod tests {
         let path = unique_store_path("commit-charge");
         let mut store = ChannelStore::create(&path, params).unwrap();
 
-        assert_eq!(store.commit_charge(&ledger, 10, &voucher_hex).unwrap(), 10);
+        assert_eq!(
+            store.commit_charge(&ledger, 100, &voucher_hex).unwrap(),
+            100
+        );
 
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(loaded.accepted(), 100);
         assert_eq!(
             loaded.calls(),
             &[AcceptedCall {
-                price: 10,
-                accepted: 10
+                price: 100,
+                accepted: 100
             }]
         );
         assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
@@ -629,24 +632,24 @@ mod tests {
         let source_path = unique_store_path("recovery-source");
         let restored_path = unique_store_path("recovery-restored");
         let mut store = ChannelStore::create(&source_path, params).unwrap();
-        store.commit_charge(&ledger, 10, &voucher_hex).unwrap();
+        store.commit_charge(&ledger, 100, &voucher_hex).unwrap();
 
         let checkpoint = store.recovery_snapshot().unwrap();
         let restored =
             ChannelStore::restore_recovery_snapshot(&restored_path, &checkpoint).unwrap();
 
-        assert_eq!(restored.accepted(), 10);
+        assert_eq!(restored.accepted(), 100);
         assert_eq!(restored.latest_voucher_hex(), Some(voucher_hex.as_str()));
         assert_eq!(restored.calls(), store.calls());
-        assert_eq!(ChannelStore::open(&restored_path).unwrap().accepted(), 10);
+        assert_eq!(ChannelStore::open(&restored_path).unwrap().accepted(), 100);
         fs::remove_dir_all(source_path.parent().unwrap()).unwrap();
         fs::remove_dir_all(restored_path.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn recovery_snapshot_rejects_totals_outside_channel_budget() {
-        let mut snapshot = ChannelSnapshot::from_params(&params(), 101, 0);
-        snapshot.accepted = 101;
+        let mut snapshot = ChannelSnapshot::from_params(&params(), 1_001, 0);
+        snapshot.accepted = 1_001;
         let bytes = serde_json::to_vec(&snapshot).unwrap();
         let path = unique_store_path("invalid-recovery");
 
@@ -661,15 +664,18 @@ mod tests {
 
         fs::remove_file(&path).unwrap();
         fs::create_dir(&path).unwrap();
-        assert!(store.commit_charge(&ledger, 10, &voucher_hex).is_err());
+        assert!(store.commit_charge(&ledger, 100, &voucher_hex).is_err());
         assert_eq!(store.accepted(), 0);
         assert!(store.calls().is_empty());
         assert!(store.latest_voucher_hex().is_none());
 
         fs::remove_dir(&path).unwrap();
-        assert_eq!(store.commit_charge(&ledger, 10, &voucher_hex).unwrap(), 10);
+        assert_eq!(
+            store.commit_charge(&ledger, 100, &voucher_hex).unwrap(),
+            100
+        );
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(loaded.accepted(), 100);
         assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
@@ -677,7 +683,7 @@ mod tests {
     #[test]
     fn failed_snapshot_writes_do_not_advance_in_memory_totals() {
         let (params, ledger, _) = signed_charge();
-        let session = PaymentSession::resume(params.clone(), 10).unwrap();
+        let session = PaymentSession::resume(params.clone(), 100).unwrap();
         let path = unique_store_path("failed-snapshot");
         let mut store = ChannelStore::create(&path, params).unwrap();
 
@@ -692,8 +698,8 @@ mod tests {
         store.save_ledger(&ledger).unwrap();
         store.save_session(&session).unwrap();
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.accepted(), 10);
-        assert_eq!(loaded.cumulative(), 10);
+        assert_eq!(loaded.accepted(), 100);
+        assert_eq!(loaded.cumulative(), 100);
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
@@ -705,10 +711,10 @@ mod tests {
         store.save_ledger(&ledger).unwrap();
         assert!(store.latest_voucher_hex().is_none());
 
-        assert_eq!(store.commit_charge(&ledger, 10, &voucher_hex).unwrap(), 0);
+        assert_eq!(store.commit_charge(&ledger, 100, &voucher_hex).unwrap(), 0);
 
         let loaded = ChannelStore::open(&path).unwrap();
-        assert_eq!(loaded.accepted(), 10);
+        assert_eq!(loaded.accepted(), 100);
         assert_eq!(loaded.latest_voucher_hex(), Some(voucher_hex.as_str()));
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
@@ -761,26 +767,26 @@ mod tests {
             .channel_for_quote(Some(&to_hex(&second.channel_id())))
             .unwrap();
         assert_eq!(quoted, second.channel_id());
-        let voucher = SignedVoucher::sign(&secret, &second, 10, service_key()).unwrap();
+        let voucher = SignedVoucher::sign(&secret, &second, 100, service_key()).unwrap();
         let hex = crate::encode_voucher_header(&voucher);
-        assert_eq!(directory.charge(10, Some(&hex)).unwrap(), 10);
+        assert_eq!(directory.charge(100, Some(&hex)).unwrap(), 100);
         assert_eq!(directory.accepted(&first.channel_id()).unwrap(), 0);
-        assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
+        assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 100);
         let mut unknown = first.clone();
         unknown.nonce = [5u8; NONCE_LEN];
-        let foreign = SignedVoucher::sign(&secret, &unknown, 10, service_key()).unwrap();
+        let foreign = SignedVoucher::sign(&secret, &unknown, 100, service_key()).unwrap();
         let err = directory
-            .charge(10, Some(&crate::encode_voucher_header(&foreign)))
+            .charge(100, Some(&crate::encode_voucher_header(&foreign)))
             .unwrap_err();
         assert!(matches!(err, PaywallError::UnknownChannel));
-        let voucher = SignedVoucher::sign(&secret, &first, 10, service_key()).unwrap();
+        let voucher = SignedVoucher::sign(&secret, &first, 100, service_key()).unwrap();
         assert_eq!(
             directory
-                .charge(10, Some(&crate::encode_voucher_header(&voucher)))
+                .charge(100, Some(&crate::encode_voucher_header(&voucher)))
                 .unwrap(),
-            10
+            100
         );
-        assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
+        assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 100);
     }
 
     #[test]

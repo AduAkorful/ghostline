@@ -25,7 +25,7 @@ fn fixtures() -> (
     let params = ChannelParams {
         network_tag: 1,
         payer,
-        deposit: 101,
+        deposit: 1_011,
         payer_root: Hash32::from_array([9u8; 32]),
         nonce: [3u8; NONCE_LEN],
     };
@@ -33,7 +33,11 @@ fn fixtures() -> (
     let service = service_key();
     let terms = PaymentTerms::new(service, 20, 100).unwrap();
     let state = state.with_payment_terms(terms);
-    let agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 10), service);
+    let agent = AgentPayer::new(
+        PaymentSession::new(params),
+        Policy::new(10_000, 100),
+        service,
+    );
     (state, agent, secret)
 }
 
@@ -57,7 +61,7 @@ async fn unpaid_request_returns_402_quote() {
     assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
     let body = json_body(response).await;
     assert_eq!(body["scheme"], "ghostline.channel.voucher.v1");
-    assert_eq!(body["price"], 10);
+    assert_eq!(body["price"], 100);
     assert_eq!(body["basis"], "per_request");
     assert_eq!(
         body["recipient_key"],
@@ -75,7 +79,7 @@ async fn quote_advertises_one_time_service_output_key_separately_from_channel_ke
     let params = ChannelParams {
         network_tag: 1,
         payer,
-        deposit: 101,
+        deposit: 1_011,
         payer_root: Hash32::from_array([9u8; 32]),
         nonce: [4u8; NONCE_LEN],
     };
@@ -107,7 +111,7 @@ async fn quote_advertises_one_time_service_output_key_separately_from_channel_ke
     let (_, wrong_output_public) = create_key_pair_from_seed(33);
     let mut wrong_session = PaymentSession::new(params.clone());
     let wrong_voucher = wrong_session
-        .sign_next(&secret, 10, wrong_output_public.to_byte_type())
+        .sign_next(&secret, 100, wrong_output_public.to_byte_type())
         .unwrap();
     let rejected = app
         .clone()
@@ -122,7 +126,11 @@ async fn quote_advertises_one_time_service_output_key_separately_from_channel_ke
         .unwrap();
     assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
 
-    let mut agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 10), service);
+    let mut agent = AgentPayer::new(
+        PaymentSession::new(params),
+        Policy::new(10_000, 100),
+        service,
+    );
     let voucher = agent.pay(&quote, &secret).unwrap();
     assert_eq!(voucher.service_output_key, output_public.to_byte_type());
     let paid = app
@@ -150,12 +158,12 @@ async fn metered_call_charges_unit_price_times_units() {
     let params = ChannelParams {
         network_tag: 1,
         payer,
-        deposit: 100,
+        deposit: 1_000,
         payer_root: Hash32::from_array([9u8; 32]),
         nonce: [3u8; NONCE_LEN],
     };
     let state = AppState::new(ServiceLedger::new(params.clone()));
-    let mut agent = AgentPayer::new(PaymentSession::new(params), Policy::new(100, 40), payer);
+    let mut agent = AgentPayer::new(PaymentSession::new(params), Policy::new(1_000, 300), payer);
     let app = router(state);
     let quote_response = app
         .clone()
@@ -170,9 +178,9 @@ async fn metered_call_charges_unit_price_times_units() {
     assert_eq!(quote_response.status(), StatusCode::PAYMENT_REQUIRED);
     let raw = json_body(quote_response).await;
     assert_eq!(raw["basis"], "metered");
-    assert_eq!(raw["unit_price"], 10);
+    assert_eq!(raw["unit_price"], 100);
     assert_eq!(raw["units"], 3);
-    assert_eq!(raw["price"], 30);
+    assert_eq!(raw["price"], 300);
     let quote: PaymentRequired = serde_json::from_value(raw).unwrap();
     let header = agent.voucher_header(&quote, &secret).unwrap();
     let paid = app
@@ -189,7 +197,7 @@ async fn metered_call_charges_unit_price_times_units() {
     assert_eq!(paid.status(), StatusCode::OK);
     let body = json_body(paid).await;
     assert_eq!(body["units"], 3);
-    assert_eq!(body["charged"], 30);
+    assert_eq!(body["charged"], 300);
 
     let zero = app
         .oneshot(
@@ -270,10 +278,10 @@ async fn ten_paid_calls_leave_one_settle_total() {
             .await
             .unwrap();
         assert_eq!(paid.status(), StatusCode::OK);
-        last_amount += 10;
+        last_amount += 100;
     }
     assert_eq!(agent.session().cumulative(), last_amount);
-    assert_eq!(last_amount, 100);
+    assert_eq!(last_amount, 1_000);
 }
 
 #[tokio::test]
@@ -283,7 +291,7 @@ async fn ledger_file_keeps_accepted_after_reopen() {
     let params = ChannelParams {
         network_tag: 1,
         payer,
-        deposit: 100,
+        deposit: 1_000,
         payer_root: Hash32::from_array([9u8; 32]),
         nonce: [3u8; NONCE_LEN],
     };
@@ -301,10 +309,10 @@ async fn ledger_file_keeps_accepted_after_reopen() {
     ChannelStore::create(&ledger_path, params.clone()).unwrap();
     ChannelStore::create(&session_path, params.clone()).unwrap();
 
-    let state = AppState::with_store(ChannelStore::open(&ledger_path).unwrap(), 10).unwrap();
+    let state = AppState::with_store(ChannelStore::open(&ledger_path).unwrap(), 100).unwrap();
     let app = router(state);
     let mut payer_store = ChannelStore::open(&session_path).unwrap();
-    let mut engine = PolicyEngine::new(Policy::new(100, 10).allow_vendor(payer));
+    let mut engine = PolicyEngine::new(Policy::new(10_000, 100).allow_vendor(payer));
     for _ in 0..3 {
         let quote: PaymentRequired = serde_json::from_value(
             json_body(
@@ -340,15 +348,15 @@ async fn ledger_file_keeps_accepted_after_reopen() {
     drop(app);
     let ledger = ChannelStore::open(&ledger_path).unwrap();
     let session = ChannelStore::open(&session_path).unwrap();
-    assert_eq!(ledger.ledger().unwrap().accepted(), 30);
-    assert_eq!(session.session().unwrap().cumulative(), 30);
+    assert_eq!(ledger.ledger().unwrap().accepted(), 300);
+    assert_eq!(session.session().unwrap().cumulative(), 300);
     assert_eq!(
         ledger
             .calls()
             .iter()
             .map(|call| (call.price, call.accepted))
             .collect::<Vec<_>>(),
-        vec![(10, 10), (10, 20), (10, 30)]
+        vec![(100, 100), (100, 200), (100, 300)]
     );
     assert!(session.calls().is_empty());
 }
@@ -396,7 +404,7 @@ async fn two_channels_charge_only_the_named_one() {
     let first = ChannelParams {
         network_tag: 1,
         payer,
-        deposit: 100,
+        deposit: 1_000,
         payer_root: Hash32::from_array([9u8; 32]),
         nonce: [3u8; NONCE_LEN],
     };
@@ -413,7 +421,7 @@ async fn two_channels_charge_only_the_named_one() {
     std::fs::create_dir_all(&dir).unwrap();
     ChannelStore::create(dir.join("a.json"), first.clone()).unwrap();
     ChannelStore::create(dir.join("b.json"), second.clone()).unwrap();
-    let state = AppState::with_directory(ChannelDirectory::open(&dir).unwrap(), 10).unwrap();
+    let state = AppState::with_directory(ChannelDirectory::open(&dir).unwrap(), 100).unwrap();
     let app = router(state);
     let ambiguous = app
         .clone()
@@ -442,7 +450,7 @@ async fn two_channels_charge_only_the_named_one() {
     assert_eq!(quote.channel_id, to_hex(&second.channel_id()));
     let mut agent = AgentPayer::new(
         PaymentSession::new(second.clone()),
-        Policy::new(100, 10),
+        Policy::new(10_000, 100),
         payer,
     );
     let header = agent.voucher_header(&quote, &secret).unwrap();
@@ -459,5 +467,5 @@ async fn two_channels_charge_only_the_named_one() {
     assert_eq!(paid.status(), StatusCode::OK);
     let directory = ChannelDirectory::open(&dir).unwrap();
     assert_eq!(directory.accepted(&first.channel_id()).unwrap(), 0);
-    assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 10);
+    assert_eq!(directory.accepted(&second.channel_id()).unwrap(), 100);
 }

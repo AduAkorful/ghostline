@@ -8,7 +8,8 @@ use crate::{ChannelStore, PaywallError};
 /// Off-chain view of a channel store. Not a chain confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChannelStatus {
-    /// Always `off_chain_store`. Remainder is hypothetical at these totals, not a UTXO balance.
+    /// Always `off_chain_store`. Remainder is hypothetical at these totals, not a UTXO balance. It is the settleable
+    /// headroom: how much more the payer could still be charged once the protocol fee and payer change are reserved.
     pub source: &'static str,
     pub channel_id: String,
     pub deposit: u64,
@@ -275,24 +276,24 @@ impl ChannelStatus {
         current_epoch: Option<u64>,
     ) -> Result<Self, PaywallError> {
         let spend_limit = deposit.saturating_sub(ghostline_core::SETTLEMENT_RESERVE);
-        let remainder_at_accepted =
-            spend_limit
-                .checked_sub(accepted)
-                .ok_or(PaywallError::Voucher(
+        let settle_limit =
+            spend_limit / (ghostline_core::FEE_DIVISOR + 1) * ghostline_core::FEE_DIVISOR;
+        // Totals above the spend limit are corrupt. Totals between the settleable and spend limits come from
+        // pre-fee ledgers; they still report, with no headroom left.
+        let headroom = |total: u64| {
+            if total > spend_limit {
+                Err(PaywallError::Voucher(
                     ghostline_core::VoucherError::ExceedsDeposit {
-                        amount: accepted,
+                        amount: total,
                         deposit: spend_limit,
                     },
-                ))?;
-        let remainder_at_cumulative =
-            spend_limit
-                .checked_sub(cumulative)
-                .ok_or(PaywallError::Voucher(
-                    ghostline_core::VoucherError::ExceedsDeposit {
-                        amount: cumulative,
-                        deposit: spend_limit,
-                    },
-                ))?;
+                ))
+            } else {
+                Ok(settle_limit.saturating_sub(total))
+            }
+        };
+        let remainder_at_accepted = headroom(accepted)?;
+        let remainder_at_cumulative = headroom(cumulative)?;
         let epochs_until_expiry = match (expiry_epoch, current_epoch) {
             (Some(exp), Some(cur)) => Some(i128::from(exp) - i128::from(cur)),
             _ => None,
@@ -331,7 +332,7 @@ mod tests {
         ChannelParams {
             network_tag: 1,
             payer: RistrettoPublicKeyBytes::from_bytes(&[7u8; 32]).unwrap(),
-            deposit: 100,
+            deposit: 1_000,
             payer_root: Hash32::from_array([9u8; 32]),
             nonce: [3u8; NONCE_LEN],
         }
@@ -346,7 +347,8 @@ mod tests {
         let mut store = ChannelStore::create(&path, params()).unwrap();
         store.set_totals(40, 40).unwrap();
         let view = ChannelStatus::from_store(&store, Some(50), Some(40)).unwrap();
-        assert_eq!(view.remainder_at_accepted, 59);
+        // Deposit 1_000 settles at most 900 µT (plus a 9 µT fee and 1 µT change).
+        assert_eq!(view.remainder_at_accepted, 860);
         assert_eq!(view.settle_window, SettleWindow::SettleOpen);
         let late = ChannelStatus::from_store(&store, Some(50), Some(50)).unwrap();
         assert_eq!(late.settle_window, SettleWindow::RefundOpen);

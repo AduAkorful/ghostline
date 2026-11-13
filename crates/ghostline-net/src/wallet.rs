@@ -7,9 +7,12 @@
 //! does not depend on that package: it pulls a newer `tari_ootle_transaction` than
 //! the 0.45 engine suite Ghostline pins.
 //!
-//! Auth here is `credentials: "None"` plus `permissions: ["Admin"]`, which is what
-//! a daemon started with `--authentication none` accepts. Other auth methods are
-//! not implemented.
+//! [`WalletClient::authenticate`] uses walletd's cookie when `GHOSTLINE_WALLET_COOKIE`
+//! names it: a daemon started with `--cookie-auth true` writes a fresh owner-only
+//! `<base-path>/<network>/.cookie` at each start and accepts its contents as a bearer
+//! token. Without it the client falls back to `credentials: "None"` plus
+//! `permissions: ["Admin"]`, which only a daemon started with `--authentication none`
+//! accepts. That mode lets any local program spend, so never use it on a funded wallet.
 //!
 //! Submitting Ghostline-sealed envelopes through the public indexer REST API is a
 //! different path: `resolve-inputs` then `seal-unsigned`. That settle is proven live.
@@ -17,6 +20,7 @@
 //! accounts remain correlated. A live settle from a second-seed walletd (`--url`) is also
 //! proven; that fee wallet's faucet claim is still public.
 
+use std::path::Path;
 use std::str::FromStr;
 
 use reqwest::{Client, IntoUrl};
@@ -28,6 +32,10 @@ use url::Url;
 use crate::NetError;
 
 const JSON_RPC: &str = "json_rpc";
+
+/// Names walletd's `.cookie` file. When set, [`WalletClient::authenticate`] uses it instead of
+/// the no-credential login.
+pub const WALLET_COOKIE_ENV: &str = "GHOSTLINE_WALLET_COOKIE";
 const AUTH_REQUEST: &str = "auth.request";
 const SUBMIT: &str = "transactions.submit";
 const SUBMIT_DRY_RUN: &str = "transactions.submit_dry_run";
@@ -39,6 +47,7 @@ const ACCOUNTS_GET: &str = "accounts.get";
 const ACCOUNTS_GET_BALANCES: &str = "accounts.get_balances";
 const ACCOUNTS_CREATE: &str = "accounts.create";
 const CREATE_FREE_TEST_COINS: &str = "accounts.create_free_test_coins";
+const WALLET_GET_INFO: &str = "wallet.get_info";
 const ACCOUNTS_TRANSFER: &str = "accounts.transfer";
 const ACCOUNTS_CREATE_OR_GET: &str = "accounts.create_or_get";
 const ACCOUNTS_RENAME: &str = "accounts.rename";
@@ -747,6 +756,32 @@ impl WalletClient {
         &self.endpoint
     }
 
+    /// Logs in with the cookie named by `GHOSTLINE_WALLET_COOKIE`, or with the no-credential
+    /// login when it is unset.
+    pub async fn authenticate(&mut self) -> Result<(), NetError> {
+        match std::env::var_os(WALLET_COOKIE_ENV) {
+            Some(path) if !path.is_empty() => self.use_cookie_file(Path::new(&path)),
+            _ => self.auth_none_admin().await,
+        }
+    }
+
+    /// Uses a walletd `.cookie` file's token as the bearer token. walletd writes a new cookie at
+    /// each start, so read it after the daemon is up. Errors never include the token.
+    pub fn use_cookie_file(&mut self, path: &Path) -> Result<(), NetError> {
+        let raw = std::fs::read_to_string(path).map_err(|e| {
+            NetError::WalletAuth(format!("cannot read cookie {}: {e}", path.display()))
+        })?;
+        let token = raw.trim();
+        if token.is_empty() || token.chars().any(char::is_whitespace) {
+            return Err(NetError::WalletAuth(format!(
+                "cookie {} does not hold a single token",
+                path.display()
+            )));
+        }
+        self.token = Some(token.to_string());
+        Ok(())
+    }
+
     pub async fn auth_none_admin(&mut self) -> Result<(), NetError> {
         let resp: AuthLoginResponse = self
             .rpc(
@@ -793,6 +828,12 @@ impl WalletClient {
     pub async fn default_account_address(&self) -> Result<String, NetError> {
         let resp: AccountDefaultResponse = self.rpc(GET_DEFAULT, serde_json::json!({})).await?;
         Ok(resp.address)
+    }
+
+    /// `wallet.get_info` network name (`esmeralda`, `localnet`, `mainnet`, …).
+    pub async fn network_name(&self) -> Result<String, NetError> {
+        let info: WalletInfo = self.rpc(WALLET_GET_INFO, serde_json::json!({})).await?;
+        Ok(info.network)
     }
 
     /// `accounts.create_free_test_coins` for an account that is not on chain.
@@ -1110,6 +1151,24 @@ impl WalletClient {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct WalletInfo {
+    #[serde(default)]
+    network: String,
+}
+
+/// The Esmeralda faucet does not exist on mainnet. An unreadable network is also a refusal.
+pub fn faucet_claim_allowed(network: &str) -> Result<(), &'static str> {
+    let network = network.trim();
+    if network.is_empty() {
+        return Err("wallet.get_info did not report a network; refusing faucet claim");
+    }
+    if network.eq_ignore_ascii_case("mainnet") {
+        return Err("faucet claim is not available on mainnet");
+    }
+    Ok(())
+}
+
 /// True when the dry-run / wait payload contains an `Accept` finalize (not `Reject`).
 pub fn execution_accepted(result: &Value) -> bool {
     let finalize = result.get("finalize").unwrap_or(result);
@@ -1122,6 +1181,14 @@ pub fn execution_accepted(result: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn faucet_claim_refuses_mainnet_and_a_missing_network() {
+        assert!(faucet_claim_allowed("esmeralda").is_ok());
+        assert!(faucet_claim_allowed("localnet").is_ok());
+        assert!(faucet_claim_allowed("MainNet").is_err());
+        assert!(faucet_claim_allowed("  ").is_err());
+    }
 
     #[test]
     fn connect_appends_json_rpc() {
@@ -1157,6 +1224,29 @@ mod tests {
         assert!(execution_accepted(&v));
         let v = serde_json::json!({"finalize":{"result":{"Reject":"nope"}}});
         assert!(!execution_accepted(&v));
+    }
+
+    #[test]
+    fn cookie_file_sets_the_bearer_token() {
+        let dir = std::env::temp_dir().join(format!("ghostline-cookie-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cookie = dir.join(".cookie");
+        std::fs::write(&cookie, "tc_example_token\n").unwrap();
+        let mut client = WalletClient::connect("http://127.0.0.1:5100").unwrap();
+        client.use_cookie_file(&cookie).unwrap();
+        assert_eq!(client.token.as_deref(), Some("tc_example_token"));
+
+        std::fs::write(&cookie, "  \n").unwrap();
+        let err = client.use_cookie_file(&cookie).unwrap_err().to_string();
+        assert!(err.contains("does not hold a single token"), "{err}");
+
+        std::fs::write(&cookie, "tc_secret other").unwrap();
+        let err = client.use_cookie_file(&cookie).unwrap_err().to_string();
+        assert!(!err.contains("tc_secret"), "errors must not echo the cookie: {err}");
+
+        let err = client.use_cookie_file(&dir.join("missing")).unwrap_err().to_string();
+        assert!(err.contains("cannot read cookie"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
