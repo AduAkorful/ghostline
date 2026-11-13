@@ -263,6 +263,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bech32"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1481,6 +1487,7 @@ dependencies = [
  "ghostline-paywall",
  "ghostline-policy",
  "ghostline-sdk",
+ "ootle-network",
  "ootle_byte_type",
  "rand",
  "reqwest",
@@ -1640,6 +1647,7 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
+ "tari_ootle_address",
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_ootle_wallet_crypto",
@@ -4049,6 +4057,20 @@ dependencies = [
  "keccak",
  "rand_core 0.10.1",
  "zeroize",
+]
+
+[[package]]
+name = "tari_ootle_address"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f84b54feab4a15017a002313c507f451cd976be6bdd16525cdd4274601891fa"
+dependencies = [
+ "bech32",
+ "ootle-network",
+ "ootle_byte_type",
+ "tari_crypto",
+ "tari_template_lib_types",
+ "thiserror",
 ]
 
 [[package]]

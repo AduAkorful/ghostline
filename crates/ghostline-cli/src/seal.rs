@@ -33,6 +33,9 @@ pub struct SettleArgs<'a> {
     pub deposit: MaskAndValue,
     pub voucher: &'a SignedVoucher,
     pub service_output: RistrettoPublicKeyBytes,
+    /// When set, the payout is addressed to this service wallet destination so walletd finds it. Its one-time key
+    /// must equal `service_output`.
+    pub payout: Option<ghostline_sdk::WalletDestination>,
     /// Must be the fee config's current treasury key, or the template rejects the settlement.
     pub treasury: RistrettoPublicKeyBytes,
     pub resource: ResourceAddress,
@@ -40,10 +43,57 @@ pub struct SettleArgs<'a> {
     pub scan: OutputScan,
 }
 
+/// Where an expiry refund pays the deposit.
+pub enum RefundOutput {
+    /// Locked to a bare key. walletd does not find such an output; Ghostline tooling must recover it.
+    Key(RistrettoPublicKeyBytes),
+    /// Addressed to a wallet, which finds and can spend it.
+    Wallet(Box<ghostline_sdk::WalletDestination>),
+}
+
+fn refund_statement(
+    channel: &Channel,
+    deposit: MaskAndValue,
+    output: &RefundOutput,
+    scan: OutputScan,
+) -> Result<tari_template_lib::types::stealth::StealthTransferStatement, String> {
+    match output {
+        RefundOutput::Key(key) => refund(channel, deposit, *key, scan),
+        RefundOutput::Wallet(destination) => {
+            ghostline_sdk::refund_to_wallet(channel, deposit, destination, scan)
+        }
+    }
+    .map_err(|e| e.to_string())
+}
+
+fn settle_statement(
+    args: &SettleArgs<'_>,
+) -> Result<tari_template_lib::types::stealth::StealthTransferStatement, String> {
+    match &args.payout {
+        Some(payout) => ghostline_sdk::settle_to_wallet(
+            args.channel,
+            args.deposit.clone(),
+            args.voucher,
+            payout,
+            args.treasury,
+            args.scan,
+        ),
+        None => settle(
+            args.channel,
+            args.deposit.clone(),
+            args.voucher,
+            args.service_output,
+            args.treasury,
+            args.scan,
+        ),
+    }
+    .map_err(|e| e.to_string())
+}
+
 pub struct RefundArgs<'a> {
     pub channel: &'a Channel,
     pub deposit: MaskAndValue,
-    pub payer_output: RistrettoPublicKeyBytes,
+    pub payer_output: RefundOutput,
     pub resource: ResourceAddress,
     pub max_epoch: u64,
     pub scan: OutputScan,
@@ -163,15 +213,7 @@ pub fn seal_settle(
     sealer: &RistrettoSecretKey,
     fee: Option<AccountFee<'_>>,
 ) -> Result<String, String> {
-    let statement = settle(
-        args.channel,
-        args.deposit,
-        args.voucher,
-        args.service_output,
-        args.treasury,
-        args.scan,
-    )
-    .map_err(|e| e.to_string())?;
+    let statement = settle_statement(&args)?;
     seal_hex_with_fee(
         args.scan.network,
         args.resource,
@@ -187,15 +229,7 @@ pub fn unsigned_settle(
     args: SettleArgs<'_>,
     fee_account: Option<(ComponentAddress, u64)>,
 ) -> Result<UnsignedTransaction, String> {
-    let statement = settle(
-        args.channel,
-        args.deposit,
-        args.voucher,
-        args.service_output,
-        args.treasury,
-        args.scan,
-    )
-    .map_err(|e| e.to_string())?;
+    let statement = settle_statement(&args)?;
     Ok(unsigned_stealth_transfer_with_fee(
         args.scan.network,
         args.resource,
@@ -208,13 +242,13 @@ pub fn unsigned_settle(
 pub fn unsigned_refund(
     channel: &Channel,
     deposit: MaskAndValue,
-    payer_output: RistrettoPublicKeyBytes,
+    payer_output: &RefundOutput,
     resource: ResourceAddress,
     max_epoch: u64,
     scan: OutputScan,
     fee_account: Option<(ComponentAddress, u64)>,
 ) -> Result<UnsignedTransaction, String> {
-    let statement = refund(channel, deposit, payer_output, scan).map_err(|e| e.to_string())?;
+    let statement = refund_statement(channel, deposit, payer_output, scan)?;
     Ok(unsigned_stealth_transfer_with_fee(
         scan.network,
         resource,
@@ -229,8 +263,7 @@ pub fn seal_refund(
     sealer: &RistrettoSecretKey,
     fee: Option<AccountFee<'_>>,
 ) -> Result<String, String> {
-    let statement = refund(args.channel, args.deposit, args.payer_output, args.scan)
-        .map_err(|e| e.to_string())?;
+    let statement = refund_statement(args.channel, args.deposit, &args.payer_output, args.scan)?;
     seal_hex_with_fee(
         args.scan.network,
         args.resource,

@@ -22,6 +22,7 @@ rand = "0.10.1"
 tari_bor = { version = "=0.17.2", default-features = true }
 tari_crypto = "0.24.0"
 tari_engine_types = "=0.53.3"
+tari_ootle_address = "=0.18.0"
 tari_ootle_transaction = { version = "=0.53.3", features = ["serde"] }
 tari_ootle_wallet_crypto = { version = "=0.54.0", features = ["serde"] }
 tari_template_lib = "=0.40.1"

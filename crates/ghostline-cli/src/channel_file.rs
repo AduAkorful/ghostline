@@ -44,6 +44,9 @@ pub struct ChannelFile {
     /// Payer session JSON. MCP `ghostline_call_paid` uses this when `GHOSTLINE_SESSION` is unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<PathBuf>,
+    /// Service payout destination file (`wallet payout-destination`). `channel settle` addresses the payout to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payout_destination: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub utxo_json: Option<PathBuf>,
     /// View-key mask of the channel output. Not a wallet seed, but enough to build settle and refund.
@@ -498,6 +501,7 @@ mod tests {
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("channel.json");
         let file = ChannelFile {
+            payout_destination: None,
             network_tag: 1,
             deposit: 100,
             payer_hex: "aa".into(),
@@ -533,6 +537,7 @@ mod tests {
     #[test]
     fn list_row_omits_mask_and_keys() {
         let record = ChannelFile {
+            payout_destination: None,
             network_tag: 1,
             deposit: 100,
             payer_hex: "11".repeat(32),
@@ -612,6 +617,7 @@ mod tests {
 
     fn sample() -> ChannelFile {
         ChannelFile {
+            payout_destination: None,
             network_tag: 1,
             deposit: 100,
             payer_hex: "11".repeat(32),

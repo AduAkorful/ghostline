@@ -2,6 +2,7 @@
 
 mod channel_file;
 mod demo;
+mod payout;
 mod seal;
 mod secrets;
 
@@ -350,6 +351,9 @@ enum Command {
         dry_run: bool,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
+        /// Address the payout to the service wallet in this `wallet payout-destination` file.
+        #[arg(long)]
+        payout_destination_file: Option<PathBuf>,
     },
     /// Build (and optionally submit) a refund once `current_epoch >= expiry_epoch`.
     ///
@@ -392,9 +396,14 @@ enum Command {
         dry_run: bool,
         #[arg(long, default_value_t = 90)]
         timeout_secs: u64,
+        /// Pay the refunded deposit to this payer wallet `otl_…` address so its walletd finds it.
+        #[arg(long)]
+        refund_address: Option<String>,
     },
 }
 
+// Parsed once per process, so the size gap between variants costs nothing worth boxing for.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum ChannelCommand {
     /// Write a channel file. No network call. The file has no keys until `channel open` or `channel bind`.
@@ -431,6 +440,9 @@ enum ChannelCommand {
         /// Payer session JSON. Used by MCP when `GHOSTLINE_SESSION` is unset.
         #[arg(long)]
         session: Option<PathBuf>,
+        /// Service payout destination (`wallet payout-destination`). `channel settle` pays the service wallet.
+        #[arg(long)]
+        payout_destination: Option<PathBuf>,
     },
     /// Wallet-open the channel, unblind the output, and store the mask on the file.
     Open {
@@ -578,6 +590,22 @@ enum ChannelCommand {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum WalletCommand {
+    /// Create a one-time payout destination for a service wallet address.
+    ///
+    /// Quote the printed `owner_key_hex` as `--service-output-key-hex` for one channel, and give the file to
+    /// `settle-due --payout-destination-file` (or `channel init --payout-destination`). The settled payout is then
+    /// addressed so that wallet's walletd finds and can spend it.
+    PayoutDestination {
+        /// The service wallet's `otl_…` address (`wallet account-get` prints it).
+        #[arg(long)]
+        address: String,
+        /// `mainnet`, `esmeralda` or `localnet`; must match the address.
+        #[arg(long)]
+        ootle_network: String,
+        /// Owner-only output file. It holds the payout's secret nonce.
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Allocate a fresh wallet-managed account signing key. Use one per service/channel settlement.
     KeyCreate {
         #[arg(long, default_value = "http://127.0.0.1:5100")]
@@ -1058,6 +1086,27 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Wallet { command } => match command {
+            WalletCommand::PayoutDestination {
+                address,
+                ootle_network,
+                out,
+            } => {
+                let network = ootle_network
+                    .parse::<ootle_network::Network>()
+                    .map_err(|_| format!("unknown --ootle-network {ootle_network}"))?;
+                let destination =
+                    ghostline_sdk::WalletDestination::random_for_address(&address, network)
+                        .map_err(|e| e.to_string())?;
+                payout::write(&out, &destination)?;
+                println!(
+                    "owner_key_hex={}",
+                    to_hex(destination.owner_key().as_bytes())
+                );
+                println!("payout_destination={}", out.display());
+                eprintln!(
+                    "Quote owner_key_hex as --service-output-key-hex for one channel only. Keep the file private: settlement reads its nonce."
+                );
+            }
             WalletCommand::KeyCreate { url, out } => {
                 if let Some(path) = &out
                     && path.exists()
@@ -1451,6 +1500,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 };
                 let unsigned = seal::unsigned_settle(
                     seal::SettleArgs {
+                        payout: None,
                         channel: &channel,
                         deposit,
                         voucher: &voucher,
@@ -1495,6 +1545,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 };
                 let tx = seal::seal_settle(
                     seal::SettleArgs {
+                        payout: None,
                         channel: &channel,
                         deposit,
                         voucher: &voucher,
@@ -1582,7 +1633,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let unsigned = seal::unsigned_refund(
                     &channel,
                     deposit,
-                    channel.spec().payer,
+                    &seal::RefundOutput::Key(channel.spec().payer),
                     resource,
                     max_epoch,
                     scan,
@@ -1623,7 +1674,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     seal::RefundArgs {
                         channel: &channel,
                         deposit,
-                        payer_output: channel.spec().payer,
+                        payer_output: seal::RefundOutput::Key(channel.spec().payer),
                         resource,
                         max_epoch,
                         scan,
@@ -1774,6 +1825,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             fee_account_name,
             dry_run,
             timeout_secs,
+            payout_destination_file,
         } => {
             settle_due(SettleDueArgs {
                 ledger,
@@ -1797,6 +1849,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 fee_account_name,
                 dry_run,
                 timeout_secs,
+                payout_destination: payout_destination_file,
             })
             .await?;
         }
@@ -1818,6 +1871,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             fee_account_name,
             dry_run,
             timeout_secs,
+            refund_address,
         } => {
             refund_due(RefundDueArgs {
                 open,
@@ -1827,6 +1881,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 deposit_mask_hex,
                 deposit_mask_from_channel_file: false,
                 refund_output_hex: None,
+                refund_address,
                 max_epoch,
                 resource_hex,
                 ootle_network,
@@ -2190,7 +2245,11 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             payer_wallet_url,
             ledger,
             session,
+            payout_destination,
         } => {
+            if let Some(path) = &payout_destination {
+                payout::read(path)?;
+            }
             seal::parse_channel_scan(
                 &ootle_network,
                 tari_template_lib::types::constants::STEALTH_TARI_RESOURCE_ADDRESS,
@@ -2219,6 +2278,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 payer_wallet_url,
                 ledger,
                 session,
+                payout_destination,
                 utxo_json: None,
                 deposit_mask_hex: None,
                 open_transaction_id: None,
@@ -2376,6 +2436,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 fee_account_name: record.fee_account_name.clone(),
                 dry_run,
                 timeout_secs,
+                payout_destination: record.payout_destination.clone(),
             })
             .await?;
         }
@@ -2470,6 +2531,23 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             timeout_secs,
         } => {
             let record = channel_file::ChannelFile::load(&path)?;
+            let payer_wallet_url = record
+                .payer_wallet_url
+                .clone()
+                .unwrap_or(record.opener_wallet_url.clone());
+            // An explicit output key keeps the old key-locked refund. Otherwise refund to the payer wallet's own
+            // address, which its walletd finds; a key-locked output is invisible to it.
+            let refund_address = if refund_output_hex.is_some() {
+                None
+            } else {
+                Some(
+                    connect_wallet(&payer_wallet_url)
+                        .await?
+                        .default_account_address()
+                        .await
+                        .map_err(|e| e.to_string())?,
+                )
+            };
             refund_due(RefundDueArgs {
                 open: open_args_from(&record),
                 indexer_url: record.indexer_url.clone(),
@@ -2478,6 +2556,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 deposit_mask_hex: record.deposit_mask_hex.clone(),
                 deposit_mask_from_channel_file: true,
                 refund_output_hex: refund_output_hex.or_else(|| record.refund_hex.clone()),
+                refund_address,
                 max_epoch: record.max_epoch,
                 resource_hex: None,
                 ootle_network: record.ootle_network.clone(),
@@ -2485,10 +2564,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 max_fee,
                 out: None,
                 submit,
-                wallet_url: record
-                    .payer_wallet_url
-                    .clone()
-                    .unwrap_or(record.opener_wallet_url.clone()),
+                wallet_url: payer_wallet_url,
                 seal_key_id_file,
                 fee_account_name: record.payer_fee_account_name.clone(),
                 dry_run,
@@ -2522,6 +2598,8 @@ struct SettleDueArgs {
     fee_account_name: Option<String>,
     dry_run: bool,
     timeout_secs: u64,
+    /// Service payout destination (`wallet payout-destination`). When set, the payout is addressed to that wallet.
+    payout_destination: Option<PathBuf>,
 }
 
 async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
@@ -2618,8 +2696,22 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
     let resource = seal::parse_resource(args.resource_hex.as_deref())?;
     let scan =
         seal::parse_channel_scan(&args.ootle_network, resource, channel.params().network_tag)?;
+    let payout = match &args.payout_destination {
+        Some(path) => {
+            let destination = payout::read(path)?;
+            if destination.owner_key() != voucher.service_output_key {
+                return Err(format!(
+                    "payout destination {} does not match the voucher's service output key; settle with the destination this channel quoted",
+                    path.display()
+                ));
+            }
+            Some(destination)
+        }
+        None => None,
+    };
     let unsigned = seal::unsigned_settle(
         seal::SettleArgs {
+            payout,
             channel: &channel,
             deposit: funded(channel.params().deposit, &deposit_mask)?,
             voucher: &voucher,
@@ -2785,6 +2877,7 @@ async fn watch_channel(args: WatchChannelArgs<'_>) -> Result<(), String> {
                     fee_account_name: record.fee_account_name.clone(),
                     dry_run,
                     timeout_secs,
+                    payout_destination: record.payout_destination.clone(),
                 })
                 .await;
             }
@@ -2850,6 +2943,8 @@ struct RefundDueArgs {
     fee_account_name: Option<String>,
     dry_run: bool,
     timeout_secs: u64,
+    /// Payer wallet `otl_…` address. When set, the refunded deposit is addressed so that wallet finds it.
+    refund_address: Option<String>,
 }
 
 async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
@@ -2909,14 +3004,23 @@ async fn refund_due(args: RefundDueArgs) -> Result<(), String> {
     let resource = seal::parse_resource(args.resource_hex.as_deref())?;
     let scan =
         seal::parse_channel_scan(&args.ootle_network, resource, channel.params().network_tag)?;
+    let refund_output = match &args.refund_address {
+        Some(address) => seal::RefundOutput::Wallet(Box::new(
+            ghostline_sdk::WalletDestination::random_for_address(address, scan.network)
+                .map_err(|e| e.to_string())?,
+        )),
+        None => seal::RefundOutput::Key(
+            args.refund_output_hex
+                .as_deref()
+                .map(|hex| seal::parse_pk("refund output", hex))
+                .transpose()?
+                .unwrap_or(channel.spec().payer),
+        ),
+    };
     let unsigned = seal::unsigned_refund(
         &channel,
         funded(channel.params().deposit, &deposit_mask)?,
-        args.refund_output_hex
-            .as_deref()
-            .map(|hex| seal::parse_pk("refund output", hex))
-            .transpose()?
-            .unwrap_or(channel.spec().payer),
+        &refund_output,
         resource,
         args.max_epoch,
         scan,
@@ -4403,6 +4507,7 @@ mod tests {
         let path = dir.join("channel.json");
         let mask = "55".repeat(32);
         channel_file::ChannelFile {
+            payout_destination: None,
             network_tag: 1,
             deposit: 1_000,
             payer_hex: to_hex(payer_pk.as_bytes()),
@@ -4521,6 +4626,7 @@ mod seal_tests {
         .unwrap();
         let settle_hex = seal::seal_settle(
             seal::SettleArgs {
+                payout: None,
                 channel: &channel,
                 deposit: funded(1_000, &deposit_mask).unwrap(),
                 voucher: &voucher,
@@ -4673,6 +4779,7 @@ mod seal_tests {
                 .unwrap();
         let unsigned = seal::unsigned_settle(
             seal::SettleArgs {
+                payout: None,
                 channel: &channel,
                 deposit: MaskAndValue {
                     value: 1_000,
@@ -4716,7 +4823,7 @@ mod seal_tests {
                 value: 100,
                 mask: RistrettoSecretKey::random(&mut rand::rng()),
             },
-            channel.spec().payer,
+            &seal::RefundOutput::Key(channel.spec().payer),
             STEALTH_TARI_RESOURCE_ADDRESS,
             1,
             OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),

@@ -6,6 +6,7 @@
 //! Submitting the envelope through an indexer is `ghostline-net`.
 
 mod channel;
+mod destination;
 mod error;
 mod fee;
 mod recover;
@@ -13,6 +14,7 @@ mod spend;
 mod tx;
 
 pub use channel::{BATCH_SETTLE_FUNCTION, Channel, ChannelSpec, SETTLE_FUNCTION};
+pub use destination::WalletDestination;
 pub use error::SdkError;
 pub use fee::{TREASURY_ENV, parse_fee_config, parse_treasury, treasury_from_env};
 pub use ghostline_core::{
@@ -26,8 +28,8 @@ pub use spend::settle_batch;
 #[cfg(feature = "adversarial-test-builders")]
 pub use spend::{FeeOverride, settle_with_fee_override};
 pub use spend::{
-    OpenStatement, OutputScan, fund_open, fund_open_batched, refund, refund_batched, settle,
-    settle_batched_individually,
+    OpenStatement, OutputScan, fund_open, fund_open_batched, refund, refund_batched,
+    refund_to_wallet, settle, settle_batched_individually, settle_to_wallet,
 };
 pub use tari_ootle_transaction::{TransactionEnvelope, UnsignedTransaction};
 pub use tari_ootle_wallet_crypto::MaskAndValue;

@@ -28,7 +28,7 @@ use tari_template_lib::types::{
 };
 use tari_utilities::ByteArray;
 
-use crate::{Channel, SdkError};
+use crate::{Channel, SdkError, WalletDestination};
 
 /// Ootle scan parameters for UTXO tags. Distinct from Ghostline's voucher `network_tag`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +198,32 @@ pub fn settle(
         voucher,
         service_output_key,
         treasury,
+        None,
+        scan,
+    )
+}
+
+/// Settles with the service payout addressed to the service's wallet, so walletd finds and can spend it.
+///
+/// `payout` must be the destination whose one-time key the service quoted: the voucher binds
+/// `service_output_key`, and the template pays only to that key.
+pub fn settle_to_wallet(
+    channel: &Channel,
+    deposit: MaskAndValue,
+    voucher: &SignedVoucher,
+    payout: &WalletDestination,
+    treasury: RistrettoPublicKeyBytes,
+    scan: OutputScan,
+) -> Result<StealthTransferStatement, SdkError> {
+    settle_with_leaves(
+        channel,
+        channel.leaves_vec(),
+        channel.settle_leaf(),
+        deposit,
+        voucher,
+        voucher.service_output_key,
+        treasury,
+        Some(payout),
         scan,
     )
 }
@@ -222,6 +248,7 @@ pub fn settle_batched_individually(
         voucher,
         service_output_key,
         treasury,
+        None,
         scan,
     )
 }
@@ -235,10 +262,16 @@ fn settle_with_leaves(
     voucher: &SignedVoucher,
     service_output_key: RistrettoPublicKeyBytes,
     treasury: RistrettoPublicKeyBytes,
+    payout: Option<&WalletDestination>,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     voucher.verify(channel.params())?;
     if voucher.service_output_key != service_output_key {
+        return Err(SdkError::InvalidServiceOutputKey);
+    }
+    if let Some(payout) = payout
+        && payout.owner_key() != service_output_key
+    {
         return Err(SdkError::InvalidServiceOutputKey);
     }
     if deposit.value != channel.params().deposit {
@@ -263,6 +296,7 @@ fn settle_with_leaves(
         voucher,
         service_output_key,
         fee_output,
+        payout,
         scan,
     )
 }
@@ -311,6 +345,7 @@ pub fn settle_with_fee_override(
         voucher,
         service_output_key,
         fee_output,
+        None,
         scan,
     )
 }
@@ -324,6 +359,7 @@ fn settle_statement(
     voucher: &SignedVoucher,
     service_output_key: RistrettoPublicKeyBytes,
     fee: FeeOutput,
+    payout: Option<&WalletDestination>,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     let fee_paid = if fee.auth.is_some() { fee.amount } else { 0 };
@@ -338,13 +374,16 @@ fn settle_statement(
         &channel.spec().payer,
         scan,
     )?];
-    outputs.push(output_with_mask(
-        voucher.amount,
-        voucher.mask.clone(),
-        SpendAuthorization::Key(service_output_key),
-        &service_output_key,
-        scan,
-    )?);
+    outputs.push(match payout {
+        Some(payout) => output_to_wallet(voucher.amount, voucher.mask.clone(), payout, scan)?,
+        None => output_with_mask(
+            voucher.amount,
+            voucher.mask.clone(),
+            SpendAuthorization::Key(service_output_key),
+            &service_output_key,
+            scan,
+        )?,
+    });
     if let Some(auth) = fee.auth {
         outputs.push(output_with_mask(
             fee.amount,
@@ -560,9 +599,30 @@ pub fn refund(
         channel,
         channel.leaves_vec(),
         deposit,
-        payer_output_key,
+        RefundTo::Key(payer_output_key),
         scan,
     )
+}
+
+/// Refunds after expiry to the payer's wallet address, so walletd finds and can spend the returned deposit.
+pub fn refund_to_wallet(
+    channel: &Channel,
+    deposit: MaskAndValue,
+    destination: &WalletDestination,
+    scan: OutputScan,
+) -> Result<StealthTransferStatement, SdkError> {
+    refund_with_leaves(
+        channel,
+        channel.leaves_vec(),
+        deposit,
+        RefundTo::Wallet(destination),
+        scan,
+    )
+}
+
+enum RefundTo<'a> {
+    Key(RistrettoPublicKeyBytes),
+    Wallet(&'a WalletDestination),
 }
 
 /// Refunds a batch-enabled channel after expiry using its matching committed condition tree.
@@ -576,7 +636,7 @@ pub fn refund_batched(
         channel,
         channel.batched_leaves_vec(),
         deposit,
-        payer_output_key,
+        RefundTo::Key(payer_output_key),
         scan,
     )
 }
@@ -585,7 +645,7 @@ fn refund_with_leaves(
     channel: &Channel,
     leaves: Vec<tari_template_lib::types::stealth::SpendCondition>,
     deposit: MaskAndValue,
-    payer_output_key: RistrettoPublicKeyBytes,
+    refund_to: RefundTo<'_>,
     scan: OutputScan,
 ) -> Result<StealthTransferStatement, SdkError> {
     if deposit.value != channel.params().deposit {
@@ -597,12 +657,20 @@ fn refund_with_leaves(
 
     let (witness, _) =
         stealth::script_path_witness_with_data(&leaves, channel.refund_leaf(), Default::default())?;
-    let outputs = [output(
-        channel.params().deposit,
-        SpendAuthorization::Key(payer_output_key),
-        &payer_output_key,
-        scan,
-    )?];
+    let outputs = [match refund_to {
+        RefundTo::Key(key) => output(
+            channel.params().deposit,
+            SpendAuthorization::Key(key),
+            &key,
+            scan,
+        )?,
+        RefundTo::Wallet(destination) => output_to_wallet(
+            channel.params().deposit,
+            RistrettoSecretKey::random(&mut rand::rng()),
+            destination,
+            scan,
+        )?,
+    }];
 
     channel_close_statement(deposit, witness, &outputs)
 }
@@ -714,6 +782,45 @@ fn output_with_mask(
     })
 }
 
+/// An output walletd recognises as its own: data and tag keyed to the address's view key, locked to the one-time
+/// spend key `H(r·V)·G + A`. Mirrors upstream `build_stealth_output_witness` for `StealthPublicKey`.
+fn output_to_wallet(
+    amount: u64,
+    mask: RistrettoSecretKey,
+    destination: &WalletDestination,
+    scan: OutputScan,
+) -> Result<StealthOutputWitness, SdkError> {
+    if destination.network() != scan.network {
+        return Err(SdkError::Address(format!(
+            "destination is for {} but the output is on {}",
+            destination.network(),
+            scan.network
+        )));
+    }
+    let view = destination.view_public_key();
+    let encrypted_data = StealthCryptoApi::new()
+        .encrypt_value_and_mask(amount, &mask, view, destination.nonce(), None)
+        .map_err(|err| SdkError::Encrypt(err.to_string()))?;
+    let tag = StealthCryptoApi::new().derive_stealth_output_tag(
+        scan.network,
+        destination.nonce(),
+        view,
+        &scan.resource,
+    );
+    Ok(StealthOutputWitness {
+        witness: OutputWitness {
+            amount,
+            mask,
+            sender_public_nonce: destination.public_nonce(),
+            minimum_value_promise: 1,
+            encrypted_data,
+            resource_view_key: None,
+        },
+        auth: SpendAuthorization::Key(destination.owner_key()),
+        tag,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -800,6 +907,167 @@ mod tests {
             .to_byte_type();
         assert_eq!(fee.output.commitment, expected);
         tari_engine_types::stealth::validate_transfer(&statement, None).unwrap();
+    }
+
+    /// The receive side as walletd runs it (upstream `ootle_sdk_core::stealth::scan_stealth_output`): tag and AEAD
+    /// keyed by the view secret, then the one-time spend key re-derived from the view secret and account key.
+    /// Returns the opened funds and the spend secret walletd would derive.
+    fn wallet_scan(
+        output: &tari_template_lib::types::stealth::StealthUnspentOutput,
+        account: &(RistrettoSecretKey, RistrettoPublicKey),
+        view: &(RistrettoSecretKey, RistrettoPublicKey),
+    ) -> Option<(MaskAndValue, RistrettoSecretKey)> {
+        let funds = crate::unblind_output(&output.output, output.tag, &view.0, scan()).ok()?;
+        let nonce =
+            RistrettoPublicKey::from_canonical_bytes(output.output.sender_public_nonce.as_bytes())
+                .unwrap();
+        let api = StealthCryptoApi::new();
+        let expected = api.derive_stealth_owner_public_key_from_view_key(
+            scan().network,
+            &account.1,
+            &view.0,
+            &nonce,
+        );
+        if output.auth != SpendAuthorization::Key(expected.to_byte_type()) {
+            return None;
+        }
+        let spend_secret =
+            api.derive_stealth_owner_secret(scan().network, &account.0, &view.0, &nonce);
+        Some((funds, spend_secret))
+    }
+
+    fn service_wallet() -> (
+        (RistrettoSecretKey, RistrettoPublicKey),
+        (RistrettoSecretKey, RistrettoPublicKey),
+        WalletDestination,
+    ) {
+        let account = create_key_pair_from_seed(21);
+        let view = create_key_pair_from_seed(22);
+        let destination = WalletDestination::new(
+            scan().network,
+            account.1.to_byte_type(),
+            view.1.to_byte_type(),
+            RistrettoSecretKey::random(&mut rand::rng()),
+        )
+        .unwrap();
+        (account, view, destination)
+    }
+
+    #[test]
+    fn wallet_payout_is_found_and_spendable_by_the_service_wallet() {
+        let (secret, channel, _) = channel_and_keys();
+        let (account, view, payout) = service_wallet();
+        let voucher =
+            SignedVoucher::sign(&secret, channel.params(), 300, payout.owner_key()).unwrap();
+        let statement = settle_to_wallet(
+            &channel,
+            funded(1_000),
+            &voucher,
+            &payout,
+            treasury(),
+            scan(),
+        )
+        .unwrap();
+        tari_engine_types::stealth::validate_transfer(&statement, None).unwrap();
+
+        let service_output = &statement.outputs_statement.outputs[1];
+        assert_eq!(
+            service_output.auth,
+            SpendAuthorization::Key(payout.owner_key())
+        );
+        let (funds, spend_secret) =
+            wallet_scan(service_output, &account, &view).expect("walletd finds the payout");
+        assert_eq!(funds.value, 300);
+        assert_eq!(funds.mask, voucher.mask);
+        assert_eq!(
+            RistrettoPublicKey::from_secret_key(&spend_secret).to_byte_type(),
+            payout.owner_key()
+        );
+
+        // The template still sees the voucher commitment, the fee quotient and the treasury key.
+        let fee = &statement.outputs_statement.outputs[2];
+        assert_eq!(fee.auth, SpendAuthorization::Key(treasury()));
+        assert_eq!(
+            fee.output.commitment,
+            MaskAndValue::new(3, fee_mask(&voucher.mask))
+                .to_commitment()
+                .to_byte_type()
+        );
+    }
+
+    #[test]
+    fn key_addressed_payout_is_invisible_to_the_wallet_scan() {
+        // The pre-fix shape that stranded mainnet payouts: encrypted to the bare spend key.
+        let (secret, channel, _) = channel_and_keys();
+        let (account, view, _) = service_wallet();
+        let bare: RistrettoPublicKeyBytes = account.1.to_byte_type();
+        let voucher = SignedVoucher::sign(&secret, channel.params(), 300, bare).unwrap();
+        let statement =
+            settle(&channel, funded(1_000), &voucher, bare, treasury(), scan()).unwrap();
+        assert!(wallet_scan(&statement.outputs_statement.outputs[1], &account, &view).is_none());
+    }
+
+    #[test]
+    fn wallet_payout_must_be_the_destination_the_voucher_names() {
+        let (secret, channel, _) = channel_and_keys();
+        let (_, _, quoted) = service_wallet();
+        let (_, _, other) = service_wallet();
+        let voucher =
+            SignedVoucher::sign(&secret, channel.params(), 300, quoted.owner_key()).unwrap();
+        let err = settle_to_wallet(
+            &channel,
+            funded(1_000),
+            &voucher,
+            &other,
+            treasury(),
+            scan(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SdkError::InvalidServiceOutputKey), "{err}");
+    }
+
+    #[test]
+    fn wallet_payout_refuses_a_destination_on_another_network() {
+        let (secret, channel, _) = channel_and_keys();
+        let account = create_key_pair_from_seed(21);
+        let view = create_key_pair_from_seed(22);
+        let mainnet = WalletDestination::new(
+            Network::MainNet,
+            account.1.to_byte_type(),
+            view.1.to_byte_type(),
+            RistrettoSecretKey::random(&mut rand::rng()),
+        )
+        .unwrap();
+        let voucher =
+            SignedVoucher::sign(&secret, channel.params(), 300, mainnet.owner_key()).unwrap();
+        let err = settle_to_wallet(
+            &channel,
+            funded(1_000),
+            &voucher,
+            &mainnet,
+            treasury(),
+            scan(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SdkError::Address(_)), "{err}");
+    }
+
+    #[test]
+    fn wallet_refund_is_found_and_spendable_by_the_payer_wallet() {
+        let (_, channel, _) = channel_and_keys();
+        let (account, view, destination) = service_wallet();
+        let statement = refund_to_wallet(&channel, funded(1_000), &destination, scan()).unwrap();
+        tari_engine_types::stealth::validate_transfer(&statement, None).unwrap();
+        let (funds, spend_secret) =
+            wallet_scan(&statement.outputs_statement.outputs[0], &account, &view)
+                .expect("walletd finds the refund");
+        assert_eq!(funds.value, 1_000);
+        assert_eq!(
+            SpendAuthorization::Key(
+                RistrettoPublicKey::from_secret_key(&spend_secret).to_byte_type()
+            ),
+            statement.outputs_statement.outputs[0].auth
+        );
     }
 
     #[cfg(feature = "trusted-local-batch-prototype")]

@@ -19,6 +19,7 @@ pub enum SdkError {
     InvalidServiceOutputKey,
     Encode,
     Encrypt(String),
+    Address(String),
     Decrypt(String),
     TagMismatch,
     UnknownNetwork(u8),
@@ -54,6 +55,7 @@ impl fmt::Display for SdkError {
             }
             Self::Encode => write!(f, "failed to encode bound template arguments"),
             Self::Encrypt(details) => write!(f, "failed to encrypt output data: {details}"),
+            Self::Address(details) => write!(f, "invalid wallet destination: {details}"),
             Self::Decrypt(details) => write!(f, "failed to decrypt output data: {details}"),
             Self::TagMismatch => write!(f, "utxo tag does not match this claim key and resource"),
             Self::UnknownNetwork(byte) => write!(

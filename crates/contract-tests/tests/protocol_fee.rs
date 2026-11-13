@@ -7,8 +7,8 @@ mod support;
 
 use ghostline_core::{NONCE_LEN, SignedVoucher, VoucherError};
 use ghostline_sdk::{
-    Channel, ChannelSpec, FeeOverride, MaskAndValue, OutputScan, SdkError, settle,
-    settle_with_fee_override,
+    Channel, ChannelSpec, FeeOverride, MaskAndValue, OutputScan, SdkError, WalletDestination,
+    settle, settle_to_wallet, settle_with_fee_override,
 };
 use ootle_byte_type::ToByteType;
 use support::{DEPOSIT, FEE_CONFIG, FeeSetup, fund, templates};
@@ -121,6 +121,40 @@ fn submit(
     } else {
         Err(format!("{:?}", result.expect_failure()))
     }
+}
+
+#[test]
+fn settlement_to_a_wallet_destination_is_accepted() {
+    // The payout is locked to a one-time key derived from the service wallet's address, which the voucher names as
+    // its service output key. The template only checks that key, so the walletd-detectable shape settles as before.
+    let mut f = fixture();
+    let (_, account) = create_key_pair_from_seed(31);
+    let (_, view) = create_key_pair_from_seed(32);
+    let payout = WalletDestination::new(
+        f.scan.network,
+        account.to_byte_type(),
+        view.to_byte_type(),
+        RistrettoSecretKey::random(&mut rand::rng()),
+    )
+    .unwrap();
+    let (payer_secret, _) = create_key_pair_from_seed(11);
+    f.voucher = SignedVoucher::sign(
+        &payer_secret,
+        f.channel.params(),
+        PAYOUT,
+        payout.owner_key(),
+    )
+    .unwrap();
+    let statement = settle_to_wallet(
+        &f.channel,
+        f.deposit.clone(),
+        &f.voucher,
+        &payout,
+        f.fee.treasury,
+        f.scan,
+    )
+    .unwrap();
+    submit(&mut f, statement).expect("wallet-addressed settle");
 }
 
 #[test]
