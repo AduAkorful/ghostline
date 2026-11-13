@@ -155,13 +155,12 @@ export default function Landing() {
 
       {/* Desktop teaser ("next" tier). No waitlist: the site has no backend. */}
       <section className="border-t border-rule bg-paper">
-        <div className="mx-auto grid max-w-[1200px] items-center gap-6 px-4 py-14 md:grid-cols-[auto_1fr_auto] md:px-6">
+        <div className="mx-auto grid max-w-[1200px] items-center gap-6 px-4 py-14 md:grid-cols-[auto_1fr] md:px-6">
           <span className="w-fit rounded-sm border border-ghost/50 px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-ghost">Coming next</span>
           <div>
             <h2 className="text-xl font-semibold">The Ghostline desktop app</h2>
             <p className="mt-1 max-w-2xl text-muted">One window for your wallet, channels, spending policy and approvals, with nothing to configure by hand. Your keys stay on your machine. Until then, the CLI and MCP server do everything shown here.</p>
           </div>
-          <a href="https://github.com/AduAkorful/ghostline" className="text-sm text-chain underline underline-offset-4">Follow on GitHub ↗</a>
         </div>
       </section>
 

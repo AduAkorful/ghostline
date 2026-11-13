@@ -34,7 +34,7 @@ export function llmsTxt(): string {
     "",
     "> Private pay-per-call channels for AI agents on Tari Ootle mainnet. An agent locks funds once, signs a cumulative voucher for each paid HTTP call off-chain, and the service settles once on chain. A spending policy outside the agent limits what it can sign. Unaudited: keep deposits small.",
     "",
-    "Every documentation page below is Markdown. Fetch a page with the `.md` URL, or all pages at once from llms-full.txt. Amounts are integer micro-TARI (µT); one TARI is 1,000,000 µT.",
+    "Every documentation page below is Markdown. Fetch a page with the `.md` URL, or all pages at once from llms-full.txt. Mainnet needs Ghostline 0.5.0 or later. Amounts are integer micro-TARI (µT); one TARI is 1,000,000 µT.",
     "",
   ];
   for (const group of GROUPS) {

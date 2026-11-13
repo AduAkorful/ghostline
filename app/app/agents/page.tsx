@@ -23,7 +23,7 @@ const CONFIG = `{
 }`;
 
 const STEPS = [
-  { t: "Install Ghostline", d: "Build ghostline, ghostline-mcp and ghostline-paid-api from the repository.", href: "/docs/install/" },
+  { t: "Install Ghostline", d: "Mainnet needs 0.5.0 or later: install the latest release, or build ghostline, ghostline-mcp and ghostline-paid-api from source.", href: "/docs/install/" },
   { t: "Run your wallet with cookie login", d: "tari_ootle_walletd 0.53.3 on 127.0.0.1 with --cookie-auth true. Never --authentication none.", href: "/docs/mainnet-quickstart/#1-start-the-wallet-with-cookie-login" },
   { t: "Create the channel record", d: "ghostline channel init with the service's terms and a Ghostline claim key, so no wallet view key is exported.", href: "/docs/mainnet-quickstart/" },
   { t: "Connect the MCP server", d: "Add the config below to your MCP host. Secrets stay in the environment, never in tool arguments.", href: "/docs/mcp/" },
