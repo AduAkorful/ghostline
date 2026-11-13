@@ -6,19 +6,19 @@ Ghostline is unaudited. Fees are public. If one wallet plays every role, as in t
 
 ## What you need
 
-- **Ghostline from this repository** at commit `bd8ad10` or later. Build `ghostline` and `ghostline-paid-api` with `cargo build --release`. The published `v0.4.0` release predates the protocol fee and mainnet, so it does not work.
+- **Ghostline built from source** ([install](install.md#build-from-source)) at commit `bd8ad10` or later. Build `ghostline` and `ghostline-paid-api` with `cargo build --release`. The published `v0.4.0` release predates the protocol fee and mainnet, so it does not work.
 - **Tari Ootle wallet daemon 0.53.3** (`tari_ootle_walletd`), from the [tari-ootle v0.53.3 release](https://github.com/tari-project/tari-ootle/releases/tag/v0.53.3). Check the published `.sha256` before running it. There is no Intel macOS build.
 - **TARI in that wallet.** Burn XTM on L1 and claim it (Tari Universe does this). A claim arrives as a private (stealth) balance.
 - `curl`, `python3` and `openssl` for the helper commands below.
 
 ## Mainnet deployment
 
-From [`deploy/mainnet.json`](../deploy/mainnet.json). Check them against the indexer yourself (`GET /substates/<address>` should return HTTP 200).
+These are the addresses from the [mainnet deployment](deployment.md). Check them against the indexer yourself (`GET /substates/<address>` should return HTTP 200).
 
 | | Value |
 |---|---|
-| Channel template | `ae13cead3c34052116c49fc09e4645f3a62edf55857c0e2e45226dd7093cef9c` |
-| Fee config | `component_37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5` |
+| Channel template | [`ae13cead3c34052116c49fc09e4645f3a62edf55857c0e2e45226dd7093cef9c`](https://indexer-a.ootle.tari.com/substates/template_ae13cead3c34052116c49fc09e4645f3a62edf55857c0e2e45226dd7093cef9c) |
+| Fee config | [`component_37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5`](https://indexer-a.ootle.tari.com/substates/component_37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5) |
 | Indexers | `https://indexer-a.ootle.tari.com`, `https://indexer-b.ootle.tari.com` |
 | Network tag / byte | `0` |
 
@@ -26,14 +26,14 @@ Settlements pay 1% of the service payout to the fee config's current treasury. G
 
 ## Fees you will pay
 
-Measured on mainnet, 13 Nov 2026. Re-run the dry-runs; fees change.
+Mainnet observations from 13 Nov 2026. Dry-run the actual transaction because fees change.
 
 | Transaction | Paid by | Fee (µT) |
 |---|---|---|
 | Create your account with revealed TARI (once) | wallet, from private balance | 11,070 |
 | Channel open | opener | 15,919 |
 | Settle | service fee account | ~28,800 |
-| Expiry refund | payer fee account | ~10,000 |
+| Expiry refund | payer fee account | 10,014 |
 
 A settle costs about 29,000 µT, so a channel only makes sense when the payments it carries are worth well more than that. Prices must be multiples of 100 µT. A deposit `D` can settle at most `floor((D − 1) / 101) × 100` µT: the 1% fee and 1 µT of change are reserved.
 
@@ -169,7 +169,7 @@ The deposit is refunded to the payer wallet's own address, and walletd lists it 
 
 ## Agent path (MCP)
 
-`ghostline-mcp` runs the same flow as stdio tools for an agent host. Run on mainnet on 13 Nov 2026: open `83e7510e…85f0`, five `ghostline_call_paid` calls, sixth refused by policy, settle `ca036bf1…ab8c0`.
+`ghostline-mcp` runs the same flow as stdio tools for an agent host. Run on mainnet on 13 Nov 2026: open [`83e7510e…85f0`](https://indexer-a.ootle.tari.com/transactions/83e7510e9d504a3e80b6f4e45f17d41894931eca6b1dcaa256eee7526b9985f0), five `ghostline_call_paid` calls, sixth refused by policy, settle [`ca036bf1…b8c0`](https://indexer-a.ootle.tari.com/transactions/ca036bf190cfc29786511feaf91d4a6b0579d4058ce7cc55a6655063d03ab8c0).
 
 **Payer side.** Give the server only the payer wallet's cookie:
 
@@ -213,6 +213,6 @@ Call `ghostline_close_channel` with `{}`. The settle pays the treasury read from
 
 ## Mainnet record (13 Nov 2026)
 
-- Open `e0abfa2b…5cdd`, 10 calls, settle `b0270a26…ba72`: the first fee output.
-- Open `2053b611…41e5`, 5 calls, settle `f4aa9c61…67c1`: the payout was found by walletd.
-- Open `1664ba30…a0b6`, expiry refund `4cc8c48f…9204`: the deposit was found by walletd.
+- Open [`e0abfa2b…5cdd`](https://indexer-a.ootle.tari.com/transactions/e0abfa2b6381a793f592b9396bc5d10635254528a19fb481e33eed1c76365cdd), 10 calls, settle [`b0270a26…ba72`](https://indexer-a.ootle.tari.com/transactions/b0270a268121e67922884423cb5123a7442a5a1833f6c694f74058d81140ba72): the first fee output.
+- Open [`2053b611…41e5`](https://indexer-a.ootle.tari.com/transactions/2053b611c4b09741a0d5f2ceb4db0d4b6b38e97bbccf6bba1a82051e999641e5), 5 calls, settle [`f4aa9c61…67c1`](https://indexer-a.ootle.tari.com/transactions/f4aa9c613d5def17c0ca2ac4c50d266febf997293f49c8e70dbe71a90cd667c1): the payout was found by walletd.
+- Open [`1664ba30…a0b6`](https://indexer-a.ootle.tari.com/transactions/1664ba301a51fe7de3ad1e44336757b056aa03f368f1c9ded9822ab094a7a0b6), expiry refund [`4cc8c48f…9204`](https://indexer-a.ootle.tari.com/transactions/4cc8c48f3428cfa99ce82e271e9960c1ca5b8f4ca7ccb6f5d8e620e68b469204): the deposit was found by walletd.

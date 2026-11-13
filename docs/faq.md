@@ -1,8 +1,8 @@
 # Ghostline FAQ
 
-## Do I need to clone the repository?
+## Do I need to build Ghostline from source?
 
-No, if you use the glibc-based Linux x86-64 release. The [installer](install.md) downloads the CLI, MCP server, and reference API. Live payments still require a compatible funded Ootle wallet and the provider's channel configuration; the installer does not supply those.
+Not to run the local demo: the [installer](install.md) downloads the CLI, MCP server and reference API for glibc-based Linux x86-64. For mainnet, yes: the published release predates the mainnet template and the protocol fee, so [build from source](install.md#build-from-source). Live payments also require a compatible funded Ootle wallet and the provider's channel configuration; neither the installer nor the build supplies those.
 
 ## What does Ghostline hide?
 
@@ -50,8 +50,8 @@ No. The TypeScript package currently matches channel-id and voucher encoding/sig
 
 ## Is Ghostline audited or ready for real funds?
 
-No. It is early development, has not had an independent audit, and is intended for testnet use. Do not use real funds. The two documented self-review rounds are not a substitute for independent security review.
+Ghostline has finalized an open, settlement, and expiry refund on mainnet. It has two documented self-review rounds and has yet to receive an independent audit. Use the [mainnet quickstart](mainnet-quickstart.md) for the supported flow and keep deposits small.
 
 ## Does the side-by-side demo exist?
 
-A [read-only prototype](../demo/ui/README.md) presents sanitized Esmeralda evidence for 20 paid calls followed by one settlement using the newly published fixed-output template. It contains no wallet connection or transaction controls. Call counts come from service records; the page and CLI privacy receipts are operator summaries, not cryptographic proof of the off-chain call log.
+The [Two views simulator](https://ghostline-ui.vercel.app/privacy/) compares a private call ledger with what an observer sees on mainnet. The [Esmeralda contest demo](https://ghostline-ui.vercel.app/demo/) is a separate historical demo. Call counts come from service records. The public chain records the open and close.

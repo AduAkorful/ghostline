@@ -72,12 +72,12 @@ The CLI is the operator interface for channel files, wallet opens/submits, offli
 
 ## TypeScript package
 
-Package: `@ghostline/sdk` (`packages/ghostline`). It implements the shared voucher/channel-id surface, not wallet operations. Current exports are:
+Package: `@ghostline/sdk`. It implements the shared voucher/channel-id surface, not wallet operations. Current exports are:
 
 - Channel: `CHANNEL_ID_DOMAIN`, `CHANNEL_ID_LEN`, `NONCE_LEN`, `ChannelParams`, `channelId`, `fromHex`, `toHex`, `voucherMessage`.
 - Voucher: `VOUCHER_DOMAIN`, `SignedVoucher`, `computeChallenge`, `publicKeyFromSecret`, `signVoucher`, `verifyVoucher`, `voucherToBytes`.
 
-The package requires Node.js 22 or newer. Rust/TypeScript shared vectors live in the package and Rust tests; use `npm test --prefix packages/ghostline` to check parity.
+The package requires Node.js 22 or newer. Rust/TypeScript shared vectors live in the package and Rust tests; run the package's tests (`npm test`) to check parity.
 
 ## MCP stdio server
 
@@ -101,4 +101,4 @@ Configure an MCP client to launch the installed `ghostline-mcp` over stdio. For 
 
 Wallet-backed close needs `GHOSTLINE_SEAL_KEY_ID_FILE` referencing the operation's signer in the selected wallet: the service key for settlement or payer key for refund. `GHOSTLINE_CLOSE_DRY_RUN=1` submits only to the wallet's dry-run path and is mutually exclusive with `GHOSTLINE_CLOSE_SUBMIT=1`. MCP close uses a fixed 100000 µT maximum fee. The channel-file settle and refund commands expose `--max-fee`; their default is 100000 µT. Lower-level `settle-due` and `refund-due` also expose `--max-fee`.
 
-Human approval is requested through MCP elicitation when the configured policy requires it. If the MCP client cannot provide consent, the payment does not proceed. For all process environment variables and the tested open/call/close sequence, see [Quickstart](quickstart.md).
+Human approval is requested through MCP elicitation when the configured policy requires it. If the MCP client cannot provide consent, the payment does not proceed. For all process environment variables, see the [MCP server](mcp.md#process-settings) page; for the tested open, call and close sequence, see the [mainnet quickstart](mainnet-quickstart.md#agent-path-mcp).

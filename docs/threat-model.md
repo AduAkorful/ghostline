@@ -1,13 +1,13 @@
 # Ghostline threat model
 
-Unaudited. Testnet only. This is a working model of who can do what, not a claim that the implementation is safe.
+Ghostline has finalized opens, settlements, and an expiry refund on Tari Ootle mainnet. No independent review has closed. The model below describes the mainnet deployment and identifies historical Esmeralda evidence where it applies. See the [mainnet quickstart](mainnet-quickstart.md) and the [mainnet observer test](privacy.md#mainnet-observer-test-13-nov-2026).
 
 ## Assets
 
 - Channel deposit (stealth UTXO)
 - Payer signing key
 - Service sealing key
-- Browser session payer key in the planned Sapient flow
+- Ephemeral browser signing key in the frozen Esmeralda demo
 - Wallet view key and account key (when the deposit is wallet-built)
 - Off-chain vouchers and the HTTP path they travel on
 - Policy limits (budget, per-call ceiling, vendor allowlist)
@@ -20,10 +20,11 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 | Policy engine | Runs outside the agent. Enforces limits only if the agent actually signs through it; the human gate depends on a separate CLI operator or MCP host UI |
 | Service | Knows the declared channel deposit limit, sees every request and voucher (including voucher amount/mask), and can settle any valid cumulative amount it holds, once. It does not receive the deposit UTXO mask in ordinary individual flows. |
 | Batch coordinator | No production coordinator exists. The current SDK batch prototype receives every channel's deposit value and mask in one process, so that process can learn every opening. It is not suitable as a hosted multi-user coordinator. |
-| Public observer | Claim-free Esmeralda settlement and payer-refund transactions hid the deposit and plaintext values in transaction fields. Fees, condition branches, and other transaction metadata remain visible. |
+| Public observer | Sees the open and close, their UTXO link, public network fees, branch and authorization data, output commitments, and timing. Mainnet run 4 disclosed no plaintext deposit or settlement amounts. |
+| Treasury key holder | Can recover each protocol fee amount and infer the corresponding service payout at the fixed 1% rate. The fee-config owner can update the treasury key. |
 | Wallet daemon | If used for open/settle, it sees amounts, masks, and keys it holds |
 | Ootle validators | See the same public fields any observer sees, plus whatever the protocol leaks in proofs and fees |
-| Hosted demo relay (planned) | Would temporarily control a small Esmeralda test deposit and the wallet profile that opens the channel; this is testnet custody and creates a funding correlation the local-wallet flow does not have. |
+| Frozen Esmeralda demo relay | Temporarily controls the test deposit and the wallet profile that opens the channel. This custody and funding linkage are specific to the contest demo. |
 
 ## Goals we try to meet
 
@@ -40,7 +41,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 - Hiding the declared deposit limit or voucher details from the service; the service needs them to validate and serve payments
 - Hiding deposit openings from a coordinator in the current batch prototype; production flows do not use that prototype
 - Hiding transaction fees or the account that paid them
-- Hiding fees, timing, the fixed two-output shape, opaque channel id, and authorization data revealed by the selected spend leaf
+- Hiding fees, timing, the three-output settlement shape, opaque channel id, and authorization data revealed by the selected spend leaf
 - Hiding the payer/service association within a settlement, even when the service uses separate channel-authorization and payout keys
 - Stopping an agent that signs with `--unsafe-no-policy` or a raw secret
 - Hiding the faucet (or other public funding) of the fee-paying account
@@ -48,7 +49,7 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 ## Main attacks
 
-**Replay / stale voucher.** Cumulative amounts only increase. Redeeming pays the delta over what was already redeemed. A lower voucher after a higher one must fail.
+**Replay / stale voucher.** The service accepts only increasing cumulative amounts. The on-chain template settles once and spends the channel output, so a second redemption cannot spend the same output.
 
 **Settle after expiry / refund before.** The condition tree is two leaves: settle (`BeforeEpoch` + service key + template `settle`) and refund (`AfterEpoch` + payer key). In-process tests cover the epoch cut. Live Esmeralda: a refund before `AfterEpoch` does not spend the channel UTXO (`OnlyFeeAccepted` / `AcceptFeeRejectRest`). A refund at/after expiry Finalized Commit (stealth transfer of the deposit; opener paid the public fee). A live settle at the expiry epoch is `OnlyFeeAccepted`: `BeforeEpoch` fails, the channel UTXO stays unspent, public fees are still taken. A wallet dry-run settle at that epoch can still print Accept; that is not a live spend.
 
@@ -56,11 +57,11 @@ Unaudited. Testnet only. This is a working model of who can do what, not a claim
 
 **Wrong-channel voucher.** Vouchers are bound to `channel_id` (network tag, payer, deposit, payer root, nonce). A voucher for another channel must fail verification.
 
-**Settlement amount confidentiality.** The payer signs the service output's Pedersen commitment, and the template requires that exact commitment to be paid to the signed service key. The witness contains no amount or commitment opening, outputs use a one-unit minimum-value promise, and the template rejects revealed values or extra inputs. Fresh Esmeralda settlement and expiry-refund transactions finalized with empty covenant-claim lists and no plaintext amounts. Branch, opaque channel id, authorization data, timing, and fees remain visible; this does not hide activity from the service. The local contract now also enforces exactly two outputs and rejects a full-deposit voucher. Deploy and retest that change before treating output shape as private on Esmeralda.
+**Settlement amount confidentiality.** The payer signs the service output's Pedersen commitment, and the template requires that exact commitment to be paid to the signed service key. The witness contains no amount or commitment opening, outputs use a one-unit minimum-value promise, and the template rejects revealed values or extra inputs. Fresh Esmeralda settlement and expiry-refund transactions finalized with empty covenant-claim lists and no plaintext amounts. Branch, opaque channel id, authorization data, timing, and fees remain visible; this does not hide activity from the service. Mainnet settles have three stealth outputs for service payout, payer change, and the 1% treasury fee. Cumulative amounts must be multiples of 100 µT and leave room for the protocol fee and at least 1 µT of change.
 
 **Policy bypass.** If the agent can reach the payer secret, policy is advisory. The on-chain limit is the deposit. Human rules can gate every payment, calls at or above a configured µT threshold, or a vendor's first payment. The CLI asks for terminal confirmation and MCP requests client elicitation; the MCP host must actually present the prompt to a person. The low-level policy API trusts its caller's attestation boolean. Optional JSONL audit logging is append-only and fails closed on write errors, but it does not protect against an operator who can edit or replace the file.
 
-**Browser-session key exposure (planned live Sapient mode).** The proposed ephemeral payer key would sign vouchers from the active page. A page compromise during that session could authorize vouchers up to the channel's deposit limit. The small testnet deposit caps the loss; it does not make a compromised tab safe. The current static browser demo does not connect a wallet, open a channel, or keep a payer key in session storage.
+**Browser-session key exposure (Esmeralda demo).** A compromised tab could authorize vouchers up to that test channel’s deposit limit. The mainnet site simulates channels in the browser. Mainnet signing stays in the operator’s local tools.
 
 **Wallet-built deposit encrypted to the view key.** `accounts.stealth_transfer` with a wallet `destination_address` encrypts the output to the wallet view key, not the Ghostline payer key. Unblinding with the payer secret fails. Settlement needs the view-key mask (or a wallet that already holds it).
 
@@ -76,4 +77,4 @@ New derived accounts are not scanned until `keys.create` has produced that index
 
 ## Residual risk
 
-No independent review round has closed. Property tests cover accounting invariants in-process; they do not replace a review of the template against the current engine. Do not use with real funds.
+No independent review round has closed. Property tests cover accounting invariants in-process; they do not replace a review of the template against the current engine. Keep mainnet exposure small and account for the public fee and funding links. See [Privacy](privacy.md) for the measured disclosures.

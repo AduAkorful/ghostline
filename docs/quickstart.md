@@ -37,7 +37,7 @@ bash ghostline-esmeralda-demo.sh
 
 It defaults to 3 calls at 100 µT each and a 100,000 µT channel deposit. You can change those values in its prompts. Review both fee dry-runs; unused fee-cap amounts may not be refunded. Each transaction needs a separate confirmation, and settlement consumes the channel output. State is kept in an owner-only directory because it contains the deposit mask; remove it after saving your explorer links and no longer needing the local call record. The current deployment profile comes from [the recorded Ghostline Esmeralda evidence](../demo/ui/evidence.json); the script checks the active template substate at the documented address and stops if the address is missing or resolves to a different template. Esmeralda may reset, so a failed profile check means stop and obtain a freshly verified deployment profile.
 
-Ghostline is early development, unaudited, and testnet only. Do not use real funds.
+This walkthrough is for the Esmeralda testnet and its published template, which predates the protocol fee; use test funds only. Ghostline itself is live on mainnet and unaudited, so for mainnet follow the [mainnet quickstart](mainnet-quickstart.md) and keep deposits small.
 
 ## Optional manual CLI walkthrough
 

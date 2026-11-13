@@ -1,10 +1,28 @@
 # Install Ghostline
 
-The current Ghostline release is [`v0.4.0`](https://github.com/AduAkorful/ghostline/releases/tag/v0.4.0). Its Linux x86-64 download includes `ghostline`, `ghostline-paid-api`, and `ghostline-mcp`. These run on your computer; installation does not create or fund a wallet.
+Ghostline's executables are `ghostline` (the command-line tool), `ghostline-mcp` (the MCP server) and `ghostline-paid-api` (the reference paywalled API). They run on your computer; installing them does not create or fund a wallet.
 
-## Download the executables
+**For mainnet, build from source.** The published `v0.4.0` download predates the mainnet template and the protocol fee, so it can run the local demo but cannot open a mainnet channel.
 
-Prebuilt downloads support **glibc-based Linux x86-64**. The installer requires `curl`, `tar`, `sha256sum`, and `awk`. It downloads the latest release, checks its SHA-256 checksum, and installs without root:
+## Build from source
+
+The verified development platform is Linux. Prebuilt downloads for macOS, Windows, ARM, and musl-based Linux are not provided; this guide does not establish source-build support on those platforms.
+
+Install Rust through `rustup`, Git, a C/C++ toolchain, Clang with libclang, CMake, and the protobuf compiler (`protoc`). Use the Rust version the source pins.
+
+```sh
+git clone https://github.com/AduAkorful/ghostline.git
+cd ghostline
+cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api
+mkdir -p "$HOME/.local/bin"
+install -m 0755 target/release/ghostline target/release/ghostline-mcp target/release/ghostline-paid-api "$HOME/.local/bin/"
+```
+
+These commands build the host executables from the current source. Building the channel WASM and publishing a template are separate operator tasks; a template hash must come from an actual deployment.
+
+## Download the executables (local demo)
+
+These downloads run the local demo and the CLI, but not mainnet: the published release predates the mainnet template and the protocol fee. Prebuilt downloads support **glibc-based Linux x86-64**. The installer requires `curl`, `tar`, `sha256sum`, and `awk`. It downloads the latest release, checks its SHA-256 checksum, and installs without root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
@@ -36,39 +54,22 @@ Set `GHOSTLINE_INSTALL_DIR` on the `sh` process to choose a different directory.
 
 ## Before making a live payment
 
-The installer supplies Ghostline's executables. Prepare the following for the [Esmeralda quickstart](quickstart.md):
+Prepare the following for the [mainnet quickstart](mainnet-quickstart.md):
 
 | Requirement | Where it comes from |
 |---|---|
-| Compatible Ootle wallet daemon connected to Esmeralda | Your [Tari Ootle setup](https://github.com/tari-project/tari-ootle); wallet installation and upgrades are separate |
-| Funded opener account | Your test wallet; it needs the channel deposit plus opening fees |
-| Funded service fee account | The service's wallet; it pays settlement fees separately from the channel deposit |
-| Deployment parameters | The provider/deployment record: template hash, indexer URL, network tag and service public key |
-| Payer and claim secrets | Your private key storage; the Ghostline payer key signs vouchers, while the wallet view key unblinds the channel output |
-| Service signer reference | A KeyId JSON file for the service signing key held in the fee wallet |
+| Tari Ootle wallet daemon 0.53.3 | Your own [Tari Ootle setup](https://github.com/tari-project/tari-ootle). Run it with `--cookie-auth true`; see [start the wallet](mainnet-quickstart.md#1-start-the-wallet-with-cookie-login) |
+| TARI in that wallet | Burn XTM on L1 and claim it; Tari Universe does this |
+| A fee account with revealed TARI | Settle and refund fees are paid from an account's revealed balance; see [fees](fees.md) |
+| Deployment parameters | The [mainnet deployment](deployment.md): template, fee config and indexers |
+| Payer key and claim secret | Your private key storage; see [export the claim secret](mainnet-quickstart.md#3-export-the-claim-secret) |
+| Service signer reference | A KeyId JSON file for the service signing key held in the service wallet |
 | Private state directory | Channel record, payer session, service ledger and optional policy audit log |
 
-The CLI currently authenticates to a local wallet daemon using its `None` authentication flow. Keep that endpoint on loopback; it grants wallet administration access. A separately funded fee wallet can reduce direct funding linkage, but fees and funding transfers remain public.
+**Never run a funded wallet with `--authentication none`.** In that mode any program on the computer can spend. Keep the wallet's listener on `127.0.0.1`. A separately funded fee wallet can reduce direct funding linkage, but fees and funding transfers remain public.
 
-Confirm incoming tTARI is visible in the wallet before opening a channel, then use the open dry run to check available inputs and fees. A successful Ghostline installation does not establish wallet/network compatibility or guarantee funding discovery. Preserve the wallet profile if funding is missing; see [troubleshooting](quickstart.md#troubleshooting).
+Confirm the TARI is visible in the wallet before opening a channel, then use the open dry run to check available inputs and fees. A successful installation does not establish wallet or network compatibility or guarantee funding discovery. Preserve the wallet profile if funding is missing; see [troubleshooting](troubleshooting.md).
 
-The repository does not supply a hosted paid service, shared wallet, or default deployed template. Get the public channel terms from the provider you intend to pay. Operators running the reference API need their own deployment record and service signer setup. Never substitute an invented template or account identifier.
+Ghostline does not supply a hosted paid service, shared wallet, or default deployed template. Get the public channel terms from the provider you intend to pay. Operators running the reference API need their own deployment record and service signer setup. Never substitute an invented template or account identifier.
 
-## Build from source
-
-The verified development platform is Linux. Prebuilt downloads for macOS, Windows, ARM, and musl-based Linux are not provided; this guide does not establish source-build support on those platforms.
-
-Install Rust through `rustup`, Git, a C/C++ toolchain, Clang with libclang, CMake, and the protobuf compiler (`protoc`). The repository pins Rust in `rust-toolchain.toml`.
-
-```sh
-git clone https://github.com/AduAkorful/ghostline.git
-cd ghostline
-git checkout v0.4.0
-cargo build --locked --release -p ghostline-cli -p ghostline-mcp -p ghostline-paid-api
-mkdir -p "$HOME/.local/bin"
-install -m 0755 target/release/ghostline target/release/ghostline-mcp target/release/ghostline-paid-api "$HOME/.local/bin/"
-```
-
-These commands build the published version's host executables. To build current development code, select the intended commit before building. Building the channel WASM and publishing a template are separate operator tasks; a template hash must come from an actual deployment.
-
-Continue with the [quickstart](quickstart.md). Developers can find workspace checks in [Development](../README.md#development).
+Continue with the [mainnet quickstart](mainnet-quickstart.md).
