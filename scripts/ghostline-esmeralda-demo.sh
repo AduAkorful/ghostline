@@ -72,7 +72,7 @@ read_tty 'Funded service fee account name (same account is simplest)' "$OPENER_A
 FEE_ACCOUNT_NAME="$REPLY"
 read_tty 'Calls to make' '3'
 CALLS="$REPLY"
-read_tty 'Price per call in integer micro-Tari' '10'
+read_tty 'Price per call in integer micro-Tari (a multiple of 100)' '100'
 PRICE="$REPLY"
 read_tty 'Channel deposit in integer micro-Tari' '100000'
 DEPOSIT="$REPLY"
@@ -112,6 +112,10 @@ for label in calls price deposit; do
     exit 2
   fi
 done
+if (( PRICE % 100 != 0 )); then
+  echo 'Price must be a multiple of 100 µT so the 1% protocol fee divides exactly.' >&2
+  exit 2
+fi
 if (( CALLS > 100 || PRICE > 1000000 || DEPOSIT > 1000000000 )); then
   echo 'Demo bounds exceeded (maximum 100 calls, 1,000,000 µT/call, 1,000,000,000 µT deposit).' >&2
   exit 2

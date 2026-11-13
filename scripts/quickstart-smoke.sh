@@ -30,6 +30,8 @@ expiry_epoch=42
 nonce_hex=0101010101010101010101010101010101010101010101010101010101010101
 # This zero hash is a local smoke-test sentinel only. No transaction is built or submitted.
 template_hex=0000000000000000000000000000000000000000000000000000000000000000
+# Likewise a sentinel fee config address; the channel template pins the real one at build time.
+fee_config=0808080808080808080808080808080808080808080808080808080808080808
 spec_output="$(target/debug/ghostline spec \
   --network-tag "$network_tag" \
   --deposit "$deposit" \
@@ -37,7 +39,8 @@ spec_output="$(target/debug/ghostline spec \
   --service-hex "$service_public" \
   --expiry-epoch "$expiry_epoch" \
   --nonce-hex "$nonce_hex" \
-  --template-hex "$template_hex")"
+  --template-hex "$template_hex" \
+  --fee-config "$fee_config")"
 payer_root="$(sed -n 's/^payer_root=//p' <<<"$spec_output")"
 [[ "$payer_root" =~ ^[0-9a-fA-F]{64}$ ]] || {
   echo "quickstart smoke: ghostline spec did not produce a 32-byte payer root" >&2
@@ -60,7 +63,7 @@ bind="127.0.0.1:$port"
 target/debug/ghostline-paid-api serve \
   --bind "$bind" \
   --ledger "$ledger" \
-  --price 10 \
+  --price 100 \
   --service-key-hex "$service_public" \
   --min-expiry-epoch "$expiry_epoch" \
   --max-expiry-epoch "$expiry_epoch" \
@@ -88,7 +91,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as quote_file:
     quote = json.load(quote_file)
 assert quote["scheme"] == "ghostline.channel.voucher.v1", quote
-assert quote["price"] == 10, quote
+assert quote["price"] == 100, quote
 assert quote["basis"] == "per_request", quote
 assert quote["recipient_key"] == sys.argv[2], quote
 assert quote["min_expiry_epoch"] == int(sys.argv[3]), quote
@@ -100,11 +103,11 @@ call_output="$(GHOSTLINE_PAYER_SECRET="$payer_secret" target/debug/ghostline-pai
   --session "$session" \
   --calls 3 \
   --vendor-hex "$service_public" \
-  --budget 100 \
-  --max-per-call 10)"
+  --budget 1000 \
+  --max-per-call 100)"
 grep -q '^ok_calls=3$' <<<"$call_output"
-grep -q '^cumulative=30$' <<<"$call_output"
-grep -q '^unspent_on_channel=99969$' <<<"$call_output"
+grep -q '^cumulative=300$' <<<"$call_output"
+grep -q '^unspent_on_channel=98700$' <<<"$call_output"
 curl -sS "http://$bind/metrics" >"$tmp_dir/metrics.txt"
 grep -q '^ghostline_paid_requests_total 3$' "$tmp_dir/metrics.txt"
 grep -q '^ghostline_payment_required_total 4$' "$tmp_dir/metrics.txt"
@@ -114,4 +117,4 @@ if grep -Eq 'channel_id|deposit|cumulative|voucher_hex|100000' "$tmp_dir/metrics
   echo "quickstart smoke: metrics exposed channel or payment data" >&2
   exit 1
 fi
-echo "quickstart smoke passed: quote validated, 3 paid calls, cumulative 30 µT"
+echo "quickstart smoke passed: quote validated, 3 paid calls, cumulative 300 µT"

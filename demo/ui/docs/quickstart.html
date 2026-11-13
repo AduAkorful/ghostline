@@ -71,7 +71,7 @@
               <div class="guide-command-head"><span>DOWNLOAD · REVIEW · RUN LOCALLY</span><button class="guide-copy" type="button" data-copy="guided-demo-commands">Copy commands</button></div>
               <pre><code id="guided-demo-commands">curl -fsSLo ghostline-esmeralda-demo.sh https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/ghostline-esmeralda-demo.sh&#10;less ghostline-esmeralda-demo.sh&#10;bash ghostline-esmeralda-demo.sh</code></pre>
             </div>
-            <p>The defaults are 3 calls at 10 µT each with a 100,000 µT deposit. The run is real testnet activity and requires two confirmations. It keeps an owner-only state directory containing the channel mask and service call ledger; remove it only after saving the explorer links and when you no longer need the local record.</p>
+            <p>The defaults are 3 calls at 100 µT each with a 100,000 µT deposit. The run is real testnet activity and requires two confirmations. It keeps an owner-only state directory containing the channel mask and service call ledger; remove it only after saving the explorer links and when you no longer need the local record.</p>
           </section>
           <section id="manual-walkthrough" class="guide-section">
             <p class="guide-label">PATH 3 / OPTIONAL MANUAL ROUTE</p>
@@ -101,7 +101,7 @@
             <p>The key file is owner-only and contains the signing secret and public key. Use its <code>public_hex</code> in channel parameters and pass the file to <code>ghostline sign --secret-file</code>. Generate a different payer key for every channel. Choose a future expiry epoch and a unique 32-byte nonce. Compute the payer root from the exact channel terms, then initialize the channel record using the provider's real values:</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>COMPUTE CHANNEL TERMS · REPLACE PLACEHOLDERS</span><button class="guide-copy" type="button" data-copy="channel-spec">Copy command</button></div>
-              <pre><code id="channel-spec">ghostline spec \&#10;  --network-tag &lt;esmeralda-network-tag&gt; \&#10;  --deposit 100000 \&#10;  --payer-hex &lt;payer-public-key-hex&gt; \&#10;  --service-hex &lt;service-public-key-hex&gt; \&#10;  --expiry-epoch &lt;future-epoch&gt; \&#10;  --nonce-hex &lt;unique-32-byte-nonce-hex&gt; \&#10;  --template-hex &lt;deployed-template-hash-hex&gt;</code></pre>
+              <pre><code id="channel-spec">ghostline spec \&#10;  --network-tag &lt;esmeralda-network-tag&gt; \&#10;  --deposit 100000 \&#10;  --payer-hex &lt;payer-public-key-hex&gt; \&#10;  --service-hex &lt;service-public-key-hex&gt; \&#10;  --expiry-epoch &lt;future-epoch&gt; \&#10;  --nonce-hex &lt;unique-32-byte-nonce-hex&gt; \&#10;  --template-hex &lt;deployed-template-hash-hex&gt; \&#10;  --fee-config &lt;deployed-fee-config-component&gt;</code></pre>
             </div>
             <p><code>100000</code> means 0.1 tTARI in integer micro-units. Fees are additional. The full <code>channel init</code> command also needs your wallet accounts, indexer, ledger/session paths, and maximum accepted epoch. See the detailed source guide for every setup flag and troubleshooting note.</p>
           </section>
@@ -110,8 +110,8 @@
             <h2>Start the other side.</h2>
             <p>Run the reference API locally, or use a compatible provider. The service sets the price and accepted expiry range. Use a fresh authorization key for each channel; its ledger and the payer session must stay in separate private files.</p>
             <div class="guide-command">
-              <div class="guide-command-head"><span>REFERENCE SERVICE · 10 µT PER CALL</span><button class="guide-copy" type="button" data-copy="service-run">Copy commands</button></div>
-              <pre><code id="service-run">ghostline-paid-api init --ledger /secure/service-ledger.json --session /secure/service-session.json &lt;channel-parameters&gt;&#10;ghostline-paid-api serve --bind 127.0.0.1:8787 --ledger /secure/service-ledger.json --price 10 \&#10;  --service-key-hex &lt;channel-authorization-public-key&gt; \&#10;  --service-output-key-hex &lt;optional-one-time-payout-public-key&gt; &lt;expiry-terms&gt;</code></pre>
+              <div class="guide-command-head"><span>REFERENCE SERVICE · 100 µT PER CALL</span><button class="guide-copy" type="button" data-copy="service-run">Copy commands</button></div>
+              <pre><code id="service-run">ghostline-paid-api init --ledger /secure/service-ledger.json --session /secure/service-session.json &lt;channel-parameters&gt;&#10;ghostline-paid-api serve --bind 127.0.0.1:8787 --ledger /secure/service-ledger.json --price 100 \&#10;  --service-key-hex &lt;channel-authorization-public-key&gt; \&#10;  --service-output-key-hex &lt;optional-one-time-payout-public-key&gt; &lt;expiry-terms&gt;</code></pre>
             </div>
             <div class="guide-command">
               <div class="guide-command-head"><span>OPTIONAL · TWO DISTINCT SERVICE KEYS</span><button class="guide-copy" type="button" data-copy="service-keys">Copy commands</button></div>
@@ -127,10 +127,10 @@
               <div class="guide-command-head"><span>OPEN ONLY AFTER REVIEW</span><button class="guide-copy" type="button" data-copy="channel-open">Copy commands</button></div>
               <pre><code id="channel-open">ghostline channel open --file /secure/path/channel.json --dry-run&#10;ghostline channel open --file /secure/path/channel.json --max-fee &lt;reviewed-opening-fee-cap&gt;&#10;ghostline channel status --file /secure/path/channel.json</code></pre>
             </div>
-            <p>Once open, pay for ten calls at 10 µT each. The policy budget limits voucher spending, not transaction fees.</p>
+            <p>Once open, pay for ten calls at 100 µT each. The policy budget limits voucher spending, not transaction fees.</p>
             <div class="guide-command">
               <div class="guide-command-head"><span>MAKE TEN PAID CALLS</span><button class="guide-copy" type="button" data-copy="paid-calls">Copy command</button></div>
-              <pre><code id="paid-calls">ghostline-paid-api call \&#10;  --url http://127.0.0.1:8787/fortune \&#10;  --session /secure/path/session.json \&#10;  --calls 10 \&#10;  --vendor-hex &lt;service-public-key-hex&gt; \&#10;  --budget 100 \&#10;  --max-per-call 10</code></pre>
+              <pre><code id="paid-calls">ghostline-paid-api call \&#10;  --url http://127.0.0.1:8787/fortune \&#10;  --session /secure/path/session.json \&#10;  --calls 10 \&#10;  --vendor-hex &lt;service-public-key-hex&gt; \&#10;  --budget 1000 \&#10;  --max-per-call 100</code></pre>
             </div>
             <p>Each call signs the next cumulative voucher total. Calls do not submit individual transactions to the chain. The service records accepted calls; that record alone is not proof of settlement.</p>
           </section>

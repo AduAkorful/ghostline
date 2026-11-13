@@ -33,7 +33,7 @@ less ghostline-esmeralda-demo.sh
 bash ghostline-esmeralda-demo.sh
 ```
 
-It defaults to 3 calls at 10 µT each and a 100,000 µT channel deposit. You can change those values in its prompts. Review both fee dry-runs; unused fee-cap amounts may not be refunded. Each transaction needs a separate confirmation, and settlement consumes the channel output. State is kept in an owner-only directory because it contains the deposit mask; remove it after saving your explorer links and no longer needing the local call record. The current deployment profile comes from [the recorded Ghostline Esmeralda evidence](../demo/ui/evidence.json); the script checks the active template substate at the documented address and stops if the address is missing or resolves to a different template. Esmeralda may reset, so a failed profile check means stop and obtain a freshly verified deployment profile.
+It defaults to 3 calls at 100 µT each and a 100,000 µT channel deposit. You can change those values in its prompts. Review both fee dry-runs; unused fee-cap amounts may not be refunded. Each transaction needs a separate confirmation, and settlement consumes the channel output. State is kept in an owner-only directory because it contains the deposit mask; remove it after saving your explorer links and no longer needing the local call record. The current deployment profile comes from [the recorded Ghostline Esmeralda evidence](../demo/ui/evidence.json); the script checks the active template substate at the documented address and stops if the address is missing or resolves to a different template. Esmeralda may reset, so a failed profile check means stop and obtain a freshly verified deployment profile.
 
 Ghostline is early development, unaudited, and testnet only. Do not use real funds.
 
@@ -94,7 +94,8 @@ ghostline spec \
   --service-hex <service-public-key-hex> \
   --expiry-epoch <future-epoch> \
   --nonce-hex <unique-32-byte-nonce-hex> \
-  --template-hex <deployed-template-hash-hex>
+  --template-hex <deployed-template-hash-hex> \
+  --fee-config <deployed-fee-config-component>
 ```
 
 Create the channel record. Values in angle brackets are placeholders, not valid network identifiers:
@@ -109,6 +110,7 @@ ghostline channel init \
   --expiry-epoch <future-epoch> \
   --nonce-hex <unique-32-byte-nonce-hex> \
   --template-hex <deployed-template-hash-hex> \
+  --fee-config <deployed-fee-config-component> \
   --indexer-url <esmeralda-indexer-url> \
   --ootle-network esmeralda \
   --max-epoch <maximum-accepted-epoch> \
@@ -127,7 +129,7 @@ For expiry refunds, also include `--payer-fee-account <payer-fee-account-compone
 
 ## 2. Start the paid API
 
-In a separate terminal, initialize the service ledger with the same channel parameters, then serve the local `/fortune` endpoint at 10 µT per call:
+In a separate terminal, initialize the service ledger with the same channel parameters, then serve the local `/fortune` endpoint at 100 µT per call. Prices must be multiples of 100 µT so the 1% protocol fee divides exactly:
 
 ```bash
 ghostline-paid-api init \
@@ -142,7 +144,7 @@ ghostline-paid-api init \
 ghostline-paid-api serve \
   --bind 127.0.0.1:8787 \
   --ledger /secure/path/ledger.json \
-  --price 10 \
+  --price 100 \
   --service-key-hex <service-public-key-hex> \
   --service-output-key-hex <one-time-payout-public-key-hex> \
   --min-expiry-epoch <minimum-accepted-expiry> \
@@ -174,7 +176,7 @@ ghostline channel status --file /secure/path/channel.json
 
 A live open stores the output's deposit mask and creates/resumes the matching session. The fee cap can be charged on the opening path even if the dry-run requirement was lower; avoid a needlessly large cap. If submission times out, reconcile the transaction before retrying (see [troubleshooting](#troubleshooting)).
 
-Pay for ten calls at 10 µT each:
+Pay for ten calls at 100 µT each:
 
 ```sh
 ghostline-paid-api call \
@@ -182,13 +184,13 @@ ghostline-paid-api call \
   --session /secure/path/session.json \
   --calls 10 \
   --vendor-hex <service-public-key-hex> \
-  --budget 100 \
-  --max-per-call 10
+  --budget 1000 \
+  --max-per-call 100
 
 ghostline channel status --file /secure/path/channel.json
 ```
 
-The service's `accepted` total should now be 100 µT. Calls do not submit individual on-chain transactions. The policy budget limits voucher spending; it does not include wallet transaction fees.
+The service's `accepted` total should now be 1,000 µT. Calls do not submit individual on-chain transactions. The policy budget limits voucher spending; it does not include wallet transaction fees.
 
 ### MCP path
 
@@ -197,7 +199,7 @@ Configure the MCP client to start `ghostline-mcp` with this environment. Supply 
 ```text
 GHOSTLINE_CHANNEL_FILE=/secure/path/channel.json
 GHOSTLINE_POLICY_BUDGET=10000
-GHOSTLINE_POLICY_MAX_PER_CALL=10
+GHOSTLINE_POLICY_MAX_PER_CALL=100
 GHOSTLINE_POLICY_VENDOR_HEX=<service-public-key-hex>
 GHOSTLINE_POLICY_AUDIT_LOG=/secure/path/ghostline-policy.jsonl
 # Optional approval rules:
@@ -240,6 +242,7 @@ ghostline settle-due \
   --expiry-epoch <channel-expiry-epoch> \
   --nonce-hex <channel-nonce-hex> \
   --template-hex <deployed-template-hash-hex> \
+  --fee-config <deployed-fee-config-component> \
   --indexer-url <esmeralda-indexer-url> \
   --utxo-json /secure/path/channel.utxo.json \
   --max-epoch <maximum-accepted-epoch> \
@@ -278,19 +281,19 @@ For an unspent channel at or after expiry, use `ghostline channel refund --file 
 
 The earlier 1,000-call run proves the batching flow, not amount confidentiality or that a 10 µT price is economical. Its 10,000 µT of payments settled with a 17,640 µT service-side fee; that fee alone equals 1,764 calls at 10 µT. A separate open required 15,199 µT. Fees change, and the payer and service may pay different transactions, so rerun dry-run estimates and set a price and budget for the deployment.
 
-To exercise 1,000 HTTP paywall calls on one channel, run the paid API client with the payer secret already supplied through its private process environment:
+To exercise 990 HTTP paywall calls on one channel, run the paid API client with the payer secret already supplied through its private process environment:
 
 ```bash
 ghostline-paid-api call \
   --url http://127.0.0.1:8787/fortune \
   --session /secure/path/session.json \
-  --calls 1000 \
+  --calls 990 \
   --vendor-hex <service-public-key-hex> \
-  --budget 10000 \
-  --max-per-call 10
+  --budget 99000 \
+  --max-per-call 100
 ```
 
-The 0.1 tTARI example deposit covers 1,000 calls at 10 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement using the earlier template; it proves batching, not amount confidentiality. The current commitment-based template was published and a fresh Esmeralda run accepted 20 HTTP calls before one finalized fixed-shape settlement. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
+The 0.1 tTARI example deposit can settle at most 99,000 µT (the protocol fee and 1 µT change are reserved), so it covers 990 calls at 100 µT each. Use this batch on a fresh, unspent channel with a matching session and sufficient policy budget. The historical live HTTP run recorded 1,000 accepted calls totaling 10,000 µT, then one finalized settlement using the earlier template; it proves batching, not amount confidentiality. The current commitment-based template was published and a fresh Esmeralda run accepted 20 HTTP calls before one finalized fixed-shape settlement. The MCP stdio path is separately live-proven for ten calls and a single settlement. These results do not validate your wallet build or configuration.
 
 For more commands, see the [API reference](api-reference.md). For privacy limits, read [privacy notes](privacy.md) and the [threat model](threat-model.md).
 

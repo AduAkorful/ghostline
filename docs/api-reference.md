@@ -20,10 +20,10 @@ An unpaid request returns HTTP `402` with a JSON body shaped like:
 ```json
 {
   "scheme": "ghostline.channel.voucher.v1",
-  "price": 30,
+  "price": 300,
   "channel_id": "<64 hex characters>",
   "basis": "metered",
-  "unit_price": 10,
+  "unit_price": 100,
   "units": 3,
   "recipient_key": "<64 hex characters>",
   "service_output_key": "<optional 64 hex characters>",
