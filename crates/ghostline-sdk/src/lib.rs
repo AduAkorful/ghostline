@@ -14,7 +14,7 @@ mod spend;
 mod tx;
 
 pub use channel::{BATCH_SETTLE_FUNCTION, Channel, ChannelSpec, SETTLE_FUNCTION};
-pub use destination::WalletDestination;
+pub use destination::{WalletDestination, address_with_view_key};
 pub use error::SdkError;
 pub use fee::{
     TREASURY_ENV, parse_fee_config, parse_treasury, treasury_from_config_substate,

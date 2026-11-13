@@ -442,6 +442,10 @@ enum ChannelCommand {
         /// Service payout destination (`wallet payout-destination`). `channel settle` pays the service wallet.
         #[arg(long)]
         payout_destination: Option<PathBuf>,
+        /// Claim key file (`keygen --role claim`) used to address and unblind the deposit instead of the wallet's
+        /// view key, which walletd only exports to a browser session.
+        #[arg(long)]
+        claim_key_file: Option<PathBuf>,
     },
     /// Wallet-open the channel, unblind the output, and store the mask on the file.
     Open {
@@ -2245,9 +2249,13 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             ledger,
             session,
             payout_destination,
+            claim_key_file,
         } => {
             if let Some(path) = &payout_destination {
                 ghostline_net::payout::read(path)?;
+            }
+            if let Some(path) = &claim_key_file {
+                secrets::load_key_file(path, "claim")?;
             }
             seal::parse_channel_scan(
                 &ootle_network,
@@ -2278,6 +2286,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
                 ledger,
                 session,
                 payout_destination,
+                claim_key_file,
                 utxo_json: None,
                 deposit_mask_hex: None,
                 open_transaction_id: None,
@@ -3399,8 +3408,14 @@ async fn open_channel_from_file(
         channel.params().network_tag,
     )?;
     seal::print_ids(&channel);
+    let claim_secret_hex = match &record.claim_key_file {
+        Some(file) => Some(to_hex(secrets::load_key_file(file, "claim")?.as_bytes())),
+        None => None,
+    };
     if !dry_run {
-        secrets::load_secret(None, secrets::CLAIM_SECRET_ENV, "wallet claim secret")?;
+        if claim_secret_hex.is_none() {
+            secrets::load_secret(None, secrets::CLAIM_SECRET_ENV, "wallet claim secret")?;
+        }
         if let Some(existing) = record.open_transaction_id.clone() {
             println!("transaction_id={existing}");
             let wallet = connect_wallet(&record.opener_wallet_url).await?;
@@ -3412,10 +3427,26 @@ async fn open_channel_from_file(
     }
     let resource = seal::parse_resource(None)?.to_string();
     let wallet = connect_wallet(&record.opener_wallet_url).await?;
-    let destination = wallet
+    let wallet_address = wallet
         .default_account_address()
         .await
         .map_err(|error| error.to_string())?;
+    let destination = match &claim_secret_hex {
+        Some(hex) => {
+            use tari_crypto::keys::PublicKey as _;
+            let secret = seal::parse_secret("claim secret", hex)?;
+            let view = tari_crypto::ristretto::RistrettoPublicKey::from_secret_key(&secret);
+            ghostline_sdk::address_with_view_key(
+                &wallet_address,
+                tari_template_lib::types::crypto::RistrettoPublicKeyBytes::from_bytes(
+                    view.as_bytes(),
+                )
+                .map_err(|_| "claim key is malformed".to_string())?,
+            )
+            .map_err(|e| e.to_string())?
+        }
+        None => wallet_address,
+    };
     let mut inline_quote = None;
     let submitted = if funding_commitments.is_empty() {
         let spend_fee = if dry_run {
@@ -3685,6 +3716,10 @@ async fn store_opened_channel(
     }
     print_wait(wallet, transaction_id, timeout_secs).await?;
     if record.deposit_mask_hex.is_none() {
+        let claim_secret_hex = match &record.claim_key_file {
+            Some(file) => Some(to_hex(secrets::load_key_file(file, "claim")?.as_bytes())),
+            None => None,
+        };
         let utxo_path = path.with_extension("utxo.json");
         dump_wallet_utxos(wallet, transaction_id, Some(&utxo_path)).await?;
         let recovered = recover_utxo(RecoverUtxoArgs {
@@ -3694,7 +3729,7 @@ async fn store_opened_channel(
             encrypted_hex: None,
             tag: None,
             resource_hex: None,
-            secret_hex: None,
+            secret_hex: claim_secret_hex.as_deref(),
             ootle_network: &record.ootle_network,
         })?;
         if recovered.value != record.deposit {
@@ -4511,6 +4546,7 @@ mod tests {
         let mask = "55".repeat(32);
         channel_file::ChannelFile {
             payout_destination: None,
+            claim_key_file: None,
             network_tag: 1,
             deposit: 1_000,
             payer_hex: to_hex(payer_pk.as_bytes()),

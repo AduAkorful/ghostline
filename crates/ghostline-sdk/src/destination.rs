@@ -114,6 +114,22 @@ impl fmt::Debug for WalletDestination {
     }
 }
 
+/// The same account at a view key the caller holds.
+///
+/// A channel deposit is script-locked, so the address it is sent to only decides who can decrypt it. Pointing it at a
+/// Ghostline-held view key lets Ghostline unblind the deposit without exporting the wallet's view secret, which
+/// walletd only releases to an interactive browser session. walletd itself will not list such an output; it never
+/// could spend a script-locked deposit anyway.
+pub fn address_with_view_key(
+    address: &str,
+    view: RistrettoPublicKeyBytes,
+) -> Result<String, SdkError> {
+    let parsed =
+        OotleAddress::from_str(address.trim()).map_err(|e| SdkError::Address(e.to_string()))?;
+    public_key(&view)?;
+    Ok(OotleAddress::new(parsed.network(), view, *parsed.account_public_key()).to_bech32_string())
+}
+
 fn public_key(bytes: &RistrettoPublicKeyBytes) -> Result<RistrettoPublicKey, SdkError> {
     RistrettoPublicKey::from_canonical_bytes(bytes.as_bytes()).map_err(|_| SdkError::InvalidKey)
 }
@@ -165,6 +181,24 @@ mod tests {
 
         let err = WalletDestination::random_for_address(&address, Network::Esmeralda).unwrap_err();
         assert!(err.to_string().contains("mainnet"), "{err}");
+    }
+
+    #[test]
+    fn address_with_view_key_keeps_account_and_network() {
+        let (_, account) = keypair(9);
+        let (_, wallet_view) = keypair(10);
+        let (_, claim) = keypair(11);
+        let address = OotleAddress::new(
+            Network::MainNet,
+            wallet_view.to_byte_type(),
+            account.to_byte_type(),
+        )
+        .to_bech32_string();
+        let rewritten = address_with_view_key(&address, claim.to_byte_type()).unwrap();
+        let parsed = OotleAddress::from_str(&rewritten).unwrap();
+        assert_eq!(parsed.network(), Network::MainNet);
+        assert_eq!(*parsed.account_public_key(), account.to_byte_type());
+        assert_eq!(*parsed.view_only_key(), claim.to_byte_type());
     }
 
     #[test]
