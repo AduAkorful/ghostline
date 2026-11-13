@@ -17,8 +17,8 @@ use ghostline_paywall::{
 };
 use ghostline_policy::env_flag;
 use ghostline_sdk::{
-    Channel, ChannelSpec, MaskAndValue, OutputScan, refund, settle,
-    unsigned_stealth_transfer_with_fee,
+    Channel, ChannelSpec, MaskAndValue, OutputScan, WalletDestination, refund_to_wallet, settle,
+    settle_to_wallet, unsigned_stealth_transfer_with_fee,
 };
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
@@ -113,6 +113,9 @@ struct CloseRecord {
     utxo_json: Option<PathBuf>,
     #[serde(default)]
     deposit_mask_hex: Option<String>,
+    /// Service payout destination (`ghostline wallet payout-destination`); the settle pays the service wallet.
+    #[serde(default)]
+    payout_destination: Option<PathBuf>,
 }
 
 pub async fn close_channel() -> Result<CloseOutcome, String> {
@@ -147,11 +150,42 @@ pub async fn close_channel() -> Result<CloseOutcome, String> {
         return Err("set only one of GHOSTLINE_CLOSE_SUBMIT and GHOSTLINE_CLOSE_DRY_RUN".into());
     }
     let unsigned = match &kind {
-        CloseKind::Settle(SettleDecision::Due { .. }) => build_settle(
-            &record,
-            record.ledger.as_ref().ok_or("channel file has no ledger")?,
-        )?,
-        CloseKind::Refund(RefundDecision::Due { .. }) => build_refund(&record)?,
+        CloseKind::Settle(SettleDecision::Due { .. }) => {
+            let fee_config = channel_from(&record)?.spec().fee_config;
+            let treasury =
+                ghostline_net::resolve_treasury(&record.indexer_url, &fee_config).await?;
+            let payout = record
+                .payout_destination
+                .as_deref()
+                .map(ghostline_net::payout::read)
+                .transpose()?;
+            build_settle(
+                &record,
+                record.ledger.as_ref().ok_or("channel file has no ledger")?,
+                treasury,
+                payout.as_ref(),
+            )?
+        }
+        CloseKind::Refund(RefundDecision::Due { .. }) => {
+            // Refund to the payer wallet's own address so its walletd finds the returned deposit.
+            let payer_url = record
+                .payer_wallet_url
+                .clone()
+                .unwrap_or_else(|| record.opener_wallet_url.clone());
+            let mut payer_wallet = WalletClient::connect(&payer_url).map_err(|e| e.to_string())?;
+            payer_wallet
+                .authenticate()
+                .await
+                .map_err(|e| e.to_string())?;
+            let address = payer_wallet
+                .default_account_address()
+                .await
+                .map_err(|e| e.to_string())?;
+            let destination =
+                WalletDestination::random_for_address(&address, scan(&record)?.network)
+                    .map_err(|e| e.to_string())?;
+            build_refund(&record, &destination)?
+        }
         _ => return Ok(outcome),
     };
     let (wallet_url, fee_name) = match &kind {
@@ -296,6 +330,8 @@ fn ledger_totals(ledger: Option<&PathBuf>) -> Result<(u64, bool), String> {
 fn build_settle(
     record: &CloseRecord,
     ledger: &std::path::Path,
+    treasury: tari_template_lib::types::crypto::RistrettoPublicKeyBytes,
+    payout: Option<&WalletDestination>,
 ) -> Result<ghostline_sdk::UnsignedTransaction, String> {
     let store = ChannelStore::open(ledger).map_err(|e| e.to_string())?;
     let voucher_hex = store
@@ -307,15 +343,18 @@ fn build_settle(
     let deposit = funded(record, &channel)?;
     let resource = STEALTH_TARI_RESOURCE_ADDRESS;
     let scan = scan(record)?;
-    let treasury = ghostline_sdk::treasury_from_env()?;
-    let statement = settle(
-        &channel,
-        deposit,
-        &voucher,
-        channel.spec().service,
-        treasury,
-        scan,
-    )
+    // The voucher names the output key the service quoted, which is not always the channel's authorization key.
+    let statement = match payout {
+        Some(payout) => settle_to_wallet(&channel, deposit, &voucher, payout, treasury, scan),
+        None => settle(
+            &channel,
+            deposit,
+            &voucher,
+            voucher.service_output_key,
+            treasury,
+            scan,
+        ),
+    }
     .map_err(|e| e.to_string())?;
     let fee = parse_component(
         "fee-account",
@@ -333,13 +372,16 @@ fn build_settle(
     ))
 }
 
-fn build_refund(record: &CloseRecord) -> Result<ghostline_sdk::UnsignedTransaction, String> {
+fn build_refund(
+    record: &CloseRecord,
+    destination: &WalletDestination,
+) -> Result<ghostline_sdk::UnsignedTransaction, String> {
     let channel = channel_from(record)?;
     let deposit = funded(record, &channel)?;
     let resource = STEALTH_TARI_RESOURCE_ADDRESS;
     let scan = scan(record)?;
     let statement =
-        refund(&channel, deposit, channel.spec().payer, scan).map_err(|e| e.to_string())?;
+        refund_to_wallet(&channel, deposit, destination, scan).map_err(|e| e.to_string())?;
     let fee = parse_component(
         "payer-fee-account",
         record

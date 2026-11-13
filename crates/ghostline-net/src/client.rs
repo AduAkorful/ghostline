@@ -151,6 +151,31 @@ impl IndexerClient {
             .await
     }
 
+    /// The fee config's current treasury key, read from its on-chain state. A settlement must pay this key; a stale
+    /// configured key makes the template reject the settlement after the network fee is charged.
+    pub async fn fee_config_treasury(
+        &self,
+        fee_config: &tari_template_lib::types::ComponentAddress,
+    ) -> Result<tari_template_lib::types::crypto::RistrettoPublicKeyBytes, NetError> {
+        let path = "substates (fee config)";
+        let body = self.substate(&fee_config.to_string()).await?;
+        let encoded = body
+            .pointer("/state/up/substate")
+            .and_then(Value::as_str)
+            .ok_or_else(|| NetError::Decode {
+                path: path.into(),
+                details: "fee config is not an up substate on this indexer".into(),
+            })?;
+        let bytes = decode_standard_base64(encoded).ok_or_else(|| NetError::Decode {
+            path: path.into(),
+            details: "fee config substate is not base64".into(),
+        })?;
+        ghostline_sdk::treasury_from_config_substate(&bytes).map_err(|details| NetError::Decode {
+            path: path.into(),
+            details,
+        })
+    }
+
     fn substate_url(&self, substate_id: &str) -> Result<Url, NetError> {
         let mut url = self.base.clone();
         url.path_segments_mut()
@@ -392,6 +417,46 @@ pub struct ResolvedInputs {
 
 fn unsigned_inputs_mut(unsigned: &mut Value) -> Option<&mut Vec<Value>> {
     unsigned.pointer_mut("/V1/inputs")?.as_array_mut()
+}
+
+/// The treasury a settlement must pay: the fee config's on-chain state. `GHOSTLINE_TREASURY_KEY` is used only when
+/// the indexer cannot be read, and is refused when it disagrees with the chain, because a stale key makes the
+/// template reject the settlement after the network fee is charged.
+pub async fn resolve_treasury(
+    indexer_url: &str,
+    fee_config: &tari_template_lib::types::ComponentAddress,
+) -> Result<tari_template_lib::types::crypto::RistrettoPublicKeyBytes, String> {
+    let configured = std::env::var(ghostline_sdk::TREASURY_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| ghostline_sdk::parse_treasury(&value))
+        .transpose()?;
+    let on_chain = match IndexerClient::connect(indexer_url) {
+        Ok(indexer) => indexer
+            .fee_config_treasury(fee_config)
+            .await
+            .map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    match (on_chain, configured) {
+        (Ok(chain), Some(configured)) if chain != configured => Err(format!(
+            "{} is {} but fee config {fee_config} pays treasury {}; unset or update it",
+            ghostline_sdk::TREASURY_ENV,
+            ghostline_core::to_hex(configured.as_bytes()),
+            ghostline_core::to_hex(chain.as_bytes()),
+        )),
+        (Ok(chain), _) => Ok(chain),
+        (Err(error), Some(configured)) => {
+            eprintln!(
+                "warning: could not read the treasury from fee config {fee_config} ({error}); using {}",
+                ghostline_sdk::TREASURY_ENV
+            );
+            Ok(configured)
+        }
+        (Err(error), None) => Err(format!(
+            "could not read the treasury from fee config {fee_config}: {error}"
+        )),
+    }
 }
 
 /// Public indexer 404 body: `Input substate {id} (v0) is down`.

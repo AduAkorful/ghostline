@@ -9,12 +9,13 @@
 
 mod client;
 mod error;
+pub mod payout;
 mod wallet;
 
 pub use client::{
     EpochStats, IndexedSubstate, IndexerClient, ResolvedInputs, SubstatePresence,
     classify_substate_response, indexed_receipt_status, indexed_transaction_status,
-    indexer_result_abort_details, indexer_result_status,
+    indexer_result_abort_details, indexer_result_status, resolve_treasury,
 };
 pub use error::NetError;
 pub use tari_ootle_transaction::{Epoch, Transaction, TransactionEnvelope, TransactionId};

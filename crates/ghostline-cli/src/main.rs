@@ -2,7 +2,6 @@
 
 mod channel_file;
 mod demo;
-mod payout;
 mod seal;
 mod secrets;
 
@@ -1097,7 +1096,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let destination =
                     ghostline_sdk::WalletDestination::random_for_address(&address, network)
                         .map_err(|e| e.to_string())?;
-                payout::write(&out, &destination)?;
+                ghostline_net::payout::write(&out, &destination)?;
                 println!(
                     "owner_key_hex={}",
                     to_hex(destination.owner_key().as_bytes())
@@ -2248,7 +2247,7 @@ async fn channel_command(command: ChannelCommand) -> Result<(), String> {
             payout_destination,
         } => {
             if let Some(path) = &payout_destination {
-                payout::read(path)?;
+                ghostline_net::payout::read(path)?;
             }
             seal::parse_channel_scan(
                 &ootle_network,
@@ -2698,7 +2697,7 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
         seal::parse_channel_scan(&args.ootle_network, resource, channel.params().network_tag)?;
     let payout = match &args.payout_destination {
         Some(path) => {
-            let destination = payout::read(path)?;
+            let destination = ghostline_net::payout::read(path)?;
             if destination.owner_key() != voucher.service_output_key {
                 return Err(format!(
                     "payout destination {} does not match the voucher's service output key; settle with the destination this channel quoted",
@@ -2716,7 +2715,11 @@ async fn settle_due(args: SettleDueArgs) -> Result<(), String> {
             deposit: funded(channel.params().deposit, &deposit_mask)?,
             voucher: &voucher,
             service_output: voucher.service_output_key,
-            treasury: ghostline_sdk::treasury_from_env()?,
+            treasury: ghostline_net::resolve_treasury(
+                &args.indexer_url,
+                &channel.spec().fee_config,
+            )
+            .await?,
             resource,
             max_epoch: args.max_epoch,
             scan,

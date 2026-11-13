@@ -1569,6 +1569,7 @@ version = "0.4.0"
 dependencies = [
  "ghostline-core",
  "ghostline-sdk",
+ "ootle-network",
  "ootle_byte_type",
  "rand",
  "reqwest",
@@ -1578,6 +1579,7 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_template_lib",
+ "tari_utilities",
  "thiserror",
  "tokio",
  "url",
