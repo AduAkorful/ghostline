@@ -46,7 +46,7 @@ On a transparent account-based EVM payment path, each call can add another publi
 
 ## Install
 
-Mainnet needs Ghostline 0.5.0 or later: the `v0.4.0` release predates the protocol fee and the mainnet template. Install the latest release or build from source with the [installation guide](docs/install.md), then follow the [mainnet quickstart](docs/mainnet-quickstart.md). You also need Tari Ootle wallet daemon 0.53.3 and TARI in that wallet.
+Mainnet needs Ghostline 0.5.0 or later. Install the latest release or build from source with the [installation guide](docs/install.md), then follow the [mainnet quickstart](docs/mainnet-quickstart.md). You also need Tari Ootle wallet daemon 0.53.3 and TARI in that wallet.
 
 On glibc-based Linux x86-64 the installer downloads the latest release without compiling:
 

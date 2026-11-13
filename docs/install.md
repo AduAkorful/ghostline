@@ -2,7 +2,7 @@
 
 Ghostline's executables are `ghostline` (the command-line tool), `ghostline-mcp` (the MCP server) and `ghostline-paid-api` (the reference paywalled API). They run on your computer; installing them does not create or fund a wallet.
 
-**For mainnet, use Ghostline 0.5.0 or later.** The `v0.4.0` download predates the mainnet template and the protocol fee, so it can run the local demo but cannot open a mainnet channel. Install the latest release below, or build from source.
+**For mainnet, use Ghostline 0.5.0 or later.** Install the latest release below, or build from source.
 
 ## Build from source
 

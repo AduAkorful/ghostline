@@ -49,7 +49,7 @@ Results to look for in `ghostline_call_paid`: `payment_required` (the server wan
 
 **Check a channel.** Call `ghostline_channel_status` before and after a batch of calls so the user can see the accepted total against the budget.
 
-**Help set up an agent.** Mainnet needs Ghostline 0.5.0 or later; the v0.4.0 release predates the protocol fee and cannot open a mainnet channel. Point the user at https://ghostline-ui.vercel.app/docs/mainnet-quickstart.md and https://ghostline-ui.vercel.app/docs/mcp.md. The policy settings are in https://ghostline-ui.vercel.app/docs/policy.md: `GHOSTLINE_POLICY_BUDGET`, `GHOSTLINE_POLICY_MAX_PER_CALL`, `GHOSTLINE_POLICY_VENDOR_HEX`, `GHOSTLINE_POLICY_HUMAN_THRESHOLD`, `GHOSTLINE_POLICY_APPROVE_NEW_VENDOR`, `GHOSTLINE_POLICY_REQUIRE_HUMAN` and `GHOSTLINE_POLICY_AUDIT_LOG`.
+**Help set up an agent.** Mainnet needs Ghostline 0.5.0 or later. Point the user at https://ghostline-ui.vercel.app/docs/mainnet-quickstart.md and https://ghostline-ui.vercel.app/docs/mcp.md. The policy settings are in https://ghostline-ui.vercel.app/docs/policy.md: `GHOSTLINE_POLICY_BUDGET`, `GHOSTLINE_POLICY_MAX_PER_CALL`, `GHOSTLINE_POLICY_VENDOR_HEX`, `GHOSTLINE_POLICY_HUMAN_THRESHOLD`, `GHOSTLINE_POLICY_APPROVE_NEW_VENDOR`, `GHOSTLINE_POLICY_REQUIRE_HUMAN` and `GHOSTLINE_POLICY_AUDIT_LOG`.
 
 **Help sell an API.** The HTTP 402 paywall quotes a price, verifies each voucher against a ledger and keeps the latest one for settlement: https://ghostline-ui.vercel.app/docs/paywall.md. The service must settle before the expiry epoch; at the expiry epoch the payer can refund the deposit and settlement is refused: https://ghostline-ui.vercel.app/docs/settle.md.
 

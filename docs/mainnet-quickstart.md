@@ -6,7 +6,7 @@ Ghostline is unaudited. Fees are public. If one wallet plays every role, as in t
 
 ## What you need
 
-- **Ghostline 0.5.0 or later** ([install](install.md)), as a release or built from source at commit `bd8ad10` or later. Build `ghostline` and `ghostline-paid-api` with `cargo build --release`. The `v0.4.0` release predates the protocol fee and mainnet, so it does not work.
+- **Ghostline 0.5.0 or later** ([install](install.md)), as a release or built from source at commit `bd8ad10` or later. Build `ghostline` and `ghostline-paid-api` with `cargo build --release`.
 - **Tari Ootle wallet daemon 0.53.3** (`tari_ootle_walletd`), from the [tari-ootle v0.53.3 release](https://github.com/tari-project/tari-ootle/releases/tag/v0.53.3). Check the published `.sha256` before running it. There is no Intel macOS build.
 - **TARI in that wallet.** Burn XTM on L1 and claim it (Tari Universe does this). A claim arrives as a private (stealth) balance.
 - `curl`, `python3` and `openssl` for the helper commands below.

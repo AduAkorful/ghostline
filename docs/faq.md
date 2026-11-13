@@ -2,7 +2,7 @@
 
 ## Do I need to build Ghostline from source?
 
-No, if you use the glibc-based Linux x86-64 release; for mainnet use 0.5.0 or later, because the `v0.4.0` release predates the mainnet template and the protocol fee. The [installer](install.md) downloads the CLI, MCP server and reference API. On other platforms, or to run an unreleased commit, [build from source](install.md#build-from-source). Live payments also require a compatible funded Ootle wallet and the provider's channel configuration; neither the installer nor the build supplies those.
+No, if you use the glibc-based Linux x86-64 release; for mainnet use 0.5.0 or later. The [installer](install.md) downloads the CLI, MCP server and reference API. On other platforms, or to run an unreleased commit, [build from source](install.md#build-from-source). Live payments also require a compatible funded Ootle wallet and the provider's channel configuration; neither the installer nor the build supplies those.
 
 ## What does Ghostline hide?
 
