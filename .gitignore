@@ -1,5 +1,6 @@
 # Private planning and agent instructions (kept local)
 plans/
+research_notes/
 AGENTS.md
 
 # Rust
