@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+lib/generated-tools.json
+public/llms.txt
+public/llms-full.txt
+public/skill.md
+public/docs/

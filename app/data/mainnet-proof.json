@@ -1,0 +1,115 @@
+{
+  "source": "plans/40-mainnet-readiness.md",
+  "recordedOn": "2026-11-13",
+  "run5": {
+    "priceMicroTari": 1000,
+    "budgetMicroTari": 5000,
+    "paidCalls": 5,
+    "refusedCalls": 1,
+    "path": "/fortune"
+  },
+  "records": [
+    {
+      "run": "Run 1",
+      "kind": "open",
+      "label": "Open channel",
+      "hash": "e0abfa2b6381a793f592b9396bc5d10635254528a19fb481e33eed1c76365cdd",
+      "status": "Accepted",
+      "feeMicroTari": 15919,
+      "note": "First mainnet channel"
+    },
+    {
+      "run": "Run 1",
+      "kind": "settle",
+      "label": "Settle",
+      "hash": "b0270a268121e67922884423cb5123a7442a5a1833f6c694f74058d81140ba72",
+      "status": "Finalized",
+      "feeMicroTari": 28810,
+      "note": "First protocol-fee output"
+    },
+    {
+      "run": "Run 2",
+      "kind": "open",
+      "label": "Open channel",
+      "hash": "2053b611c4b09741a0d5f2ceb4db0d4b6b38e97bbccf6bba1a82051e999641e5",
+      "status": "Accepted",
+      "feeMicroTari": 15919,
+      "note": ""
+    },
+    {
+      "run": "Run 2",
+      "kind": "settle",
+      "label": "Settle to wallet",
+      "hash": "f4aa9c613d5def17c0ca2ac4c50d266febf997293f49c8e70dbe71a90cd667c1",
+      "status": "Finalized",
+      "feeMicroTari": 28810,
+      "note": "Payout found by the service wallet",
+      "quotedFeeMicroTari": 28822,
+      "feeSource": "indexer.summary.total_fees_paid"
+    },
+    {
+      "run": "Run 3",
+      "kind": "open",
+      "label": "Open channel",
+      "hash": "1664ba301a51fe7de3ad1e44336757b056aa03f368f1c9ded9822ab094a7a0b6",
+      "status": "Accepted",
+      "feeMicroTari": 15919,
+      "note": ""
+    },
+    {
+      "run": "Run 3",
+      "kind": "refund",
+      "label": "Expiry refund",
+      "hash": "4cc8c48f3428cfa99ce82e271e9960c1ca5b8f4ca7ccb6f5d8e620e68b469204",
+      "status": "Finalized",
+      "feeMicroTari": 10014,
+      "note": "Deposit back in the payer wallet",
+      "quotedFeeMicroTari": 10026,
+      "feeSource": "indexer.summary.total_fees_paid"
+    },
+    {
+      "run": "Run 4",
+      "kind": "open",
+      "label": "Open (separate payer wallet)",
+      "hash": "6d6545b05ce80f09bfed516f8e856b4d7813bd6ed16d79690f4bafffa48a554b",
+      "status": "Accepted",
+      "feeMicroTari": 15919,
+      "note": "Observer test"
+    },
+    {
+      "run": "Run 4",
+      "kind": "settle",
+      "label": "Settle (separate service wallet)",
+      "hash": "7f61a7bccf9c139284dc15701a850a56933321e4e3d9ed3109ff595d4f3401a7",
+      "status": "Finalized",
+      "feeMicroTari": 28808,
+      "note": "Observer test"
+    },
+    {
+      "run": "Run 5",
+      "kind": "open",
+      "label": "Open through MCP",
+      "hash": "83e7510e9d504a3e80b6f4e45f17d41894931eca6b1dcaa256eee7526b9985f0",
+      "status": "Accepted",
+      "feeMicroTari": 16072,
+      "note": "Agent-driven, quote first"
+    },
+    {
+      "run": "Run 5",
+      "kind": "settle",
+      "label": "Settle through MCP",
+      "hash": "ca036bf190cfc29786511feaf91d4a6b0579d4058ce7cc55a6655063d03ab8c0",
+      "status": "Finalized",
+      "feeMicroTari": 28808,
+      "note": "After 5 paid calls; the 6th refused"
+    }
+  ],
+  "paidCallsByRun": {
+    "Run 1": 10,
+    "Run 2": 5,
+    "Run 3": 0,
+    "Run 4": 5,
+    "Run 5": 5
+  },
+  "paidCallsSource": "Counts of accepted calls from the operators' local service ledgers, as written in docs/mainnet-quickstart.md (runs 1, 2), docs/privacy.md (run 4) and plan 40 (run 5). Not provable from chain data."
+}

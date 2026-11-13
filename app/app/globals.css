@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@source "../app";
+@source "../components";
+@source "../lib";
+
+/* Night ledger tokens. The site is dark only. Colour always means state:
+   ghost (lilac) = off-chain, chain (cyan) = on-chain and checked, held (red) = refused. */
+:root {
+  color-scheme: dark;
+  --night: #0b0c11; --paper: #101219; --paper-2: #151824; --ink: #ece7dc; --muted: #9a958a; --rule: #232634;
+  --ghost: #c4b2ff; --chain: #7fe7df; --held: #ff7a6b;
+  --ruling: rgba(255,255,255,.035); --glow: rgba(127,231,223,.35); --on-ink: #0b0c11;
+  --tick: 120ms; --quick: 200ms; --rule-in: 250ms; --settle: 650ms;
+  --ease-out: cubic-bezier(.2,.8,.2,1); --ease-settle: cubic-bezier(.2,1.4,.4,1);
+}
+@theme inline {
+  --color-night: var(--night); --color-paper: var(--paper); --color-paper-2: var(--paper-2); --color-ink: var(--ink);
+  --color-muted: var(--muted); --color-rule: var(--rule); --color-ghost: var(--ghost); --color-chain: var(--chain); --color-held: var(--held);
+  --color-on-ink: var(--on-ink);
+  --font-serif: var(--font-instrument), Georgia, serif;
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+html { background: var(--night); }
+body { background: var(--night); color: var(--ink); font-family: var(--font-plex-sans), system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--ghost); color: var(--on-ink); }
+:focus-visible { outline: 2px solid var(--chain); outline-offset: 3px; border-radius: 2px; }
+
+/* The ledger page: stage pages only. Docs stay plain. */
+.ledger-bg { background: repeating-linear-gradient(to bottom, transparent 0 27px, var(--ruling) 27px 28px), var(--night); }
+
+.eyebrow { font-family: var(--font-plex-mono), monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.voice { font-family: var(--font-instrument), Georgia, serif; font-weight: 400; letter-spacing: -.02em; }
+.figures { font-variant-numeric: tabular-nums; }
+
+/* The one glow (A's phosphor), reserved for the settle record. */
+.settle-glow { box-shadow: 0 0 0 1px var(--chain), 0 0 32px var(--glow); }
+
+.prose-doc h2 { font-size: 1.375rem; font-weight: 600; margin: 2.5rem 0 .75rem; letter-spacing: -.01em; scroll-margin-top: 96px; }
+.prose-doc p, .prose-doc li { color: color-mix(in srgb, var(--ink) 88%, var(--muted)); line-height: 1.7; }
+.prose-doc p { margin: .75rem 0; }
+.prose-doc ul { padding-left: 1.25rem; list-style: disc; margin: .75rem 0; }
+.prose-doc code:not(pre code) { font-family: var(--font-plex-mono), monospace; font-size: .875em; background: var(--paper-2); border: 1px solid var(--rule); padding: .1em .35em; border-radius: 3px; }
+.prose-doc a { color: var(--chain); text-underline-offset: 3px; }
+.prose-doc table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 1rem 0; }
+.prose-doc th, .prose-doc td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.prose-doc th { font-weight: 500; color: var(--muted); font-size: .8rem; }
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { transition-duration: 1ms !important; } }
+
+/* Generated docs */
+.prose-doc h3 { font-size: 1.1rem; font-weight: 600; margin: 1.75rem 0 .5rem; scroll-margin-top: 96px; }
+.prose-doc h2 .anchor, .prose-doc h3 .anchor { color: inherit; text-decoration: none; }
+.prose-doc h2 .anchor:hover::after, .prose-doc h3 .anchor:hover::after { content: " #"; color: var(--muted); }
+.prose-doc ol { padding-left: 1.25rem; list-style: decimal; margin: .75rem 0; }
+.prose-doc li > ul, .prose-doc li > ol { margin: .25rem 0; }
+.prose-doc strong { color: var(--ink); font-weight: 600; }
+.prose-doc blockquote { border-left: 2px solid var(--ghost); padding-left: 1rem; color: var(--muted); margin: 1rem 0; }
+.prose-doc .code-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding: .35rem .75rem; border: 1px solid var(--rule); border-bottom: 0; border-radius: 3px 3px 0 0; background: var(--night); }
+.prose-doc .code-bar button { font-family: var(--font-plex-mono), monospace; font-size: 12px; color: var(--muted); }
+.prose-doc .code-bar button:hover { color: var(--ink); }
+.prose-doc pre { margin: 1rem 0; padding: .9rem; overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--night); font-family: var(--font-plex-mono), monospace; font-size: 12.5px; line-height: 1.65; }
+.prose-doc .code-bar + pre { margin-top: 0; border-radius: 0 0 3px 3px; }
+.prose-doc .table-wrap { overflow-x: auto; margin: 1rem 0; }
+.prose-doc .table-wrap table { margin: 0; }
+.prose-doc td code { white-space: nowrap; }
+/* Long hashes and flags in prose must wrap at phone width; table cells scroll instead. */
+.prose-doc p code, .prose-doc li code { overflow-wrap: anywhere; }
+.prose-doc { overflow-wrap: break-word; }
+
+[data-mermaid] { max-width: 100%; overflow-x: auto; margin: 1.25rem 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--night); padding: .75rem; }
+[data-mermaid] svg { display: block; margin: 0 auto; height: auto; min-width: 34rem; }
+#main, #story, #privacy, #evidence, #start { scroll-margin-top: 5rem; }
+
+
+/* Docs: smooth anchor jumps, thin scrollbars, GitBook-like reading rhythm. */
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+.thin-scroll { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+.thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 8px; }
+.prose-doc { font-size: 16px; }
+.prose-doc h2 { margin-top: 2.75rem; padding-top: .25rem; }
+.prose-doc pre, .prose-doc .code-bar, .prose-doc code:not(pre code), .prose-doc .table-wrap { border-radius: 6px; }
+.prose-doc .code-bar { border-radius: 6px 6px 0 0; }
+.prose-doc .code-bar + pre { border-radius: 0 0 6px 6px; }
+.prose-doc tbody tr:hover td { background: color-mix(in srgb, var(--paper-2) 55%, transparent); }
+mark { background: color-mix(in srgb, var(--chain) 22%, transparent); color: inherit; }
+.search-input, .search-input:focus, .search-input:focus-visible { outline: none; }
