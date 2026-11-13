@@ -128,16 +128,24 @@ fn print_recorded_chain_evidence() -> Result<(), String> {
     let evidence: serde_json::Value = serde_json::from_str(LOCAL_EVIDENCE)
         .map_err(|error| format!("parse bundled sanitized evidence: {error}"))?;
     println!("recorded_esmeralda_evidence=separate_historical_run");
-    for path in [
-        &["chainRecord", "openTransactionUrl"][..],
-        &["chainRecord", "settlementTransactionUrl"][..],
-    ] {
-        let url = path
-            .iter()
-            .try_fold(&evidence, |value, field| value.get(*field))
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| format!("bundled evidence is missing {}", path.join(".")))?;
-        println!("{}={url}", path.last().unwrap_or(&"transaction"));
-    }
+    // The bundled evidence records the template publish. The open and settlement links of the earlier template
+    // went away with the testnet reset, so this prints the record that exists.
+    let url = evidence
+        .get("templateRecord")
+        .and_then(|record| record.get("publishTransactionUrl"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("bundled evidence is missing templateRecord.publishTransactionUrl")?;
+    println!("publishTransactionUrl={url}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_evidence_has_the_record_the_demo_prints() {
+        print_recorded_chain_evidence()
+            .expect("bundled evidence must contain the template publish link");
+    }
 }

@@ -31,7 +31,10 @@ jobs:
       - name: Run Rust workspace tests
         run: cargo test --workspace
       - name: Build the Ghostline channel template for Ootle
-        run: cargo build --manifest-path contracts/channel/Cargo.toml --target wasm32-unknown-unknown --release
+        # The template pins its fee config at compile time; build with the one the mainnet template was built with.
+        run: |
+          GHOSTLINE_FEE_CONFIG="$(python3 -c 'import json; print(json.load(open("deploy/mainnet.json"))["channel"]["builtWithFeeConfig"])')" \
+            cargo build --manifest-path contracts/channel/Cargo.toml --target wasm32-unknown-unknown --release
       - name: Run strict Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run TypeScript tests
