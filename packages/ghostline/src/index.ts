@@ -3,7 +3,7 @@
 export {
   CHANNEL_ID_DOMAIN,
   CHANNEL_ID_LEN,
-  ChannelParams,
+  type ChannelParams,
   NONCE_LEN,
   VOUCHER_DOMAIN,
   channelId,
@@ -12,7 +12,7 @@ export {
   voucherMessage,
 } from "./channel.ts";
 export {
-  SignedVoucher,
+  type SignedVoucher,
   computeChallenge,
   publicKeyFromSecret,
   scalarFromWide,

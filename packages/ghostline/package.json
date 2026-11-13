@@ -6,7 +6,8 @@
   "license": "MIT",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fee": "./src/fee.ts"
   },
   "scripts": {
     "test": "node --experimental-strip-types --test src/channel.test.ts src/voucher.test.ts src/sim.test.ts src/ephemeral.test.ts src/fee.test.ts",
