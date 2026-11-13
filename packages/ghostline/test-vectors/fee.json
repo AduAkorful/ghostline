@@ -1,0 +1,683 @@
+{
+  "check_settleable": [
+    {
+      "amount": 0,
+      "deposit": 1,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 101,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 500,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 900,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 1000,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 10000,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 20000,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 99000,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 1,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 100,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 101,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 500,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 900,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 1000,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 10000,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 20000,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 99000,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 100,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 101,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 101,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 500,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 900,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 1000,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 10000,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 20000,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 99000,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 101,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 102,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 102,
+      "ok": true
+    },
+    {
+      "amount": 101,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 500,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 900,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 1000,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 10000,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 20000,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 99000,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 102,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 506,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 506,
+      "ok": true
+    },
+    {
+      "amount": 101,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 506,
+      "ok": true
+    },
+    {
+      "amount": 500,
+      "deposit": 506,
+      "ok": true
+    },
+    {
+      "amount": 900,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 1000,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 10000,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 20000,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 99000,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 506,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 1000,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 1000,
+      "ok": true
+    },
+    {
+      "amount": 101,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 1000,
+      "ok": true
+    },
+    {
+      "amount": 500,
+      "deposit": 1000,
+      "ok": true
+    },
+    {
+      "amount": 900,
+      "deposit": 1000,
+      "ok": true
+    },
+    {
+      "amount": 1000,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 10000,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 20000,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 99000,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 1000,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 20201,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 20201,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 101,
+      "deposit": 20201,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 500,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 900,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 1000,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 10000,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 20000,
+      "deposit": 20201,
+      "ok": true
+    },
+    {
+      "amount": 99000,
+      "deposit": 20201,
+      "ok": false
+    },
+    {
+      "amount": 100000,
+      "deposit": 20201,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 100000,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 100000,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 101,
+      "deposit": 100000,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 500,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 900,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 1000,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 10000,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 20000,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 99000,
+      "deposit": 100000,
+      "ok": true
+    },
+    {
+      "amount": 100000,
+      "deposit": 100000,
+      "ok": false
+    },
+    {
+      "amount": 0,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 1,
+      "deposit": 101001,
+      "ok": false
+    },
+    {
+      "amount": 99,
+      "deposit": 101001,
+      "ok": false
+    },
+    {
+      "amount": 100,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 101,
+      "deposit": 101001,
+      "ok": false
+    },
+    {
+      "amount": 200,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 500,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 900,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 1000,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 10000,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 20000,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 99000,
+      "deposit": 101001,
+      "ok": true
+    },
+    {
+      "amount": 100000,
+      "deposit": 101001,
+      "ok": true
+    }
+  ],
+  "fee_divisor": 100,
+  "max_settleable": [
+    {
+      "deposit": 1,
+      "max": 0
+    },
+    {
+      "deposit": 100,
+      "max": 0
+    },
+    {
+      "deposit": 101,
+      "max": 0
+    },
+    {
+      "deposit": 102,
+      "max": 100
+    },
+    {
+      "deposit": 506,
+      "max": 500
+    },
+    {
+      "deposit": 1000,
+      "max": 900
+    },
+    {
+      "deposit": 20201,
+      "max": 20000
+    },
+    {
+      "deposit": 100000,
+      "max": 99000
+    },
+    {
+      "deposit": 101001,
+      "max": 100000
+    }
+  ],
+  "settlement_fee": [
+    {
+      "amount": 0,
+      "fee": 0
+    },
+    {
+      "amount": 1,
+      "fee": null
+    },
+    {
+      "amount": 99,
+      "fee": null
+    },
+    {
+      "amount": 100,
+      "fee": 1
+    },
+    {
+      "amount": 101,
+      "fee": null
+    },
+    {
+      "amount": 200,
+      "fee": 2
+    },
+    {
+      "amount": 500,
+      "fee": 5
+    },
+    {
+      "amount": 900,
+      "fee": 9
+    },
+    {
+      "amount": 1000,
+      "fee": 10
+    },
+    {
+      "amount": 10000,
+      "fee": 100
+    },
+    {
+      "amount": 20000,
+      "fee": 200
+    },
+    {
+      "amount": 99000,
+      "fee": 990
+    },
+    {
+      "amount": 100000,
+      "fee": 1000
+    }
+  ],
+  "settlement_reserve": 1
+}

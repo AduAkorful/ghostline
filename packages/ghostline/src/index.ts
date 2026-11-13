@@ -20,3 +20,11 @@ export {
   verifyVoucher,
   voucherToBytes,
 } from "./voucher.ts";
+export {
+  FEE_DIVISOR,
+  SETTLEMENT_RESERVE,
+  checkSettleable,
+  maxSettleable,
+  settlementFee,
+  signSettleableVoucher,
+} from "./fee.ts";

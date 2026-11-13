@@ -1,6 +1,6 @@
 {
   "name": "@ghostline/sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Ghostline channel-id encodings and Ristretto Schnorr voucher signatures (`ghostline.channel.voucher.v1`).",
   "type": "module",
   "license": "MIT",
@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test src/channel.test.ts src/voucher.test.ts src/sim.test.ts src/ephemeral.test.ts",
+    "test": "node --experimental-strip-types --test src/channel.test.ts src/voucher.test.ts src/sim.test.ts src/ephemeral.test.ts src/fee.test.ts",
     "build:browser": "npx --yes esbuild@0.25.12 src/index.ts --bundle --format=esm --platform=browser --outfile=dist/ghostline.browser.js"
   },
   "engines": {

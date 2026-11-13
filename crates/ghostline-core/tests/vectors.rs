@@ -115,3 +115,46 @@ fn committed_voucher_signature_matches_rust() {
     let expected = include_str!("../../../packages/ghostline/test-vectors/voucher.json");
     assert_eq!(actual, expected);
 }
+
+/// Fee and settleable-limit cases the TypeScript SDK must reproduce (`packages/ghostline/test-vectors/fee.json`).
+#[test]
+fn committed_fee_vectors_match_rust() {
+    let amounts = [
+        0u64, 1, 99, 100, 101, 200, 500, 900, 1_000, 10_000, 20_000, 99_000, 100_000,
+    ];
+    let deposits = [1u64, 100, 101, 102, 506, 1_000, 20_201, 100_000, 101_001];
+    let settlement_fee: Vec<_> = amounts
+        .iter()
+        .map(|&amount| match ghostline_core::settlement_fee(amount) {
+            Ok(fee) => serde_json::json!({ "amount": amount, "fee": fee }),
+            Err(_) => serde_json::json!({ "amount": amount, "fee": null }),
+        })
+        .collect();
+    let mut max_settleable = Vec::new();
+    let mut check_settleable = Vec::new();
+    for &deposit in &deposits {
+        let params = ChannelParams {
+            deposit,
+            ..fixture_params()
+        };
+        max_settleable
+            .push(serde_json::json!({ "deposit": deposit, "max": params.max_settleable() }));
+        for &amount in &amounts {
+            check_settleable.push(serde_json::json!({
+                "deposit": deposit,
+                "amount": amount,
+                "ok": params.check_settleable(amount).is_ok(),
+            }));
+        }
+    }
+    let json = serde_json::json!({
+        "fee_divisor": ghostline_core::FEE_DIVISOR,
+        "settlement_reserve": ghostline_core::SETTLEMENT_RESERVE,
+        "settlement_fee": settlement_fee,
+        "max_settleable": max_settleable,
+        "check_settleable": check_settleable,
+    });
+    let actual = serde_json::to_string_pretty(&json).unwrap() + "\n";
+    let expected = include_str!("../../../packages/ghostline/test-vectors/fee.json");
+    assert_eq!(actual, expected);
+}
