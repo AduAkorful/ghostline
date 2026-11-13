@@ -165,6 +165,10 @@ struct OpenRecord {
     opener_wallet_url: String,
     #[serde(default)]
     ootle_network: String,
+    /// Ghostline claim key (`ghostline keygen --role claim`). When set, the deposit is addressed to the opener
+    /// account at this key's view key and unblinded with it, so no wallet view-key export is needed.
+    #[serde(default)]
+    claim_key_file: Option<std::path::PathBuf>,
 }
 
 pub async fn open_channel() -> Result<OpenOutcome, String> {
@@ -183,7 +187,12 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
     let channel = channel_from_value(&value)?;
     let record: OpenRecord =
         serde_json::from_str(&text).map_err(|e| format!("channel file: {e}"))?;
-    if submit {
+    let claim_key = record
+        .claim_key_file
+        .as_deref()
+        .map(load_claim_key_file)
+        .transpose()?;
+    if submit && claim_key.is_none() {
         wallet_claim_secret()?;
     }
     let max_fee = open_max_fee(
@@ -193,41 +202,56 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
     let pay_to = serde_json::json!({ "Conditions": channel.leaves_vec() });
     let mut wallet = WalletClient::connect(&record.opener_wallet_url).map_err(|e| e.to_string())?;
     wallet.authenticate().await.map_err(|e| e.to_string())?;
-    let destination = wallet
+    let wallet_address = wallet
         .default_account_address()
         .await
         .map_err(|e| e.to_string())?;
-    let request = StealthTransferRequest::channel_open(ChannelOpenParams {
-        account_name: record.opener_account.clone(),
-        destination_address: destination,
-        resource_address: STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
-        deposit: record.deposit,
-        pay_to,
-        input_selection: "PreferConfidential".parse::<UtxoInputSelection>()?,
-        fee_input_selection: "PreferRevealed".parse::<UtxoInputSelection>()?,
-        max_fee,
-        dry_run: !submit,
-    });
-    let submitted = wallet
-        .stealth_transfer(&request)
+    let destination = match &claim_key {
+        Some(secret) => {
+            use tari_crypto::keys::PublicKey as _;
+            let view = tari_crypto::ristretto::RistrettoPublicKey::from_secret_key(secret);
+            let view = RistrettoPublicKeyBytes::from_bytes(view.as_bytes())
+                .map_err(|_| "claim key is malformed".to_string())?;
+            ghostline_sdk::address_with_view_key(&wallet_address, view)
+                .map_err(|e| e.to_string())?
+        }
+        None => wallet_address,
+    };
+    let open_request = |fee: u64, dry_run: bool| -> Result<StealthTransferRequest, String> {
+        Ok(StealthTransferRequest::channel_open(ChannelOpenParams {
+            account_name: record.opener_account.clone(),
+            destination_address: destination.clone(),
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS.to_string(),
+            deposit: record.deposit,
+            pay_to: pay_to.clone(),
+            input_selection: "PreferConfidential".parse::<UtxoInputSelection>()?,
+            fee_input_selection: "PreferRevealed".parse::<UtxoInputSelection>()?,
+            max_fee: fee,
+            dry_run,
+        }))
+    };
+    // Always quote first. A live open then submits at walletd's quote, not at the configured cap: when the fee is
+    // paid from a private input the whole cap is charged, so a generous cap would be spent in full.
+    let quoted = wallet
+        .stealth_transfer(&open_request(max_fee, true)?)
         .await
         .map_err(|e| e.to_string())?;
+    // walletd 0.53+ returns the quote inline and no longer stores dry runs.
+    let (estimated_fee, required_fee) = match quoted.inline_fee_quote() {
+        Some(quote) => quote,
+        None => {
+            let transaction = wallet
+                .transaction_get(quoted.transaction_id)
+                .await
+                .map_err(|e| format!("open fee quote: {e}"))?;
+            open_fee_quote(&transaction)
+                .ok_or("wallet dry-run fee quote is missing final_fee or total_fees_required")?
+        }
+    };
     if !submit {
-        // walletd 0.53+ returns the quote inline and no longer stores dry runs.
-        let (estimated_fee, required_fee) = match submitted.inline_fee_quote() {
-            Some(quote) => quote,
-            None => {
-                let transaction = wallet
-                    .transaction_get(submitted.transaction_id)
-                    .await
-                    .map_err(|e| format!("open fee quote: {e}"))?;
-                open_fee_quote(&transaction)
-                    .ok_or("wallet dry-run fee quote is missing final_fee or total_fees_required")?
-            }
-        };
         return Ok(OpenOutcome {
             dry_run: true,
-            transaction_id: submitted.transaction_id.to_string(),
+            transaction_id: quoted.transaction_id.to_string(),
             max_fee,
             estimated_fee: Some(estimated_fee),
             required_fee: Some(required_fee),
@@ -237,6 +261,11 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
             cumulative: None,
         });
     }
+    let submit_fee = submit_fee(required_fee, max_fee)?;
+    let submitted = wallet
+        .stealth_transfer(&open_request(submit_fee, false)?)
+        .await
+        .map_err(|e| e.to_string())?;
     let timeout = std::env::var("GHOSTLINE_OPEN_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -268,7 +297,11 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
         .as_bytes(),
     )
     .map_err(|e| format!("utxo-json: {e}"))?;
-    let recovered = recover_deposit(&channel_utxo, &record)?;
+    let claim_secret = match claim_key {
+        Some(secret) => secret,
+        None => claim_secret()?,
+    };
+    let recovered = recover_deposit(&channel_utxo, &record, &claim_secret)?;
     if recovered.value != record.deposit {
         return Err(format!(
             "unblinded value {} does not match deposit {}",
@@ -288,9 +321,9 @@ pub async fn open_channel() -> Result<OpenOutcome, String> {
     Ok(OpenOutcome {
         dry_run: false,
         transaction_id: submitted.transaction_id.to_string(),
-        max_fee,
-        estimated_fee: None,
-        required_fee: None,
+        max_fee: submit_fee,
+        estimated_fee: Some(estimated_fee),
+        required_fee: Some(required_fee),
         mask_stored: true,
         session: Some(session.session),
         session_created: Some(session.created),
@@ -329,6 +362,7 @@ fn open_fee_quote(transaction: &serde_json::Value) -> Option<(u64, u64)> {
 fn recover_deposit(
     utxo: &ghostline_net::WalletStealthUtxo,
     record: &OpenRecord,
+    secret: &RistrettoSecretKey,
 ) -> Result<ghostline_sdk::MaskAndValue, String> {
     let encrypted_bytes = from_hex(&utxo.encrypted_hex)
         .map_err(|_| "encrypted: expected even-length hex".to_string())?;
@@ -343,7 +377,6 @@ fn recover_deposit(
         minimum_value_promise: 0,
         viewable_balance_proof: None,
     };
-    let secret = claim_secret()?;
     let scan = match record.ootle_network.as_str() {
         "localnet" => OutputScan::localnet(STEALTH_TARI_RESOURCE_ADDRESS),
         "esmeralda" => OutputScan::esmeralda(STEALTH_TARI_RESOURCE_ADDRESS),
@@ -356,7 +389,49 @@ fn recover_deposit(
     }
     .require_channel_tag(record.network_tag)?;
     let tag = u32::try_from(utxo.tag).map_err(|_| format!("tag: {}", utxo.tag))?;
-    unblind_output(&output, UtxoTag::new(tag), &secret, scan).map_err(|e| e.to_string())
+    unblind_output(&output, UtxoTag::new(tag), secret, scan).map_err(|e| e.to_string())
+}
+
+/// The fee a live open submits with: walletd's quote, refused if it is zero or above the reviewed cap.
+fn submit_fee(required: u64, cap: u64) -> Result<u64, String> {
+    if required == 0 {
+        return Err("open fee quote was zero".into());
+    }
+    if required > cap {
+        return Err(format!(
+            "open requires {required} µT, above GHOSTLINE_OPEN_MAX_FEE {cap} µT"
+        ));
+    }
+    Ok(required)
+}
+
+/// Reads a `ghostline keygen --role claim` file. It must be owner-only.
+fn load_claim_key_file(path: &std::path::Path) -> Result<RistrettoSecretKey, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)
+            .map_err(|e| format!("claim key file: {e}"))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err("claim key file permissions must be owner-only (0600)".into());
+        }
+    }
+    let key: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).map_err(|e| format!("claim key file: {e}"))?)
+            .map_err(|_| "claim key file is not JSON".to_string())?;
+    if key.get("format").and_then(|v| v.as_str()) != Some("ghostline-key-v1")
+        || key.get("role").and_then(|v| v.as_str()) != Some("claim")
+    {
+        return Err("claim key file must be a ghostline-key-v1 file with role claim".into());
+    }
+    let hex = key
+        .get("secret_hex")
+        .and_then(|v| v.as_str())
+        .ok_or("claim key file has no secret_hex")?;
+    let bytes = from_hex(hex.trim()).map_err(|_| "claim key: expected even-length hex")?;
+    RistrettoSecretKey::from_canonical_bytes(&bytes).map_err(|e| format!("claim key: {e}"))
 }
 
 fn claim_secret() -> Result<RistrettoSecretKey, String> {
@@ -378,7 +453,15 @@ fn wallet_claim_secret() -> Result<RistrettoSecretKey, String> {
 
 #[cfg(test)]
 mod fee_tests {
-    use super::{open_fee_quote, open_max_fee, validate_quote_for_channel};
+    use super::{open_fee_quote, open_max_fee, submit_fee, validate_quote_for_channel};
+
+    #[test]
+    fn live_open_submits_at_the_quote_within_the_cap() {
+        assert_eq!(submit_fee(15_919, 20_000).unwrap(), 15_919);
+        assert_eq!(submit_fee(15_919, 15_919).unwrap(), 15_919);
+        assert!(submit_fee(15_920, 15_919).unwrap_err().contains("above"));
+        assert!(submit_fee(0, 20_000).is_err());
+    }
     use ghostline_core::NONCE_LEN;
     use ghostline_paywall::{PaymentRequired, PaymentTerms};
     use ghostline_sdk::{Channel, ChannelSpec};
