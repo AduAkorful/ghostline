@@ -4,68 +4,64 @@
 
 Ghostline lets an agent pay a service request by request while keeping the individual voucher stream off-chain. The payer funds a channel, signs cumulative vouchers, and the service settles the accepted amount once.
 
-> **Early development. Unaudited. Esmeralda testnet only. Do not use real funds.**
+> **Live on Tari Ootle mainnet since 13 Nov 2026. Unaudited: keep deposits small, and expect fees and the open and close records to be public.**
 
 ## Try Ghostline
 
-- **[Try the browser demo](https://ghostline-ui.vercel.app/demo/):** the simulation needs no install, wallet, or backend; optional live mode uses Sapient 0.7.1 or newer and the configured Esmeralda relay. The page also links to separate recorded transaction evidence.
-- **Run the prebuilt local demo** after installing Ghostline on Linux x86-64:
+- **[Read the docs](https://ghostline-ui.vercel.app/docs/):** install, the mainnet quickstart, the MCP server, the spending policy, the paywall, fees and privacy. Every page is also plain Markdown: start from [`llms.txt`](https://ghostline-ui.vercel.app/llms.txt).
+- **[Run a channel on mainnet](docs/mainnet-quickstart.md)** with your own wallet: open, paid calls, settle, and an expiry refund. This moves real TARI, so start with a small deposit.
+- **[Let an agent pay](docs/mcp.md):** run the local MCP server and set a [spending policy](docs/policy.md) that lives outside the agent.
+- **[Check the chain](https://ghostline-ui.vercel.app/proof/):** every recorded mainnet transaction with its indexer link, and the [deployed addresses](docs/deployment.md).
+- **[See what stays private](https://ghostline-ui.vercel.app/privacy/):** a simulation that puts your ledger beside the chain's view. It needs no wallet.
+- **Use a coding agent:** install the [Ghostline skill](skills/ghostline/SKILL.md) or read [Use with AI agents](docs/ai-agents.md).
+- **Run the local demo.** It runs the real HTTP 402 → voucher → paid-call path on your machine and does not contact a wallet or submit a transaction. After installing a release for Linux x86-64:
 
   ```sh
   curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh && ghostline demo
   ```
 
-  This runs the real local HTTP 402 → voucher → paid-call path. It does not contact a wallet or submit a transaction.
+- **[Esmeralda contest demo](https://ghostline-ui.vercel.app/demo/)** and its [recorded evidence](https://ghostline-ui.vercel.app/evidence.html): the original testnet entry, kept as a historical record. It targets the retired Esmeralda template, not mainnet.
 
-- **Install the CLI** on Linux x86-64:
-
-  ```sh
-  curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
-  ```
-
-- **[Follow the CLI demo](docs/demo-runbook.md):** run the local quote → voucher → paid-call flow, then inspect the recorded Esmeralda close and its explorer links. The local flow is safe and repeatable; it does not submit a transaction.
-- **Guided live run:** install the current `v0.4.0` release, set up your local Esmeralda wallet and test funds, then use the [guided runner](docs/quickstart.md#guided-esmeralda-demo). It prepares a local service, asks before each transaction, and prints explorer links after finality.
-- **[Operator batch run](docs/demo-runbook.md):** configure an existing funded channel and paid API, then run `bash scripts/esmeralda-20-call-demo.sh` for 20 paid calls, one settlement, and an explorer link.
-- **[Explore Ghostline](https://ghostline-ui.vercel.app/):** the landing page explains the flow and links to the browser demo, CLI guide, and on-chain evidence.
-- **[Inspect verified Esmeralda evidence](https://ghostline-ui.vercel.app/evidence.html):** every recorded run with its explorer links: a command-line run and a hosted Sapient run, each with 5 paid calls and one finalized settlement, plus the template publish, an expiry refund and the pooled prototype. Call counts come from the service ledgers; the chain records the open and the settlement. The raw record is [`evidence.json`](demo/ui/evidence.json).
-
-Ghostline is MIT licensed. Work began on October 12, 2026, after the October 1 contest announcement ([first commit](https://github.com/AduAkorful/ghostline/commit/e4701ea48731d117f3eda1620f60c0c6a193edef)). Ootle's announced November 11 mainnet launch is a target for a future Ghostline template release; it is not live or guaranteed.
+Ghostline is MIT licensed. Work began on October 12, 2026, after the October 1 contest announcement ([first commit](https://github.com/AduAkorful/ghostline/commit/e4701ea48731d117f3eda1620f60c0c6a193edef)). The channel template and fee config were published on Tari Ootle mainnet on 13 Nov 2026; see [mainnet deployment](docs/deployment.md).
 
 ## How it works
 
 1. **Open:** The payer deposits funds into a channel with an expiry.
 2. **Pay:** The payer signs a cumulative voucher for each service call. Calls do not create individual chain transactions.
-3. **Settle:** The service submits the latest voucher. The contract pays the amount owed and returns the remainder.
+3. **Settle:** The service submits the latest voucher. The contract pays the service, sends a 1% protocol fee to the treasury, and returns the remainder to the payer.
 4. **Refund:** After expiry, the payer can reclaim the remaining funds.
 
-The service sees every request and voucher, plus the channel's declared deposit limit. Fresh Esmeralda runs on the latest template finalized a claim-free settlement and an expiry refund without revealing the channel deposit or output amounts in the inspected public transaction fields. The standard settlement had two stealth outputs; the refund had one. The service ledger accepted 5 paid calls before each recorded standard settlement. A separate two-channel batch prototype also finalized, but its local builder handled both deposits and the chain shows both channels in one transaction; it is not coordinator-private. See the [transaction evidence and explorer links](demo/ui/evidence.json). Fees, timing, branch, channel id, authorization data, output commitments, and output count remain visible. Funding patterns and timing may still link activity; call totals come from local ledgers, not chain proof.
+The service sees every request and voucher, plus the channel's declared deposit limit. A mainnet observer test read the public indexer with no keys: the deposit, the payout, the protocol fee and the payer's change were commitments only, and the call count and prices did not appear. What stays public is the network fees, the open and settle records and their link through the channel output, the service's fee account, the fixed three-output settlement shape (service payout, payer change, treasury fee), and any funding link you create, such as funding both wallets from one source. Call totals come from local ledgers, not chain proof. See the [privacy notes](docs/privacy.md) for the full test and the earlier Esmeralda evidence.
 
 ### What each party sees
 
 | View | What is visible |
 |---|---|
 | Service | Declared deposit limit, every request and price, voucher amount/mask, and accepted total. The deposit UTXO's secret mask stays with the payer in ordinary individual flows. |
-| Chain observer | Channel and close activity, public fees and fee payer, timing, executed branch, channel and authorization metadata, output commitments, and a two-output settlement shape. In the tested claim-free close, the exact deposit, service amount, and payer remainder were not readable from transaction fields. |
-| Batch coordinator | No production coordinator exists. The opt-in SDK prototype receives all participants' deposit UTXO openings in one process and is not coordinator-private. |
+| Chain observer | Channel and close activity, public fees and fee payer, timing, executed branch, channel and authorization metadata, output commitments, and a three-output settlement shape. In the mainnet observer test, the deposit, payout, protocol fee and payer change were not readable from transaction fields. |
+| Batch coordinator | No production coordinator exists. The opt-in SDK prototype receives all participants' deposit UTXO openings in one process, is not coordinator-private, and has not been run on mainnet. |
 | Outside observer | The same public transaction fields and graph. Ghostline does not promise anonymity or unlinkable funding; public funding, timing, or reused keys can correlate activity. |
 
 On a transparent account-based EVM payment path, each call can add another public transfer and reveal its amount and recipient. Ootle's native stealth UTXOs and confidential commitments let Ghostline batch many off-chain vouchers into a channel and hide tested deposit and settlement values without a mixer or a separate zero-knowledge circuit. Other chains can provide privacy through different designs; Ghostline does not claim this is unique to Tari. See [Tari's privacy overview](https://ootle.tari.com/concepts/privacy/) and Ghostline's [privacy notes](docs/privacy.md).
 
 ## Install
 
-Install the CLI, MCP server, and reference API on glibc-based Linux x86-64 without cloning or compiling:
+Mainnet needs a build from this repository: the published `v0.4.0` release predates the protocol fee and the mainnet template. Follow the [installation guide](docs/install.md#build-from-source), then the [mainnet quickstart](docs/mainnet-quickstart.md). You also need Tari Ootle wallet daemon 0.53.3 and TARI in that wallet.
+
+On glibc-based Linux x86-64 the installer downloads the published release without compiling. That release runs the local demo, not mainnet:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
 ```
 
-The installer downloads a [published release](https://github.com/AduAkorful/ghostline/releases), verifies its checksum, and installs to `~/.local/bin`. Start with the [installation guide](docs/install.md), then the [Esmeralda quickstart](docs/quickstart.md). A funded Ootle wallet and service configuration are required for live payments. Other operating systems can use the browser demo or build from source.
+The installer verifies the release checksum and installs to `~/.local/bin`.
 
 ## Project components
 
 | Component | Purpose |
 |---|---|
 | `contracts/channel` | Rust channel template compiled to WASM |
+| `contracts/fee-config` | On-chain component that holds the treasury key for the protocol fee |
 | `crates/ghostline-cli` | Operator CLI for channels, vouchers, and settlement |
 | `crates/ghostline-sdk` | Rust channel and voucher APIs |
 | `crates/ghostline-policy` | Spending limits and vendor controls |
@@ -73,18 +69,23 @@ The installer downloads a [published release](https://github.com/AduAkorful/ghos
 | `crates/ghostline-mcp` | MCP stdio server for agent clients |
 | `packages/ghostline` | TypeScript encodings and voucher signing |
 | `demo/paid-api` | Reference API with paid endpoints |
+| `app` | The website: docs generated from `docs/`, the mainnet proof, and the fee calculator |
+| `skills/ghostline` | The Ghostline skill for coding agents |
 
 ## Documentation
 
-- [Installation](docs/install.md): downloads, PATH, source builds, and prerequisites
-- [Quickstart](docs/quickstart.md): open, pay, and settle through CLI or MCP
-- [Terminal demo](docs/demo-runbook.md): reproduce the local flow and inspect recorded Esmeralda evidence
-- [Motion demo](demo/ui/README.md): step through the CLI and browse its command map
+- [What is Ghostline](docs/overview.md): the short version, and where to start
+- [Installation](docs/install.md): source builds and prerequisites
+- [Mainnet quickstart](docs/mainnet-quickstart.md): open, pay, settle and refund on Tari Ootle mainnet, through the CLI or MCP
+- [MCP server](docs/mcp.md), [spending policy](docs/policy.md) and [use with AI agents](docs/ai-agents.md)
+- [HTTP 402 paywall](docs/paywall.md) and [settling and payouts](docs/settle.md): for API sellers
+- [Fees](docs/fees.md) and [mainnet deployment](docs/deployment.md): costs, addresses and parameters
 - [Architecture](docs/architecture.md): components and payment flow
-- [Privacy](docs/privacy.md): what payers, services, and observers can see
+- [Privacy](docs/privacy.md): what payers, services and observers can see
 - [Threat model](docs/threat-model.md): security assumptions and residual risks
-- [API reference](docs/api-reference.md): CLI, HTTP, SDK, and MCP surfaces
-- [FAQ](docs/faq.md): fees, recovery, privacy, and readiness
+- [API reference](docs/api-reference.md), [CLI](docs/cli.md), [TypeScript SDK](docs/typescript.md) and [glossary](docs/glossary.md)
+- [FAQ](docs/faq.md) and [troubleshooting](docs/troubleshooting.md)
+- [Esmeralda quickstart](docs/quickstart.md), [terminal demo](docs/demo-runbook.md) and [motion demo](demo/ui/README.md): the earlier testnet material
 
 ## Development
 
@@ -107,4 +108,4 @@ Ghostline development began on October 12, 2026, after the contest's October 1 a
 
 ## Roadmap
 
-Ghostline is being built for Esmeralda today, with a mainnet-readiness goal aligned with the announced Ootle launch on November 11, 2026. Mainnet deployment is not yet live or guaranteed.
+Ghostline is live on Tari Ootle mainnet, and its next steps are open. A desktop app is planned and has not been started. Pooled settlement is research only. No independent audit has been done.
