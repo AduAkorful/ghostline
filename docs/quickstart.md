@@ -1,5 +1,7 @@
 # Esmeralda quickstart
 
+Running on mainnet? Use the [mainnet quickstart](mainnet-quickstart.md). The published Esmeralda template predates the protocol fee, so the current code cannot open or settle channels against it.
+
 For a no-wallet, no-chain run after installing the CLI, use `ghostline demo`. It runs the HTTP 402 quote, then signs and verifies three cumulative vouchers against a loopback paid API. The finalized Esmeralda transactions are listed at <https://ghostline-ui.vercel.app/evidence.html>. The web version is at <https://ghostline-ui.vercel.app/demo/>.
 
 Choose one of two routes: use the guided Esmeralda runner below, or follow the optional manual CLI walkthrough later in this document. The guided run is complete on its own; you do not continue through the manual steps afterward. Install the executables using the [installation guide](install.md); no repository clone is needed for the downloaded commands.
