@@ -2,7 +2,7 @@
 
 Ghostline's executables are `ghostline` (the command-line tool), `ghostline-mcp` (the MCP server) and `ghostline-paid-api` (the reference paywalled API). They run on your computer; installing them does not create or fund a wallet.
 
-**For mainnet, build from source.** The published `v0.4.0` download predates the mainnet template and the protocol fee, so it can run the local demo but cannot open a mainnet channel.
+**For mainnet, use Ghostline 0.5.0 or later.** The `v0.4.0` download predates the mainnet template and the protocol fee, so it can run the local demo but cannot open a mainnet channel. Install the latest release below, or build from source.
 
 ## Build from source
 
@@ -20,9 +20,9 @@ install -m 0755 target/release/ghostline target/release/ghostline-mcp target/rel
 
 These commands build the host executables from the current source. Building the channel WASM and publishing a template are separate operator tasks; a template hash must come from an actual deployment.
 
-## Download the executables (local demo)
+## Download the executables
 
-These downloads run the local demo and the CLI, but not mainnet: the published release predates the mainnet template and the protocol fee. Prebuilt downloads support **glibc-based Linux x86-64**. The installer requires `curl`, `tar`, `sha256sum`, and `awk`. It downloads the latest release, checks its SHA-256 checksum, and installs without root:
+Releases from 0.5.0 include everything the mainnet quickstart needs. Prebuilt downloads support **glibc-based Linux x86-64**. The installer requires `curl`, `tar`, `sha256sum`, and `awk`. It downloads the latest release, checks its SHA-256 checksum, and installs without root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | sh
@@ -38,10 +38,10 @@ ghostline-paid-api --help
 
 Add that PATH line to your shell's startup file to keep it after reopening the terminal. Launch `ghostline-mcp` through an MCP client; it communicates over stdio.
 
-To install `v0.4.0` explicitly:
+To install a specific version, for example `v0.5.0`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.4.0 sh
+curl -fsSL https://raw.githubusercontent.com/AduAkorful/ghostline/main/scripts/install-ghostline.sh | GHOSTLINE_VERSION=v0.5.0 sh
 ```
 
 After installation, run the bounded local demo. It uses the real HTTP 402 quote, voucher signing, and paid API code on loopback, then exits without wallet access or chain transactions:
