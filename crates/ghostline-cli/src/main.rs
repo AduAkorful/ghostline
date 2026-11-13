@@ -118,8 +118,9 @@ enum Command {
         /// Save the generated keypair in an owner-only JSON file instead of printing its secret.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Label the key's intended use. Service settlement keys are created by `wallet key-create`.
-        #[arg(long, value_parser = ["payer"])]
+        /// Label the key's intended use: `payer` signs vouchers, `claim` unblinds a channel deposit
+        /// (`channel init --claim-key-file`). Service settlement keys are created by `wallet key-create`.
+        #[arg(long, value_parser = ["payer", "claim"])]
         role: Option<String>,
     },
     /// Seal an open (key-path input → PayTo::Conditions). Prints tx= and deposit_mask=.

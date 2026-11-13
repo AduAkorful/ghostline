@@ -47,3 +47,20 @@ Pooled batch settlement is research-only. The current SDK prototype requires eve
 The SDK uses the template's original script-path settlement and refund conditions. No key-path escrow or custom cryptography is involved. See [`deposit-confidentiality-redesign.md`](deposit-confidentiality-redesign.md) for the design and test evidence.
 
 Unaudited. Testnet only. Do not use with real funds.
+
+## Mainnet observer test (13 Nov 2026)
+
+One channel run with separate wallets. The payer and the service each had their own walletd and seed. Both were funded from a third wallet (A), so the funding graph links them; this test shows what each Ghostline transaction reveals, not unlinkability from the funder. Everything below was read from the public mainnet indexer (`GET /transactions/{id}`), with no keys.
+
+| Transaction | What a public observer can read |
+|---|---|
+| Fund payer `6182b000…` (A → payer, 60,000 µT private) | It spends one of A's outputs (`e89d70c7…`) and creates two key-locked outputs, one of which is `80ff41d4…`. Fee 15,919. No amount and no account is named. |
+| Fund service `a9a114d9…` (A → service, 40,000 µT revealed) | It spends A's change and creates the service account component `c095ae8e…` with a **public** 40,000 µT revealed vault. Fee 11,065. |
+| Open `6d6545b0…` (payer wallet) | It spends output `80ff41d4…` (from the funding transaction) and creates the channel output `8e13565b…` (script-locked) plus private change. Fee 15,919, paid inside the transfer from the private input. **No account component is referenced. The deposit amount is not shown.** |
+| Settle `7f61a7bc…` (service wallet) | It spends the channel output `8e13565b…`, reads fee config `37df6af5…`, and pays the fee from **service account `c095ae8e…`** (28,808). Its outputs are payer change (script-locked), a payout on the one-time key `b8037587…`, and the protocol fee on the treasury key `728870ae…`. **The payout, fee and change amounts are commitments only.** The call count and prices do not appear. |
+
+**What this shows:**
+- **Hidden:** the deposit (20,201 µT), the payout (5,000 µT), the protocol fee and payer change, the five calls and their prices. The payer's account is never named.
+- **Linked by design:** the open and the settle share the channel output, so anyone can pair them. The settle names the service's fee account. The fee output names the treasury key, so every Ghostline settlement is countable.
+- **Linked by this test's funding:** the open spends an output created by A's funding transaction, and the service account was created by A's second transaction. With independent funding (separate burns or unrelated sources) and a fee account not tied to the service's public identity, these links disappear. That has not been tested.
+- **Not inferable from chain data:** which one-time payout key belongs to the service. walletd found it only because it holds the service's view key.
