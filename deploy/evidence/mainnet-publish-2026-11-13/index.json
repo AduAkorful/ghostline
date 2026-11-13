@@ -1,0 +1,43 @@
+{
+ "network": "mainnet",
+ "indexer": "https://indexer-a.ootle.tari.com",
+ "indexerVersion": "0.53.3",
+ "fetchedAtUtc": "2026-11-13T19:13:59Z",
+ "indexerEpochAtFetch": 38611,
+ "note": "Raw GET /transactions/{id} responses from the public indexer, saved because it keeps transaction bodies for only about 50 epochs. Times are UTC as reported by the indexer.",
+ "transactions": [
+  {
+   "name": "fee-config-template-publish",
+   "transactionId": "651aff4202a1dd6675c6d82903ebb036e6673075f06428dea8844d4d31a13983",
+   "substate": "template_b3628ed057f88c73b88f3c5653b494a10258067c43cf0c667d1dcf17e85e9f45",
+   "createdAt": "2026-11-13 07:07:13.0",
+   "finalizedAt": "2026-11-13 07:07:22.0",
+   "outcome": "Commit",
+   "totalFeesPaidMicroTari": 802603,
+   "indexerUrl": "https://indexer-a.ootle.tari.com/transactions/651aff4202a1dd6675c6d82903ebb036e6673075f06428dea8844d4d31a13983",
+   "substateUrl": "https://indexer-a.ootle.tari.com/substates/template_b3628ed057f88c73b88f3c5653b494a10258067c43cf0c667d1dcf17e85e9f45"
+  },
+  {
+   "name": "fee-config-create",
+   "transactionId": "1fdbb90905399f5427ad2dc8894d84c43c44af4d6da83ce97f5f0f5b93211fd9",
+   "substate": "component_37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5",
+   "createdAt": "2026-11-13 07:08:24.0",
+   "finalizedAt": "2026-11-13 07:08:32.0",
+   "outcome": "Commit",
+   "totalFeesPaidMicroTari": 2392,
+   "indexerUrl": "https://indexer-a.ootle.tari.com/transactions/1fdbb90905399f5427ad2dc8894d84c43c44af4d6da83ce97f5f0f5b93211fd9",
+   "substateUrl": "https://indexer-a.ootle.tari.com/substates/component_37df6af59007b9c02ead46df7e320af4255978cf8fefb164fb8bfdc4183d0bb5"
+  },
+  {
+   "name": "channel-template-publish",
+   "transactionId": "3ff0500cf6deef1c66dce31cce01e68105658b0ac9ae7043b7962649f17b2eec",
+   "substate": "template_ae13cead3c34052116c49fc09e4645f3a62edf55857c0e2e45226dd7093cef9c",
+   "createdAt": "2026-11-13 07:09:05.0",
+   "finalizedAt": "2026-11-13 07:09:07.0",
+   "outcome": "Commit",
+   "totalFeesPaidMicroTari": 1027585,
+   "indexerUrl": "https://indexer-a.ootle.tari.com/transactions/3ff0500cf6deef1c66dce31cce01e68105658b0ac9ae7043b7962649f17b2eec",
+   "substateUrl": "https://indexer-a.ootle.tari.com/substates/template_ae13cead3c34052116c49fc09e4645f3a62edf55857c0e2e45226dd7093cef9c"
+  }
+ ]
+}

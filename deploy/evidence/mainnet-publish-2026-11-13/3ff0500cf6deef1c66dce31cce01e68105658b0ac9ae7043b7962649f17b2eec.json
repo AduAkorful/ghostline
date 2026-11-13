@@ -1,0 +1,78 @@
+{
+ "transaction": {
+  "transaction_id": "3ff0500cf6deef1c66dce31cce01e68105658b0ac9ae7043b7962649f17b2eec",
+  "transaction": {
+   "V1": {
+    "body": {
+     "transaction": {
+      "network": 0,
+      "fee_instructions": [
+       {
+        "CallMethod": {
+         "call": {
+          "Address": "component_12d62617b885f7f05c98e6718790c846f8ee0dfd81371345faa44deaa32307a7"
+         },
+         "method": "pay_fee",
+         "args": [
+          {
+           "Literal": "1a00107ac0"
+          }
+         ]
+        }
+       }
+      ],
+      "instructions": [
+       {
+        "PublishTemplate": {
+         "binary": 0,
+         "metadata_hash": null
+        }
+       }
+      ],
+      "inputs": [
+       {
+        "substate_id": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+        "version": null,
+        "is_write": true
+       },
+       {
+        "substate_id": "component_12d62617b885f7f05c98e6718790c846f8ee0dfd81371345faa44deaa32307a7",
+        "version": null,
+        "is_write": true
+       },
+       {
+        "substate_id": "vault_12e5076d741da9c9cb1c1ea2eeb35c919e371067f267662e1a80f6277635fa00",
+        "version": null,
+        "is_write": true
+       }
+      ],
+      "min_epoch": null,
+      "max_epoch": 38579,
+      "main_signer": "SealSigner",
+      "dry_run": false,
+      "blob_hashes": [
+       "6b53b4f39751666dda3f98928afb01aedd4bc87f423eb2c06ae60bce2c3fbf74"
+      ],
+      "blob_sizes": [
+       130254
+      ],
+      "nonce": 16709907387743707469
+     },
+     "signatures": []
+    },
+    "seal_signature": {
+     "public_key": "728870aee9b9fb66e69fcf45510440e54b59387a7efe3816713e054014d3b230",
+     "signature": "c886f12320d3b7ce841a1c1e562bf9326a1aacc0c2a56bbb92de64bbf578c83bf2017f23e602584da1fa6ea59f7cc6219a9297b979b65bc5d3b04d3ffd4a4f8a"
+    }
+   }
+  },
+  "created_at": "2026-11-13 07:09:05.0",
+  "summary": {
+   "outcome": "Commit",
+   "total_fees_paid": 1027585,
+   "finalized_at": "2026-11-13 07:09:07.0"
+  },
+  "rejected_reason": null,
+  "source": "local"
+ }
+}

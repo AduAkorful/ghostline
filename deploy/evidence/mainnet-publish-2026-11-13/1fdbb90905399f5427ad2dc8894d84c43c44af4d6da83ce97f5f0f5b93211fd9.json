@@ -1,0 +1,79 @@
+{
+ "transaction": {
+  "transaction_id": "1fdbb90905399f5427ad2dc8894d84c43c44af4d6da83ce97f5f0f5b93211fd9",
+  "transaction": {
+   "V1": {
+    "body": {
+     "transaction": {
+      "network": 0,
+      "fee_instructions": [
+       {
+        "CallMethod": {
+         "call": {
+          "Address": "component_12d62617b885f7f05c98e6718790c846f8ee0dfd81371345faa44deaa32307a7"
+         },
+         "method": "pay_fee",
+         "args": [
+          {
+           "Literal": "190bb8"
+          }
+         ]
+        }
+       }
+      ],
+      "instructions": [
+       {
+        "CallFunction": {
+         "address": "b3628ed057f88c73b88f3c5653b494a10258067c43cf0c667d1dcf17e85e9f45",
+         "function": "new",
+         "args": [
+          {
+           "Literal": "5820728870aee9b9fb66e69fcf45510440e54b59387a7efe3816713e054014d3b230"
+          }
+         ]
+        }
+       }
+      ],
+      "inputs": [
+       {
+        "substate_id": "vault_12e5076d741da9c9cb1c1ea2eeb35c919e371067f267662e1a80f6277635fa00",
+        "version": null,
+        "is_write": true
+       },
+       {
+        "substate_id": "component_12d62617b885f7f05c98e6718790c846f8ee0dfd81371345faa44deaa32307a7",
+        "version": null,
+        "is_write": false
+       },
+       {
+        "substate_id": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+        "version": null,
+        "is_write": false
+       }
+      ],
+      "min_epoch": null,
+      "max_epoch": 38579,
+      "main_signer": "SealSigner",
+      "dry_run": false,
+      "blob_hashes": [],
+      "blob_sizes": [],
+      "nonce": 3845811186615711021
+     },
+     "signatures": []
+    },
+    "seal_signature": {
+     "public_key": "728870aee9b9fb66e69fcf45510440e54b59387a7efe3816713e054014d3b230",
+     "signature": "ccbb856b80df3deb0c8ee057b73569057fc2a0a7f0beeee39849b6a35d5bb1193533b4109beb94cbc3fd850d736f73b3e9b944fd8465980d3ce2ff3a933abc8e"
+    }
+   }
+  },
+  "created_at": "2026-11-13 07:08:24.0",
+  "summary": {
+   "outcome": "Commit",
+   "total_fees_paid": 2392,
+   "finalized_at": "2026-11-13 07:08:32.0"
+  },
+  "rejected_reason": null,
+  "source": "local"
+ }
+}
