@@ -167,6 +167,39 @@ ghostline channel refund --file channel.json --submit --max-fee <required_fees +
 
 The deposit is refunded to the payer wallet's own address, and walletd lists it on its next scan. Before expiry, refund prints `wait` and does nothing.
 
+## Agent path (MCP)
+
+`ghostline-mcp` runs the same flow as stdio tools for an agent host. Run on mainnet on 13 Nov 2026: open `83e7510e…85f0`, five `ghostline_call_paid` calls, sixth refused by policy, settle `ca036bf1…ab8c0`.
+
+**Payer side.** Give the server only the payer wallet's cookie:
+
+```text
+GHOSTLINE_CHANNEL_FILE=<run>/channel.json          # created with --claim-key-file
+GHOSTLINE_WALLET_COOKIE=<payer wallet>/mainnet/.cookie
+GHOSTLINE_PAYER_SECRET=<payer key secret>          # from a private environment, never a tool argument
+GHOSTLINE_POLICY_BUDGET=5000
+GHOSTLINE_POLICY_MAX_PER_CALL=1000
+GHOSTLINE_POLICY_VENDOR_HEX=<service-public>
+GHOSTLINE_POLICY_AUDIT_LOG=<run>/policy-audit.jsonl
+GHOSTLINE_OPEN_MAX_FEE=20000                       # also needed for the dry-run on a small wallet
+```
+
+- **Opening:** call `ghostline_open_channel` with `{}` to get a quote. Add `GHOSTLINE_OPEN_SUBMIT=1`, restart the server and call it again. The live open submits at walletd's quote, never above the cap.
+- **Paying:** `ghostline_call_paid {"url": …}` pays per call. A call past the budget is refused and logged.
+
+**Service side.** A separate server gets only the service wallet's cookie:
+
+```text
+GHOSTLINE_CHANNEL_FILE=<run>/channel.json          # with payout_destination set
+GHOSTLINE_WALLET_COOKIE=<service wallet>/mainnet/.cookie
+GHOSTLINE_SEAL_KEY_ID_FILE=<run>/service-key-id.json
+GHOSTLINE_SETTLE_FORCE=1
+GHOSTLINE_CLOSE_MAX_FEE=35000                      # pay_fee locks the whole cap; keep it below the revealed balance
+GHOSTLINE_CLOSE_DRY_RUN=1                          # then GHOSTLINE_CLOSE_SUBMIT=1
+```
+
+Call `ghostline_close_channel` with `{}`. The settle pays the treasury read from the fee config and addresses the payout to the service wallet.
+
 ## Privacy
 
 - **Hidden from observers:** the deposit, the exact payout and payer change, and the individual calls.
